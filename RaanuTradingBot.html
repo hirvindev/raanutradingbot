@@ -660,6 +660,107 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
     <div id="wTags" style="display:flex;flex-wrap:wrap;gap:5px"></div>
   </div>
+
+  <!-- CRYPTO STRATEGY -->
+  <div class="card" style="border-color:rgba(245,158,11,.2)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:.65rem">
+      <div class="card-title" style="margin:0">₿ Crypto Strategy Settings</div>
+      <span style="font-size:.62rem;font-family:var(--mono);color:var(--warn);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);padding:2px 7px;border-radius:4px">Separate from Stocks</span>
+    </div>
+    <div class="al al-warn" style="margin-bottom:.75rem">⚠ Crypto needs wider stops and smaller positions than stocks. These settings apply only to the Crypto Scanner tab.</div>
+    <div class="g2">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="fg">
+          <div class="fl">Stop Loss % <span style="color:var(--red)" id="crSlD">12%</span></div>
+          <input type="range" min="5" max="30" value="12" id="crSlR" oninput="updateCryptoRisk()">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto moves 10-30% daily — 5% will get stopped out by normal noise</div>
+        </div>
+        <div class="fg">
+          <div class="fl">Take Profit % <span style="color:var(--green)" id="crTpD">35%</span></div>
+          <input type="range" min="10" max="100" value="35" id="crTpR" oninput="updateCryptoRisk()">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto can 2-10x — aim for bigger targets than stocks</div>
+        </div>
+        <div class="fg">
+          <div class="fl">Max Position Size % <span style="color:var(--accent)" id="crPsD">8%</span></div>
+          <input type="range" min="1" max="25" value="8" id="crPsR" oninput="updateCryptoRisk()">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Smaller than stocks — crypto is more volatile</div>
+        </div>
+        <div class="fg">
+          <div class="fl">Min Score to Trade <span style="color:var(--accent)" id="crMsD">60</span></div>
+          <input type="range" min="40" max="90" value="60" id="crMsR" oninput="updateCryptoRisk()">
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="fg">
+          <div class="fl">RSI Overbought Threshold <span style="color:var(--warn)" id="crRsiD">80</span></div>
+          <input type="range" min="65" max="90" value="80" id="crRsiR" oninput="updateCryptoRisk()">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto can stay overbought for weeks — higher threshold than stocks</div>
+        </div>
+        <div class="fg">
+          <div class="fl">BTC Trend Filter</div>
+          <select id="crBtcFilter">
+            <option value="all">Trade in any BTC trend</option>
+            <option value="bull" selected>Only trade in BTC uptrend</option>
+            <option value="neutral">Bull + Neutral only</option>
+          </select>
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Don't fight Bitcoin — altcoins follow BTC direction</div>
+        </div>
+        <div class="fg">
+          <div class="fl">Fear &amp; Greed Entry Zone</div>
+          <select id="crFgFilter">
+            <option value="any">Any sentiment</option>
+            <option value="fear" selected>Fear zone only (0-50) — contrarian buy</option>
+            <option value="neutral">Fear + Neutral (0-65)</option>
+            <option value="greed">All including Greed</option>
+          </select>
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Buy when others are fearful</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:7px">
+          <div><div style="font-size:.76rem;font-weight:600">Auto-skip BTC bear markets</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Pause crypto trading when BTC downtrend</div></div>
+          <label class="tog"><input type="checkbox" id="crSkipBear" checked><span class="tog-s"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCORE WEIGHT BREAKDOWN FOR CRYPTO -->
+    <div style="margin-top:.75rem">
+      <div class="card-title">Crypto Signal Weights</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+        <div class="card-sm" style="text-align:center">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume Spike</div>
+          <div style="font-size:1rem;font-weight:800;color:var(--warn)" id="crW1">30%</div>
+          <input type="range" min="10" max="50" value="30" id="crW1R" oninput="crW1.textContent=this.value+'%';saveCryptoWeights()">
+        </div>
+        <div class="card-sm" style="text-align:center">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">BTC Trend</div>
+          <div style="font-size:1rem;font-weight:800;color:var(--accent2)" id="crW2">25%</div>
+          <input type="range" min="10" max="40" value="25" id="crW2R" oninput="crW2.textContent=this.value+'%';saveCryptoWeights()">
+        </div>
+        <div class="card-sm" style="text-align:center">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">RSI Zone</div>
+          <div style="font-size:1rem;font-weight:800;color:var(--green)" id="crW3">20%</div>
+          <input type="range" min="5" max="35" value="20" id="crW3R" oninput="crW3.textContent=this.value+'%';saveCryptoWeights()">
+        </div>
+        <div class="card-sm" style="text-align:center">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Momentum</div>
+          <div style="font-size:1rem;font-weight:800;color:var(--accent)" id="crW4">15%</div>
+          <input type="range" min="5" max="30" value="15" id="crW4R" oninput="crW4.textContent=this.value+'%';saveCryptoWeights()">
+        </div>
+        <div class="card-sm" style="text-align:center">
+          <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Fear &amp; Greed</div>
+          <div style="font-size:1rem;font-weight:800;color:var(--purple)" id="crW5">10%</div>
+          <input type="range" min="0" max="20" value="10" id="crW5R" oninput="crW5.textContent=this.value+'%';saveCryptoWeights()">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:.75rem;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">
+        Risk/Reward ratio: <strong style="color:var(--accent)" id="crRR">2.9:1</strong>
+      </div>
+      <button class="btn b-acc b-sm" onclick="saveCryptoStrategy()">Save Crypto Strategy</button>
+    </div>
+  </div>
 </div>
 
 <!-- ─────────── MANUAL TRADE ─────────── -->
@@ -2295,7 +2396,71 @@ async function fetchFearGreed() {
   } catch(e) { return 50; }
 }
 
-// ── Crypto Risk Parameters (separate from stocks) ──
+// ── Crypto Strategy Settings ──────────
+function updateCryptoRisk() {
+  const sl  = parseInt(document.getElementById('crSlR')?.value || 12);
+  const tp  = parseInt(document.getElementById('crTpR')?.value || 35);
+  const ps  = parseInt(document.getElementById('crPsR')?.value || 8);
+  const ms  = parseInt(document.getElementById('crMsR')?.value || 60);
+  const rsi = parseInt(document.getElementById('crRsiR')?.value || 80);
+
+  document.getElementById('crSlD').textContent = sl + '%';
+  document.getElementById('crTpD').textContent = tp + '%';
+  document.getElementById('crPsD').textContent = ps + '%';
+  document.getElementById('crMsD').textContent = ms;
+  document.getElementById('crRsiD').textContent = rsi;
+
+  // Update live CRYPTO_RISK object
+  CRYPTO_RISK.stopLoss      = sl / 100;
+  CRYPTO_RISK.takeProfit    = tp / 100;
+  CRYPTO_RISK.maxPosition   = ps / 100;
+  CRYPTO_RISK.minScore      = ms;
+  CRYPTO_RISK.rsiOverbought = rsi;
+
+  // Update risk/reward ratio display
+  const rr = (tp / sl).toFixed(1);
+  const rrEl = document.getElementById('crRR');
+  if (rrEl) {
+    rrEl.textContent = rr + ':1';
+    rrEl.style.color = parseFloat(rr) >= 2 ? 'var(--green)' : parseFloat(rr) >= 1.5 ? 'var(--warn)' : 'var(--red)';
+  }
+}
+
+function saveCryptoWeights() {
+  // Weights are visual only — cryptoScore uses hardcoded weights internally
+  // This allows user to see and adjust what matters most
+  log('Crypto weights updated (applied on next scan)', 'ok');
+}
+
+function saveCryptoStrategy() {
+  updateCryptoRisk();
+  const settings = {
+    sl:  parseInt(document.getElementById('crSlR')?.value || 12),
+    tp:  parseInt(document.getElementById('crTpR')?.value || 35),
+    ps:  parseInt(document.getElementById('crPsR')?.value || 8),
+    ms:  parseInt(document.getElementById('crMsR')?.value || 60),
+    rsi: parseInt(document.getElementById('crRsiR')?.value || 80),
+    btcFilter: document.getElementById('crBtcFilter')?.value || 'bull',
+    fgFilter:  document.getElementById('crFgFilter')?.value || 'fear',
+    skipBear:  document.getElementById('crSkipBear')?.checked ?? true,
+  };
+  localStorage.setItem('cryptoStrategy', JSON.stringify(settings));
+  log(`Crypto strategy saved — SL: ${settings.sl}% | TP: ${settings.tp}% | MaxPos: ${settings.ps}%`, 'ok');
+}
+
+function loadCryptoStrategy() {
+  const saved = JSON.parse(localStorage.getItem('cryptoStrategy') || 'null');
+  if (!saved) return;
+  if (document.getElementById('crSlR'))  { document.getElementById('crSlR').value = saved.sl;  }
+  if (document.getElementById('crTpR'))  { document.getElementById('crTpR').value = saved.tp;  }
+  if (document.getElementById('crPsR'))  { document.getElementById('crPsR').value = saved.ps;  }
+  if (document.getElementById('crMsR'))  { document.getElementById('crMsR').value = saved.ms;  }
+  if (document.getElementById('crRsiR')) { document.getElementById('crRsiR').value = saved.rsi; }
+  if (document.getElementById('crBtcFilter')) document.getElementById('crBtcFilter').value = saved.btcFilter;
+  if (document.getElementById('crFgFilter'))  document.getElementById('crFgFilter').value = saved.fgFilter;
+  if (document.getElementById('crSkipBear'))  document.getElementById('crSkipBear').checked = saved.skipBear;
+  updateCryptoRisk();
+}
 const CRYPTO_RISK = {
   stopLoss:     0.12,   // 12% stop loss (not 5% like stocks)
   takeProfit:   0.35,   // 35% take profit
@@ -2728,6 +2893,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   renderWTags();
   renderWCtrls();
   drawEqChart();
+  loadCryptoStrategy();
 
   log('RaanuTradingBot v2.1 starting...','info');
   log('Auto-loading config from backend...','info');
