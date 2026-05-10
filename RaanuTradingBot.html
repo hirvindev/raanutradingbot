@@ -630,39 +630,90 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ══ CONFIG MODAL ══ -->
 <div class="modal-bg" id="cfgM">
-  <div class="modal">
-    <div class="modal-ttl">API Configuration</div>
-    <div class="modal-sub">Connect your Trade 212 paper account to pull real data.</div>
+  <div class="modal" style="width:540px">
+    <div class="modal-ttl">🔌 Broker Configuration</div>
+    <div class="modal-sub">Paste your API key — broker is detected automatically.</div>
     <div style="display:flex;flex-direction:column;gap:11px">
+
+      <!-- SINGLE API KEY INPUT -->
       <div class="fg">
-        <div class="fl">Backend Server URL (for Vercel deployment)</div>
-        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or ngrok URL">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed when using Vercel. Leave blank if running locally. Enter your PC's local IP or ngrok URL.</div>
+        <div class="fl">API Key</div>
+        <div style="display:flex;gap:7px">
+          <input type="password" id="c-apikey" placeholder="Paste your broker API key here..." oninput="autoDetectBroker(this.value)" style="flex:1">
+          <button class="btn b-warn b-sm" onclick="testConn()">Test</button>
+        </div>
+        <!-- Auto-detected broker badge -->
+        <div id="brokerDetected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;font-size:.72rem;font-family:var(--mono)">
+          <span id="brokerIcon">🔍</span> Detected: <strong id="brokerName" style="color:var(--accent)">—</strong>
+          <span id="brokerMode" style="color:var(--muted);margin-left:8px"></span>
+        </div>
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:4px">
+          Supports: Trade 212 · Alpaca · Interactive Brokers · Binance
+        </div>
       </div>
-      <div class="fg">
-        <div class="fl">Trade 212 API Key</div>
-        <input type="password" id="c-t212" placeholder="Paste from T212 → Settings → API (Beta)">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Enables account data, positions and order placement.</div>
+
+      <!-- BROKER CARDS -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('t212')">
+          <div style="font-size:.75rem;font-weight:700">📊 Trade 212</div>
+          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">T212 → Settings → API (Beta)<br>Free paper trading ✓</div>
+        </div>
+        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('alpaca')">
+          <div style="font-size:.75rem;font-weight:700">🦙 Alpaca</div>
+          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">alpaca.markets → API Keys<br>Free paper trading ✓</div>
+        </div>
+        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('binance')">
+          <div style="font-size:.75rem;font-weight:700">🟡 Binance</div>
+          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">binance.com → API Management<br>Crypto trading ✓</div>
+        </div>
+        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('ibkr')">
+          <div style="font-size:.75rem;font-weight:700">🏦 IBKR</div>
+          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">TWS → Client Portal API<br>Stocks + Options ✓</div>
+        </div>
       </div>
+
+      <!-- BROKER HELP BOX -->
+      <div id="brokerHelp" style="display:none" class="al al-info"></div>
+
+      <!-- TRADING MODE -->
       <div class="fg">
         <div class="fl">Trading Mode</div>
         <select id="c-mode">
-          <option value="demo">Demo / Paper Trading (demo.trading212.com) — Safe</option>
-          <option value="live">Live Trading — REAL MONEY</option>
+          <option value="demo">Paper / Demo — Safe (recommended first)</option>
+          <option value="live">Live — REAL MONEY</option>
         </select>
       </div>
-      <div class="al al-warn">⚠ Use Demo mode first. Live mode places real orders with real money. The stop loss fires in both modes.</div>
-      <div class="fg">
-        <div class="fl">Claude API Key (optional — AI reasoning)</div>
-        <input type="password" id="c-claude" placeholder="sk-ant-...">
+
+      <div class="al al-warn">⚠ Always start in Paper/Demo mode. Live mode places real orders.</div>
+
+      <!-- BACKEND URL (collapsed by default) -->
+      <div>
+        <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted);cursor:pointer" onclick="document.getElementById('advancedCfg').style.display=document.getElementById('advancedCfg').style.display==='none'?'flex':'none'">
+          ▸ Advanced settings (Vercel / Alpaca Secret Key)
+        </div>
+        <div id="advancedCfg" style="display:none;flex-direction:column;gap:8px;margin-top:8px">
+          <div class="fg">
+            <div class="fl">Alpaca Secret Key (if using Alpaca)</div>
+            <input type="password" id="c-secret" placeholder="Alpaca secret key (different from API key)">
+          </div>
+          <div class="fg">
+            <div class="fl">Backend Server URL (Vercel only)</div>
+            <input type="text" id="c-backend" placeholder="http://192.168.1.5:8000 or ngrok URL">
+            <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed on Vercel. Leave blank if running locally.</div>
+          </div>
+          <div class="fg">
+            <div class="fl">Claude API Key (AI reasoning)</div>
+            <input type="password" id="c-claude" placeholder="sk-ant-...">
+          </div>
+          <div class="fg">
+            <div class="fl">News API Key (newsapi.org)</div>
+            <input type="password" id="c-news" placeholder="Free at newsapi.org">
+          </div>
+        </div>
       </div>
-      <div class="fg">
-        <div class="fl">News API Key (optional — newsapi.org)</div>
-        <input type="password" id="c-news" placeholder="Free at newsapi.org">
-      </div>
+
       <div style="display:flex;gap:7px;justify-content:flex-end;margin-top:4px">
         <button class="btn b-out" onclick="closeM('cfgM')">Cancel</button>
-        <button class="btn b-warn" onclick="testConn()">Test Connection</button>
         <button class="btn b-acc" onclick="saveConfig()">Save &amp; Connect</button>
       </div>
       <div id="connTest" style="display:none"></div>
@@ -689,10 +740,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 //  STATE
 // ═══════════════════════════════════════
 const S = {
-  apiKey:   localStorage.getItem('t212k') || '',
-  claudeKey:localStorage.getItem('claudek') || '',
-  newsKey:  localStorage.getItem('newsk') || '',
-  mode:     localStorage.getItem('t212m') || 'demo',
+  apiKey:    localStorage.getItem('t212k') || '',
+  secretKey: localStorage.getItem('secretk') || '',
+  claudeKey: localStorage.getItem('claudek') || '',
+  newsKey:   localStorage.getItem('newsk') || '',
+  mode:      localStorage.getItem('t212m') || 'demo',
+  broker:    localStorage.getItem('broker') || 't212',
+  detectedBroker: null,
   engineOn: false, engTimer:null, cdTimer:null,
   logs:[], orders:[], positions:[],
   account:null, eqHistory:[],
@@ -704,10 +758,121 @@ const S = {
 };
 
 // ═══════════════════════════════════════
-//  T212 API LAYER
-//  Routes through local backend when available
-//  Falls back to direct API when on Vercel
+//  BROKER AUTO-DETECTION
 // ═══════════════════════════════════════
+
+// Broker profiles — detect by key format
+const BROKERS = {
+  t212: {
+    name: 'Trade 212',
+    icon: '📊',
+    detect: k => k.length > 30 && !k.startsWith('PK') && !k.startsWith('SK') && !k.includes('-'),
+    modes: { demo: 'https://demo.trading212.com/api/v0', live: 'https://live.trading212.com/api/v0' },
+    endpoints: {
+      account:   '/equity/account/cash',
+      portfolio: '/equity/portfolio',
+      orders:    '/equity/orders',
+      buy:       '/equity/orders/market',
+      sell:      '/equity/orders/market',
+    },
+    authHeader: k => ({ Authorization: k }),
+    helpText: 'Get your key: Trade 212 app → Settings → API (Beta) → Generate key. Use Demo mode first.',
+  },
+  alpaca: {
+    name: 'Alpaca',
+    icon: '🦙',
+    detect: k => k.startsWith('PK') || k.startsWith('AK') || (k.length === 20 && k === k.toUpperCase()),
+    modes: { demo: 'https://paper-api.alpaca.markets/v2', live: 'https://api.alpaca.markets/v2' },
+    endpoints: {
+      account:   '/account',
+      portfolio: '/positions',
+      orders:    '/orders',
+      buy:       '/orders',
+      sell:      '/orders',
+    },
+    authHeader: (k, secret) => ({ 'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': secret || '' }),
+    helpText: 'Get your key: alpaca.markets → Sign up free → API Keys → Generate. You need both API Key and Secret Key.',
+  },
+  binance: {
+    name: 'Binance',
+    icon: '🟡',
+    detect: k => k.length === 64 && /^[A-Za-z0-9]+$/.test(k),
+    modes: { demo: 'https://testnet.binance.vision/api/v3', live: 'https://api.binance.com/api/v3' },
+    endpoints: {
+      account:   '/account',
+      portfolio: '/openOrders',
+      orders:    '/allOrders',
+    },
+    authHeader: k => ({ 'X-MBX-APIKEY': k }),
+    helpText: 'Get your key: binance.com → Profile → API Management → Create API. Crypto trading only.',
+  },
+  ibkr: {
+    name: 'Interactive Brokers',
+    icon: '🏦',
+    detect: k => k.length > 10 && k.includes('-'),
+    modes: { demo: 'https://localhost:5000/v1/api', live: 'https://localhost:5000/v1/api' },
+    endpoints: { account: '/portfolio/accounts' },
+    authHeader: k => ({ Authorization: `Bearer ${k}` }),
+    helpText: 'IBKR requires TWS or Client Portal running locally. Complex setup — recommended for advanced users.',
+  },
+};
+
+function detectBroker(apiKey) {
+  if (!apiKey || apiKey.length < 5) return null;
+  for (const [id, broker] of Object.entries(BROKERS)) {
+    if (broker.detect(apiKey)) return { id, ...broker };
+  }
+  return null;
+}
+
+function autoDetectBroker(key) {
+  const broker = detectBroker(key);
+  const box = document.getElementById('brokerDetected');
+  const nameEl = document.getElementById('brokerName');
+  const modeEl = document.getElementById('brokerMode');
+  const iconEl = document.getElementById('brokerIcon');
+  if (broker) {
+    box.style.display = 'block';
+    nameEl.textContent = broker.name;
+    iconEl.textContent = broker.icon;
+    modeEl.textContent = `(${broker.id === 'alpaca' ? 'Paper + Live' : 'Demo + Live'})`;
+    box.style.borderColor = 'rgba(0,200,150,0.3)';
+    nameEl.style.color = 'var(--accent)';
+    S.detectedBroker = broker.id;
+  } else {
+    box.style.display = key.length > 3 ? 'block' : 'none';
+    if (key.length > 3) {
+      nameEl.textContent = 'Unknown — will try Trade 212';
+      iconEl.textContent = '❓';
+      modeEl.textContent = '';
+      S.detectedBroker = 't212';
+    }
+  }
+}
+
+function showBrokerHelp(id) {
+  const broker = BROKERS[id];
+  const el = document.getElementById('brokerHelp');
+  el.style.display = 'block';
+  el.textContent = `${broker.icon} ${broker.name}: ${broker.helpText}`;
+}
+
+// ── Multi-broker API call ──────────────
+async function brokerCall(path, method='GET', body=null) {
+  const broker = BROKERS[S.broker] || BROKERS.t212;
+  const mode = S.mode || 'demo';
+  const baseUrl = broker.modes[mode];
+  const url = baseUrl + path;
+  const headers = { 'Content-Type': 'application/json', ...broker.authHeader(S.apiKey, S.secretKey) };
+  try {
+    const opts = { method, headers };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(url, opts);
+    const txt = await res.text();
+    if (!res.ok) { log(`${broker.name} ${res.status}: ${txt.slice(0,100)}`, 'err'); return null; }
+    return txt ? JSON.parse(txt) : {};
+  } catch(e) { log(`${broker.name} error: ${e.message}`, 'err'); return null; }
+}
 const BASE = {
   demo: 'https://demo.trading212.com/api/v0',
   live: 'https://live.trading212.com/api/v0',
@@ -1721,40 +1886,67 @@ function startTimer(){
 function openM(id){document.getElementById(id).classList.add('open');loadCfg();}
 function closeM(id){document.getElementById(id).classList.remove('open');}
 function loadCfg(){
-  document.getElementById('c-t212').value=S.apiKey;
-  document.getElementById('c-claude').value=S.claudeKey;
-  document.getElementById('c-news').value=S.newsKey;
-  document.getElementById('c-mode').value=S.mode;
-  document.getElementById('c-backend').value=localStorage.getItem('backendUrl')||'';
+  document.getElementById('c-apikey').value = S.apiKey;
+  document.getElementById('c-secret').value = S.secretKey || '';
+  document.getElementById('c-claude').value = S.claudeKey;
+  document.getElementById('c-news').value = S.newsKey;
+  document.getElementById('c-mode').value = S.mode;
+  document.getElementById('c-backend').value = localStorage.getItem('backendUrl') || '';
+  if (S.apiKey) autoDetectBroker(S.apiKey);
 }
+
 function saveConfig(){
-  S.apiKey=document.getElementById('c-t212').value.trim();
-  S.claudeKey=document.getElementById('c-claude').value.trim();
-  S.newsKey=document.getElementById('c-news').value.trim();
-  S.mode=document.getElementById('c-mode').value;
-  const backend=document.getElementById('c-backend').value.trim();
-  localStorage.setItem('t212k',S.apiKey);
-  localStorage.setItem('claudek',S.claudeKey);
-  localStorage.setItem('newsk',S.newsKey);
-  localStorage.setItem('t212m',S.mode);
-  if(backend) localStorage.setItem('backendUrl',backend);
+  S.apiKey    = document.getElementById('c-apikey').value.trim();
+  S.secretKey = document.getElementById('c-secret').value.trim();
+  S.claudeKey = document.getElementById('c-claude').value.trim();
+  S.newsKey   = document.getElementById('c-news').value.trim();
+  S.mode      = document.getElementById('c-mode').value;
+
+  // Auto-detect broker
+  const detected = detectBroker(S.apiKey);
+  S.broker = detected ? detected.id : 't212';
+  S.detectedBroker = S.broker;
+
+  const backend = document.getElementById('c-backend').value.trim();
+  localStorage.setItem('t212k', S.apiKey);
+  localStorage.setItem('secretk', S.secretKey);
+  localStorage.setItem('claudek', S.claudeKey);
+  localStorage.setItem('newsk', S.newsKey);
+  localStorage.setItem('t212m', S.mode);
+  localStorage.setItem('broker', S.broker);
+  if (backend) localStorage.setItem('backendUrl', backend);
   else localStorage.removeItem('backendUrl');
-  setEl('sbMode',S.mode.toUpperCase());
+
+  setEl('sbMode', S.mode.toUpperCase());
   updateConnBadge(!!S.apiKey);
   closeM('cfgM');
-  log(`Config saved — Mode: ${S.mode.toUpperCase()}, Backend: ${backend||'auto-detect'}`,S.apiKey?'ok':'err');
-  if(S.apiKey||backend) fetchAccount();
+
+  const brokerName = BROKERS[S.broker]?.name || 'Trade 212';
+  log(`Connected: ${brokerName} — Mode: ${S.mode.toUpperCase()}`, 'ok');
+  if (S.apiKey) fetchAccount();
 }
 async function testConn(){
-  const key=document.getElementById('c-t212').value.trim();
-  const mode=document.getElementById('c-mode').value;
-  if(!key){showCT('err','Enter API key first');return;}
-  showCT('info','Testing connection...');
-  try{
-    const r=await fetch(BASE[mode]+'/equity/account/info',{headers:{Authorization:key}});
-    if(r.ok){const d=await r.json();showCT('ok',`✓ Connected! Account: ${d.email||'OK'} — ${d.currencyCode||'EUR'} — ${mode.toUpperCase()} mode`);}
-    else showCT('err',`✗ HTTP ${r.status} — Check API key and mode selection`);
-  }catch(e){showCT('warn','Network error — CORS may block browser → direct API calls. Save and use the Engine instead.');}
+  const key = document.getElementById('c-apikey').value.trim();
+  const secret = document.getElementById('c-secret').value.trim();
+  const mode = document.getElementById('c-mode').value;
+  if (!key) { showCT('err', 'Paste your API key first'); return; }
+  const broker = detectBroker(key) || BROKERS.t212;
+  showCT('info', `Testing ${broker.icon} ${broker.name} connection...`);
+  try {
+    const baseUrl = broker.modes[mode];
+    const ep = broker.endpoints.account;
+    const headers = { 'Content-Type': 'application/json', ...broker.authHeader(key, secret) };
+    const res = await fetch(baseUrl + ep, { headers, signal: AbortSignal.timeout(8000) });
+    if (res.ok) {
+      const d = await res.json();
+      const info = d.email || d.id || d.uid || d.accountId || 'Connected';
+      showCT('ok', `✓ ${broker.name} connected! Account: ${info} — ${mode.toUpperCase()} mode`);
+    } else {
+      showCT('err', `✗ ${broker.name} returned HTTP ${res.status} — check your API key`);
+    }
+  } catch(e) {
+    showCT('warn', `Network error — CORS may block direct browser calls. Save and use the Engine instead.`);
+  }
 }
 function showCT(t,msg){const el=document.getElementById('connTest');el.style.display='block';el.className=`al al-${t==='ok'?'ok':t==='info'?'info':'err'}`;el.textContent=msg;}
 function updateConnBadge(ok){
