@@ -224,8 +224,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('ord',this)"><span class="sb-icon">◎</span>Orders</div>
   <div class="sb-grp">Analysis</div>
   <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
-  <div class="sb-item" onclick="nav('crypto',this)"><span class="sb-icon">₿</span>Crypto Scanner</div>
-  <div class="sb-item" onclick="nav('commodity',this)"><span class="sb-icon">⛏</span>Commodity Scanner</div>
   <div class="sb-item" onclick="nav('ind',this)"><span class="sb-icon">∿</span>Indicators</div>
   <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
   <div class="sb-grp">Execution</div>
@@ -408,16 +406,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── SIGNALS ─────────── -->
 <div id="s-sig" class="sec">
-  <div class="al al-info">🔍 Dynamically fetches S&P 500 + NASDAQ 100 + 500 mid/small caps = 1000+ stocks. Filters for momentum, uptrend and breakout only. Shows top 20 sure-shot winners. No watchlist needed — universe auto-updates.</div>
+  <div class="al al-info">🔍 Auto-scans 370+ large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top 20 sure-shot winners — no watchlist needed.</div>
 
   <!-- SCAN CONTROLS -->
   <div class="card">
     <div class="card-hdr">
-      <div style="display:flex;flex-direction:column;gap:3px">
-        <div class="card-title" style="margin:0">Market Scanner</div>
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)" id="scanHistoryInfo">Click Scan Market to start</div>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="card-title" style="margin:0">Market Scanner</div>
+      <div style="display:flex;gap:7px;align-items:center">
         <select id="capFilter" style="width:auto">
           <option value="all">All Caps</option>
           <option value="large">Large Cap Only</option>
@@ -430,13 +425,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
           <option value="breakout">Breakout</option>
           <option value="uptrend">Uptrend</option>
         </select>
-        <select id="exchangeFilter" style="width:auto" onchange="filterByExchange()">
-          <option value="all">🌍 All Exchanges</option>
-          <option value="DE">🇩🇪 XETRA Germany</option>
-          <option value="US">🇺🇸 US Markets</option>
-        </select>
         <button class="btn b-acc b-sm" onclick="runMarketScan()" id="scanBtn">⚡ Scan Market</button>
-        <button class="btn b-out b-sm" onclick="clearScanState();setEl('scanHistoryInfo','History cleared — click Scan Market to start fresh');document.getElementById('sigBody').innerHTML='<tr><td class=te colspan=12>History cleared</td></tr>'" title="Clear and restart">↺ Reset</button>
       </div>
     </div>
 
@@ -481,184 +470,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="card-title">Top Picks — Trade Reasoning</div>
     <div id="aiReasons"></div>
   </div>
-</div>
-
-<!-- ─────────── CRYPTO SCANNER ─────────── -->
-<div id="s-crypto" class="sec">
-
-  <!-- METRIC ROW -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem">
-    <div class="mcard mc-warn">
-      <div class="mlabel">BTC Price</div>
-      <div class="mval" id="cr-btc">—</div>
-      <div class="msub nu" id="cr-btc-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-blue">
-      <div class="mlabel">ETH Price</div>
-      <div class="mval" id="cr-eth">—</div>
-      <div class="msub nu" id="cr-eth-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-teal">
-      <div class="mlabel">Market Cap</div>
-      <div class="mval hi" id="cr-mcap">—</div>
-      <div class="msub nu">Total crypto market</div>
-    </div>
-    <div class="mcard mc-green">
-      <div class="mlabel">Fear &amp; Greed</div>
-      <div class="mval" id="cr-fg">—</div>
-      <div class="msub nu" id="cr-fg-lbl">Market sentiment</div>
-    </div>
-  </div>
-
-  <!-- SCANNER -->
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Crypto Momentum Scanner</div>
-      <div style="display:flex;gap:7px;align-items:center">
-        <select id="cr-filter" style="width:auto">
-          <option value="all">All Crypto</option>
-          <option value="large">Large Cap (BTC/ETH/BNB)</option>
-          <option value="mid">Mid Cap (Altcoins)</option>
-          <option value="small">Small Cap (Gems)</option>
-          <option value="defi">DeFi</option>
-          <option value="ai">AI Tokens</option>
-        </select>
-        <button class="btn b-acc b-sm" onclick="runCryptoScan()" id="crScanBtn">⚡ Scan Crypto</button>
-        <button class="btn b-out b-sm" onclick="loadCryptoPrices()">↻ Refresh Prices</button>
-      </div>
-    </div>
-
-    <!-- PROGRESS -->
-    <div id="crProgress" style="display:none;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
-        <span id="crStatus">Scanning...</span>
-        <span id="crCount">0 / 0</span>
-      </div>
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
-        <div id="crBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div>
-      </div>
-    </div>
-
-    <!-- STATS -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px" id="crStats">
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="crScanned">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="crBullish">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="crBreakouts">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="crAvg">0</div></div>
-    </div>
-
-    <table>
-      <thead><tr><th>#</th><th>Pair</th><th>Name</th><th>Price</th><th>24h %</th><th>Score</th><th>RSI</th><th>Pattern</th><th>Volume</th><th>Signal</th><th>Action</th></tr></thead>
-      <tbody id="crBody"><tr><td class="te" colspan="11">Click ⚡ Scan Crypto to find top momentum opportunities</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- TOP PICKS REASONING -->
-  <div class="card" id="crReasonCard" style="display:none">
-    <div class="card-title">🏆 Top Crypto Picks — Analysis</div>
-    <div id="crReasons"></div>
-  </div>
-
-  <!-- HEATMAP -->
-  <div class="card">
-    <div class="card-title">Live Crypto Prices — Top 20 by Market Cap</div>
-    <div id="crHeatmap" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-      <div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Click Refresh Prices to load live data</div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ─────────── COMMODITY SCANNER ─────────── -->
-<div id="s-commodity" class="sec">
-
-  <!-- METRIC ROW -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem">
-    <div class="mcard mc-warn">
-      <div class="mlabel">Gold (XAU/USD)</div>
-      <div class="mval" id="cm-gold">—</div>
-      <div class="msub nu" id="cm-gold-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-blue">
-      <div class="mlabel">Silver (XAG/USD)</div>
-      <div class="mval" id="cm-silver">—</div>
-      <div class="msub nu" id="cm-silver-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-red">
-      <div class="mlabel">Crude Oil (WTI)</div>
-      <div class="mval" id="cm-oil">—</div>
-      <div class="msub nu" id="cm-oil-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-teal">
-      <div class="mlabel">Natural Gas</div>
-      <div class="mval" id="cm-gas">—</div>
-      <div class="msub nu" id="cm-gas-chg">Loading...</div>
-    </div>
-    <div class="mcard mc-green">
-      <div class="mlabel">Copper</div>
-      <div class="mval" id="cm-copper">—</div>
-      <div class="msub nu" id="cm-copper-chg">Loading...</div>
-    </div>
-  </div>
-
-  <!-- INFO -->
-  <div class="al al-info">⛏ Commodities use ETF proxies (GLD, SLV, USO, UNG, CPER etc.) traded on US exchanges — available via Trade 212 and Alpaca. Strategy differs from stocks: supply/demand cycles, USD correlation, seasonal patterns matter more than RSI.</div>
-
-  <!-- SCANNER -->
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Commodity Momentum Scanner</div>
-      <div style="display:flex;gap:7px;align-items:center">
-        <select id="cm-filter" style="width:auto">
-          <option value="all">All Commodities</option>
-          <option value="metals">Precious Metals</option>
-          <option value="energy">Energy</option>
-          <option value="agriculture">Agriculture</option>
-          <option value="industrial">Industrial Metals</option>
-        </select>
-        <button class="btn b-acc b-sm" onclick="runCommodityScan()" id="cmScanBtn">⚡ Scan Commodities</button>
-        <button class="btn b-out b-sm" onclick="loadCommodityPrices()">↻ Refresh</button>
-      </div>
-    </div>
-
-    <!-- PROGRESS -->
-    <div id="cmProgress" style="display:none;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
-        <span id="cmStatus">Scanning...</span><span id="cmCount">0 / 0</span>
-      </div>
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
-        <div id="cmBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div>
-      </div>
-    </div>
-
-    <!-- STATS -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="cmScanned">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="cmBullish">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="cmBreakouts">0</div></div>
-      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="cmAvg">0</div></div>
-    </div>
-
-    <table>
-      <thead><tr><th>#</th><th>ETF</th><th>Commodity</th><th>Category</th><th>Price</th><th>Score</th><th>RSI</th><th>Pattern</th><th>EMA Trend</th><th>USD Corr</th><th>Signal</th><th>Action</th></tr></thead>
-      <tbody id="cmBody"><tr><td class="te" colspan="12">Click ⚡ Scan Commodities to find top opportunities</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- TOP PICKS -->
-  <div class="card" id="cmReasonCard" style="display:none">
-    <div class="card-title">🏆 Top Commodity Picks — Analysis</div>
-    <div id="cmReasons"></div>
-  </div>
-
-  <!-- PRICE GRID -->
-  <div class="card">
-    <div class="card-title">Commodity ETF Live Prices</div>
-    <div id="cmGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px">
-      <div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 4">Click Refresh to load live prices</div>
-    </div>
-  </div>
-
 </div>
 
 <!-- ─────────── INDICATORS ─────────── -->
@@ -708,239 +519,60 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── STRATEGY ─────────── -->
 <div id="s-strat" class="sec">
-
-  <!-- HIDDEN ENGINE CONFIG — always in DOM, never removed by tab switching -->
-  <div style="display:none">
-    <input type="checkbox" id="tAuto" checked>
-    <input type="checkbox" id="tTP" checked>
-    <input type="checkbox" id="tNews" checked>
-    <input type="checkbox" id="tFund" checked>
-    <input type="checkbox" id="tStocks" checked>
-    <input type="checkbox" id="tCrypto">
-    <input type="checkbox" id="tCommodity">
-    <select id="scanInt"><option value="900" selected>900</option></select>
-    <select id="ordType"><option value="MARKET" selected>MARKET</option></select>
-    <input type="range" id="mpR" value="6" min="1" max="20">
-    <input type="range" id="cbR" value="8" min="3" max="20">
-    <span id="mpD">6</span>
-    <span id="cbD">-8%</span>
-  </div>
-
-  <!-- SUB-NAV TABS -->
-  <div style="display:flex;gap:6px;border-bottom:1px solid var(--border);padding-bottom:.75rem;flex-wrap:wrap">
-    <button class="btn b-acc b-sm" id="stTab-stock"     onclick="switchStratTab('stock')">📈 Stocks</button>
-    <button class="btn b-out b-sm" id="stTab-crypto"    onclick="switchStratTab('crypto')">₿ Crypto</button>
-    <button class="btn b-out b-sm" id="stTab-commodity" onclick="switchStratTab('commodity')">⛏ Commodities</button>
-    <button class="btn b-out b-sm" id="stTab-exec"      onclick="switchStratTab('exec')">⚙ Execution</button>
-  </div>
-
-  <!-- ══ STOCKS ══ -->
-  <div id="st-stock" class="st-panel">
-    <div class="al al-info" style="margin-bottom:.75rem">📈 RSI, MACD, Bollinger Bands, EMA crossovers. Tighter stops than crypto. Fundamentals + news as quality filters.</div>
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">📊 Signal Weights (must total 100%)</div>
-        <div style="display:flex;flex-direction:column;gap:11px" id="wCtrls"></div>
-        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Total: <span id="wTot" style="color:var(--green)">100%</span></span>
-          <button class="btn b-acc b-sm" onclick="saveWeights()">Save Weights</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">🛡 Stock Risk Controls</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="slD">5%</span></div><input type="range" min="1" max="15" value="5" id="slR" oninput="slD.textContent=this.value+'%';sbSL.textContent=this.value+'%'"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Typical: 3–8%</div></div>
-          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="tpD">8%</span></div><input type="range" min="2" max="30" value="8" id="tpR" oninput="tpD.textContent=this.value+'%'"></div>
-          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="psD">20%</span></div><input type="range" min="5" max="50" value="20" id="psR" oninput="psD.textContent=this.value+'%'"></div>
-          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="msD">70</span></div><input type="range" min="50" max="95" value="70" id="msR" oninput="msD.textContent=this.value"></div>
-        </div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-title">Signal Weights (must total 100%)</div>
+      <div style="display:flex;flex-direction:column;gap:11px" id="wCtrls"></div>
+      <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Total: <span id="wTot" style="color:var(--green)">100%</span></span>
+        <button class="btn b-acc b-sm" onclick="saveWeights()">Save</button>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">⚙ Stock Execution</div>
-      <div class="g4">
-        <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">📈 Auto Execute Stocks</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place stock orders automatically</div></div>
-          <label class="tog"><input type="checkbox" id="tStocksExec" checked onchange="document.getElementById('tStocks').checked=this.checked"><span class="tog-s"></span></label>
-        </div>
-        <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">📰 News Filter</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Block on bad sentiment</div></div>
-          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tNews').checked=this.checked"><span class="tog-s"></span></label>
-        </div>
-        <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">📊 Fundamentals</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">P/E + EPS filter</div></div>
-          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tFund').checked=this.checked"><span class="tog-s"></span></label>
-        </div>
-        <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">🎯 Auto Close TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell when take-profit hit</div></div>
-          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tTP').checked=this.checked"><span class="tog-s"></span></label>
-        </div>
+      <div class="card-title">Risk Controls</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="slD">5%</span></div><input type="range" min="1" max="15" value="5" id="slR" oninput="slD.textContent=this.value+'%';sbSL.textContent=this.value+'%'"></div>
+        <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="tpD">8%</span></div><input type="range" min="2" max="30" value="8" id="tpR" oninput="tpD.textContent=this.value+'%'"></div>
+        <div class="fg"><div class="fl">Max Position Size <span style="color:var(--accent)" id="psD">20%</span></div><input type="range" min="5" max="50" value="20" id="psR" oninput="psD.textContent=this.value+'%'"></div>
+        <div class="fg"><div class="fl">Min Score to Trade <span style="color:var(--accent)" id="msD">70</span></div><input type="range" min="50" max="95" value="70" id="msR" oninput="msD.textContent=this.value"></div>
+        <div class="fg"><div class="fl">Max Positions <span style="color:var(--accent)" id="mpD">6</span></div><input type="range" min="1" max="20" value="6" id="mpR" oninput="mpD.textContent=this.value"></div>
+        <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD">-8%</span></div><input type="range" min="3" max="20" value="8" id="cbR" oninput="cbD.textContent='-'+this.value+'%'"></div>
       </div>
     </div>
   </div>
-
-  <!-- ══ CRYPTO ══ -->
-  <div id="st-crypto" class="st-panel" style="display:none">
-    <div class="al al-warn" style="margin-bottom:.75rem">₿ Wider stops, smaller positions, higher RSI threshold. BTC trend + Fear &amp; Greed are primary filters. Only applies to the Crypto Scanner tab.</div>
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">🛡 Crypto Risk Controls</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="crSlD">12%</span></div><input type="range" min="5" max="30" value="12" id="crSlR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto moves 10–30% daily</div></div>
-          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="crTpD">35%</span></div><input type="range" min="10" max="100" value="35" id="crTpR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto can 2–10×</div></div>
-          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="crPsD">8%</span></div><input type="range" min="1" max="25" value="8" id="crPsR" oninput="updateCryptoRisk()"></div>
-          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="crMsD">60</span></div><input type="range" min="40" max="90" value="60" id="crMsR" oninput="updateCryptoRisk()"></div>
-          <div class="fg"><div class="fl">RSI Overbought <span style="color:var(--warn)" id="crRsiD">80</span></div><input type="range" min="65" max="90" value="80" id="crRsiR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto stays overbought for weeks</div></div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">R/R: <strong style="color:var(--accent)" id="crRR">2.9:1</strong></span>
-            <button class="btn b-acc b-sm" onclick="saveCryptoStrategy()">Save</button>
-          </div>
-        </div>
+  <div class="card">
+    <div class="card-title">Execution Settings</div>
+    <div class="g4">
+      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div><div style="font-size:.76rem;font-weight:600">Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place orders automatically</div></div>
+        <label class="tog"><input type="checkbox" id="tAuto" checked><span class="tog-s"></span></label>
       </div>
-      <div class="card">
-        <div class="card-title">🔍 Crypto Filters &amp; Execution</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">BTC Trend Filter</div>
-            <select id="crBtcFilter"><option value="all">Any BTC trend</option><option value="bull" selected>Only BTC uptrend</option><option value="neutral">Bull + Neutral</option></select>
-          </div>
-          <div class="fg"><div class="fl">Fear &amp; Greed Entry Zone</div>
-            <select id="crFgFilter"><option value="any">Any sentiment</option><option value="fear" selected>Fear zone (0–50)</option><option value="neutral">Fear + Neutral (0–65)</option><option value="greed">All including Greed</option></select>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">₿ Auto-Trade Crypto</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute crypto signals</div></div>
-            <label class="tog"><input type="checkbox" id="crAutoExec" onchange="document.getElementById('tCrypto').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Skip BTC Bear Markets</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Pause in BTC downtrend</div></div>
-            <label class="tog"><input type="checkbox" id="crSkipBear" checked><span class="tog-s"></span></label>
-          </div>
-        </div>
+      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div><div style="font-size:.76rem;font-weight:600">News Filter</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Block on bad sentiment</div></div>
+        <label class="tog"><input type="checkbox" id="tNews" checked><span class="tog-s"></span></label>
+      </div>
+      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div><div style="font-size:.76rem;font-weight:600">Fundamentals</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">P/E + EPS filter</div></div>
+        <label class="tog"><input type="checkbox" id="tFund" checked><span class="tog-s"></span></label>
+      </div>
+      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div><div style="font-size:.76rem;font-weight:600">Auto Close TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell at take-profit</div></div>
+        <label class="tog"><input type="checkbox" id="tTP" checked><span class="tog-s"></span></label>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">📊 Crypto Signal Weights</div>
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume</div><div style="font-size:1rem;font-weight:800;color:var(--warn)" id="crW1">30%</div><input type="range" min="10" max="50" value="30" id="crW1R" oninput="crW1.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">BTC Trend</div><div style="font-size:1rem;font-weight:800;color:var(--accent2)" id="crW2">25%</div><input type="range" min="10" max="40" value="25" id="crW2R" oninput="crW2.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">RSI Zone</div><div style="font-size:1rem;font-weight:800;color:var(--green)" id="crW3">20%</div><input type="range" min="5" max="35" value="20" id="crW3R" oninput="crW3.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Momentum</div><div style="font-size:1rem;font-weight:800;color:var(--accent)" id="crW4">15%</div><input type="range" min="5" max="30" value="15" id="crW4R" oninput="crW4.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Fear&amp;Greed</div><div style="font-size:1rem;font-weight:800;color:var(--purple)" id="crW5">10%</div><input type="range" min="0" max="20" value="10" id="crW5R" oninput="crW5.textContent=this.value+'%'"></div>
-      </div>
+    <div class="g2" style="margin-top:.7rem;gap:.7rem">
+      <div class="fg"><div class="fl">Scan Interval</div><select id="scanInt"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option></select></div>
+      <div class="fg"><div class="fl">Order Type</div><select id="ordType"><option value="MARKET" selected>Market</option><option value="LIMIT">Limit (0.2% below ask)</option></select></div>
     </div>
   </div>
-
-  <!-- ══ COMMODITIES ══ -->
-  <div id="st-commodity" class="st-panel" style="display:none">
-    <div class="al al-info" style="margin-bottom:.75rem">⛏ USD correlation, supply/demand cycles, macro trends. EMA trend + volume are primary signals. Only applies to the Commodity Scanner tab.</div>
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">🛡 Commodity Risk Controls</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="cmSlD">7%</span></div><input type="range" min="3" max="20" value="7" id="cmSlR" oninput="updateCommodityRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Between stocks (5%) and crypto (12%)</div></div>
-          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="cmTpD">15%</span></div><input type="range" min="5" max="50" value="15" id="cmTpR" oninput="updateCommodityRisk()"></div>
-          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="cmPsD">15%</span></div><input type="range" min="5" max="30" value="15" id="cmPsR" oninput="updateCommodityRisk()"></div>
-          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="cmMsD">65</span></div><input type="range" min="40" max="90" value="65" id="cmMsR" oninput="updateCommodityRisk()"></div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">R/R: <strong style="color:var(--accent)" id="cmRR">2.1:1</strong></span>
-            <button class="btn b-acc b-sm" onclick="saveCommodityStrategy()">Save</button>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">🔍 Commodity Filters &amp; Execution</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">USD Strength Filter</div>
-            <select id="cmUsdFilter"><option value="weak" selected>Only when USD weak/neutral</option><option value="any">Any USD strength</option><option value="strong">Only when USD strong</option></select>
-            <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Weak USD = commodity tailwind</div>
-          </div>
-          <div class="fg"><div class="fl">Preferred Category</div>
-            <select id="cmCatFilter"><option value="all" selected>All categories</option><option value="metals">Precious Metals</option><option value="energy">Energy</option><option value="agriculture">Agriculture</option><option value="industrial">Industrial</option></select>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">⛏ Auto-Trade Commodities</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute commodity signals</div></div>
-            <label class="tog"><input type="checkbox" id="cmAutoExec" onchange="document.getElementById('tCommodity').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Inflation Hedge Mode</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Prioritise Gold/Silver in inflation</div></div>
-            <label class="tog"><input type="checkbox" id="cmInflation" checked><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Seasonal Patterns</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Boost agri in growing season</div></div>
-            <label class="tog"><input type="checkbox" id="cmSeasonal" checked><span class="tog-s"></span></label>
-          </div>
-        </div>
-      </div>
+  <div class="card">
+    <div class="card-title">Watchlist</div>
+    <div style="display:flex;gap:7px;margin-bottom:8px">
+      <input type="text" id="wIn" placeholder="Add symbol, e.g. AAPL" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
+      <button class="btn b-acc b-sm" onclick="addWatch()">+ Add</button>
     </div>
-    <div class="card">
-      <div class="card-title">📊 Commodity Signal Weights</div>
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">USD Corr</div><div style="font-size:1rem;font-weight:800;color:var(--accent2)" id="cmW1">25%</div><input type="range" min="10" max="40" value="25" id="cmW1R" oninput="cmW1.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">EMA Trend</div><div style="font-size:1rem;font-weight:800;color:var(--green)" id="cmW2">25%</div><input type="range" min="10" max="40" value="25" id="cmW2R" oninput="cmW2.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">RSI Zone</div><div style="font-size:1rem;font-weight:800;color:var(--warn)" id="cmW3">20%</div><input type="range" min="5" max="35" value="20" id="cmW3R" oninput="cmW3.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume</div><div style="font-size:1rem;font-weight:800;color:var(--accent)" id="cmW4">15%</div><input type="range" min="5" max="30" value="15" id="cmW4R" oninput="cmW4.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">MACD</div><div style="font-size:1rem;font-weight:800;color:var(--purple)" id="cmW5">15%</div><input type="range" min="5" max="30" value="15" id="cmW5R" oninput="cmW5.textContent=this.value+'%'"></div>
-      </div>
-    </div>
+    <div id="wTags" style="display:flex;flex-wrap:wrap;gap:5px"></div>
   </div>
-
-  <!-- ══ EXECUTION ══ -->
-  <div id="st-exec" class="st-panel" style="display:none">
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">⚙ Engine &amp; Order Settings</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Scan Interval</div>
-            <select onchange="document.getElementById('scanInt').value=this.value">
-              <option value="300">Every 5 minutes</option>
-              <option value="900" selected>Every 15 minutes</option>
-              <option value="1800">Every 30 minutes</option>
-              <option value="3600">Every hour</option>
-            </select>
-          </div>
-          <div class="fg"><div class="fl">Order Type</div>
-            <select onchange="document.getElementById('ordType').value=this.value">
-              <option value="MARKET" selected>Market (instant fill)</option>
-              <option value="LIMIT">Limit (0.2% below ask)</option>
-            </select>
-          </div>
-          <div class="fg"><div class="fl">Max Total Positions <span style="color:var(--accent)" id="mpD2">6</span></div><input type="range" min="1" max="20" value="6" oninput="mpD2.textContent=this.value;document.getElementById('mpR').value=this.value"></div>
-          <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD2">-8%</span></div><input type="range" min="3" max="20" value="8" oninput="cbD2.textContent='-'+this.value+'%';document.getElementById('cbR').value=this.value"></div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">🤖 Master Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Global on/off for all auto trading</div></div>
-            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tAuto').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">🗂 Asset Class Toggles</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">📈 Stocks Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute stock signals</div></div>
-            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tStocks').checked=this.checked;if(document.getElementById('tStocksExec'))document.getElementById('tStocksExec').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">₿ Crypto Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute crypto signals</div></div>
-            <label class="tog"><input type="checkbox" onchange="document.getElementById('tCrypto').checked=this.checked;if(document.getElementById('crAutoExec'))document.getElementById('crAutoExec').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">⛏ Commodity Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute commodity signals</div></div>
-            <label class="tog"><input type="checkbox" onchange="document.getElementById('tCommodity').checked=this.checked;if(document.getElementById('cmAutoExec'))document.getElementById('cmAutoExec').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">🎯 Auto Close at TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell all assets at take-profit</div></div>
-            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tTP').checked=this.checked"><span class="tog-s"></span></label>
-          </div>
-        </div>
-        <div style="margin-top:10px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:.7rem;font-family:var(--mono);color:var(--muted)">
-          <div style="color:var(--text);font-weight:600;margin-bottom:4px">Recommended Allocation</div>
-          <div>📈 Stocks: <strong style="color:var(--accent2)">60%</strong></div>
-          <div>₿ Crypto: <strong style="color:var(--warn)">20%</strong></div>
-          <div>⛏ Commodities: <strong style="color:var(--green)">20%</strong></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </div>
 
 <!-- ─────────── MANUAL TRADE ─────────── -->
@@ -998,90 +630,39 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ══ CONFIG MODAL ══ -->
 <div class="modal-bg" id="cfgM">
-  <div class="modal" style="width:540px">
-    <div class="modal-ttl">🔌 Broker Configuration</div>
-    <div class="modal-sub">Paste your API key — broker is detected automatically.</div>
+  <div class="modal">
+    <div class="modal-ttl">API Configuration</div>
+    <div class="modal-sub">Connect your Trade 212 paper account to pull real data.</div>
     <div style="display:flex;flex-direction:column;gap:11px">
-
-      <!-- SINGLE API KEY INPUT -->
       <div class="fg">
-        <div class="fl">API Key</div>
-        <div style="display:flex;gap:7px">
-          <input type="password" id="c-apikey" placeholder="Paste your broker API key here..." oninput="autoDetectBroker(this.value)" style="flex:1">
-          <button class="btn b-warn b-sm" onclick="testConn()">Test</button>
-        </div>
-        <!-- Auto-detected broker badge -->
-        <div id="brokerDetected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;font-size:.72rem;font-family:var(--mono)">
-          <span id="brokerIcon">🔍</span> Detected: <strong id="brokerName" style="color:var(--accent)">—</strong>
-          <span id="brokerMode" style="color:var(--muted);margin-left:8px"></span>
-        </div>
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:4px">
-          Supports: Trade 212 · Alpaca · Interactive Brokers · Binance
-        </div>
+        <div class="fl">Backend Server URL (for Vercel deployment)</div>
+        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or ngrok URL">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed when using Vercel. Leave blank if running locally. Enter your PC's local IP or ngrok URL.</div>
       </div>
-
-      <!-- BROKER CARDS -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('t212')">
-          <div style="font-size:.75rem;font-weight:700">📊 Trade 212</div>
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">T212 → Settings → API (Beta)<br>Free paper trading ✓</div>
-        </div>
-        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('alpaca')">
-          <div style="font-size:.75rem;font-weight:700">🦙 Alpaca</div>
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">alpaca.markets → API Keys<br>Free paper trading ✓</div>
-        </div>
-        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('binance')">
-          <div style="font-size:.75rem;font-weight:700">🟡 Binance</div>
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">binance.com → API Management<br>Crypto trading ✓</div>
-        </div>
-        <div class="card-sm" style="cursor:pointer;border-color:var(--border2)" onclick="showBrokerHelp('ibkr')">
-          <div style="font-size:.75rem;font-weight:700">🏦 IBKR</div>
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">TWS → Client Portal API<br>Stocks + Options ✓</div>
-        </div>
+      <div class="fg">
+        <div class="fl">Trade 212 API Key</div>
+        <input type="password" id="c-t212" placeholder="Paste from T212 → Settings → API (Beta)">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Enables account data, positions and order placement.</div>
       </div>
-
-      <!-- BROKER HELP BOX -->
-      <div id="brokerHelp" style="display:none" class="al al-info"></div>
-
-      <!-- TRADING MODE -->
       <div class="fg">
         <div class="fl">Trading Mode</div>
         <select id="c-mode">
-          <option value="demo">Paper / Demo — Safe (recommended first)</option>
-          <option value="live">Live — REAL MONEY</option>
+          <option value="demo">Demo / Paper Trading (demo.trading212.com) — Safe</option>
+          <option value="live">Live Trading — REAL MONEY</option>
         </select>
       </div>
-
-      <div class="al al-warn">⚠ Always start in Paper/Demo mode. Live mode places real orders.</div>
-
-      <!-- BACKEND URL (collapsed by default) -->
-      <div>
-        <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted);cursor:pointer" onclick="document.getElementById('advancedCfg').style.display=document.getElementById('advancedCfg').style.display==='none'?'flex':'none'">
-          ▸ Advanced settings (Vercel / Alpaca Secret Key)
-        </div>
-        <div id="advancedCfg" style="display:none;flex-direction:column;gap:8px;margin-top:8px">
-          <div class="fg">
-            <div class="fl">Alpaca Secret Key (if using Alpaca)</div>
-            <input type="password" id="c-secret" placeholder="Alpaca secret key (different from API key)">
-          </div>
-          <div class="fg">
-            <div class="fl">Backend Server URL (Vercel only)</div>
-            <input type="text" id="c-backend" placeholder="http://192.168.1.5:8000 or ngrok URL">
-            <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed on Vercel. Leave blank if running locally.</div>
-          </div>
-          <div class="fg">
-            <div class="fl">Claude API Key (AI reasoning)</div>
-            <input type="password" id="c-claude" placeholder="sk-ant-...">
-          </div>
-          <div class="fg">
-            <div class="fl">News API Key (newsapi.org)</div>
-            <input type="password" id="c-news" placeholder="Free at newsapi.org">
-          </div>
-        </div>
+      <div class="al al-warn">⚠ Use Demo mode first. Live mode places real orders with real money. The stop loss fires in both modes.</div>
+      <div class="fg">
+        <div class="fl">Claude API Key (optional — AI reasoning)</div>
+        <input type="password" id="c-claude" placeholder="sk-ant-...">
       </div>
-
+      <div class="fg">
+        <div class="fl">News API Key (optional — newsapi.org)</div>
+        <input type="password" id="c-news" placeholder="Free at newsapi.org">
+      </div>
       <div style="display:flex;gap:7px;justify-content:flex-end;margin-top:4px">
         <button class="btn b-out" onclick="closeM('cfgM')">Cancel</button>
+        <button class="btn b-warn" onclick="testConn()">Test Connection</button>
         <button class="btn b-acc" onclick="saveConfig()">Save &amp; Connect</button>
       </div>
       <div id="connTest" style="display:none"></div>
@@ -1108,13 +689,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 //  STATE
 // ═══════════════════════════════════════
 const S = {
-  apiKey:    localStorage.getItem('t212k') || '',
-  secretKey: localStorage.getItem('secretk') || '',
-  claudeKey: localStorage.getItem('claudek') || '',
-  newsKey:   localStorage.getItem('newsk') || '',
-  mode:      localStorage.getItem('t212m') || 'demo',
-  broker:    localStorage.getItem('broker') || 't212',
-  detectedBroker: null,
+  apiKey:   localStorage.getItem('t212k') || '',
+  claudeKey:localStorage.getItem('claudek') || '',
+  newsKey:  localStorage.getItem('newsk') || '',
+  mode:     localStorage.getItem('t212m') || 'demo',
   engineOn: false, engTimer:null, cdTimer:null,
   logs:[], orders:[], positions:[],
   account:null, eqHistory:[],
@@ -1126,498 +704,10 @@ const S = {
 };
 
 // ═══════════════════════════════════════
-//  COMMODITY SCANNER ENGINE
-//  Uses ETF proxies via Yahoo Finance
-//  Commodity strategy differs from stocks:
-//  - USD inverse correlation matters
-//  - Supply/demand cycles
-//  - Seasonal patterns
-//  - Inflation hedge signals
+//  T212 API LAYER
+//  Routes through local backend when available
+//  Falls back to direct API when on Vercel
 // ═══════════════════════════════════════
-
-const COMMODITY_UNIVERSE = {
-  metals: [
-    {sym:'GLD', name:'Gold',          full:'SPDR Gold Shares',          cat:'Precious Metal', usdCorr:-0.8},
-    {sym:'SLV', name:'Silver',        full:'iShares Silver Trust',       cat:'Precious Metal', usdCorr:-0.75},
-    {sym:'PPLT',name:'Platinum',      full:'Aberdeen Platinum ETF',      cat:'Precious Metal', usdCorr:-0.6},
-    {sym:'PALL',name:'Palladium',     full:'Aberdeen Palladium ETF',     cat:'Precious Metal', usdCorr:-0.55},
-    {sym:'GDX', name:'Gold Miners',   full:'VanEck Gold Miners ETF',     cat:'Miners',         usdCorr:-0.7},
-    {sym:'GDXJ',name:'Jr Gold Miners',full:'VanEck Junior Gold Miners',  cat:'Miners',         usdCorr:-0.65},
-  ],
-  energy: [
-    {sym:'USO', name:'Crude Oil',     full:'United States Oil Fund',     cat:'Energy',         usdCorr:-0.5},
-    {sym:'BNO', name:'Brent Oil',     full:'United States Brent Oil',    cat:'Energy',         usdCorr:-0.5},
-    {sym:'UNG', name:'Natural Gas',   full:'United States Natural Gas',  cat:'Energy',         usdCorr:-0.3},
-    {sym:'UGA', name:'Gasoline',      full:'United States Gasoline Fund', cat:'Energy',        usdCorr:-0.45},
-    {sym:'XLE', name:'Energy Sector', full:'Energy Select SPDR ETF',     cat:'Energy',         usdCorr:-0.4},
-    {sym:'OIH', name:'Oil Services',  full:'VanEck Oil Services ETF',    cat:'Energy',         usdCorr:-0.35},
-    {sym:'AMLP',name:'Pipelines',     full:'Alerian MLP ETF',            cat:'Energy',         usdCorr:-0.2},
-  ],
-  agriculture: [
-    {sym:'WEAT',name:'Wheat',         full:'Teucrium Wheat Fund',        cat:'Agriculture',    usdCorr:-0.4},
-    {sym:'CORN',name:'Corn',          full:'Teucrium Corn Fund',         cat:'Agriculture',    usdCorr:-0.35},
-    {sym:'SOYB',name:'Soybeans',      full:'Teucrium Soybean Fund',      cat:'Agriculture',    usdCorr:-0.35},
-    {sym:'CANE',name:'Sugar',         full:'Teucrium Sugar Fund',        cat:'Agriculture',    usdCorr:-0.3},
-    {sym:'JO',  name:'Coffee',        full:'iPath Coffee ETN',           cat:'Agriculture',    usdCorr:-0.25},
-    {sym:'BAL', name:'Cotton',        full:'iPath Cotton ETN',           cat:'Agriculture',    usdCorr:-0.3},
-    {sym:'MOO', name:'Agribusiness',  full:'VanEck Agribusiness ETF',    cat:'Agriculture',    usdCorr:-0.2},
-  ],
-  industrial: [
-    {sym:'CPER',name:'Copper',        full:'United States Copper Index', cat:'Industrial',     usdCorr:-0.6},
-    {sym:'DBB', name:'Base Metals',   full:'Invesco DB Base Metals',     cat:'Industrial',     usdCorr:-0.55},
-    {sym:'REMX',name:'Rare Earth',    full:'VanEck Rare Earth ETF',      cat:'Industrial',     usdCorr:-0.3},
-    {sym:'LIT', name:'Lithium',       full:'Global X Lithium ETF',       cat:'Industrial',     usdCorr:-0.25},
-    {sym:'SLX', name:'Steel',         full:'VanEck Steel ETF',           cat:'Industrial',     usdCorr:-0.4},
-    {sym:'WOOD',name:'Timber',        full:'iShares Global Timber ETF',  cat:'Industrial',     usdCorr:-0.2},
-  ],
-};
-
-// Key prices for the metric row (direct ETF tickers)
-const CM_KEY = [
-  {sym:'GLD', id:'cm-gold',   label:'Gold'},
-  {sym:'SLV', id:'cm-silver', label:'Silver'},
-  {sym:'USO', id:'cm-oil',    label:'Crude Oil'},
-  {sym:'UNG', id:'cm-gas',    label:'Nat Gas'},
-  {sym:'CPER',id:'cm-copper', label:'Copper'},
-];
-
-// ── Commodity-specific risk parameters ──
-const COMMODITY_RISK = {
-  stopLoss:   0.07,   // 7% — less volatile than crypto, more than stocks
-  takeProfit: 0.15,   // 15% — commodities move slower
-  maxPosition:0.15,   // 15% — can hold larger positions
-  minScore:   65,
-};
-
-// ── USD strength indicator ─────────────
-// Commodities are priced in USD — when USD strengthens, commodities fall
-let USD_TREND = 'neutral'; // 'strong' | 'weak' | 'neutral'
-
-async function fetchUSDTrend() {
-  try {
-    const data = await fetchPrices('UUP', 30); // Invesco DB USD Index Bullish Fund
-    if (!data) return 'neutral';
-    const c = data.closes;
-    const e20 = calcEMA(c, 20);
-    const price = c[c.length-1];
-    const v20 = e20[e20.length-1];
-    const chg = ((price - c[0]) / c[0]) * 100;
-    if (price > v20 && chg > 1) return 'strong';
-    if (price < v20 && chg < -1) return 'weak';
-    return 'neutral';
-  } catch(e) { return 'neutral'; }
-}
-
-// ── Commodity scoring ─────────────────
-function commodityScore(data, usdTrend, usdCorr) {
-  const closes = data.closes;
-  const price  = closes[closes.length-1];
-  const e50    = calcEMA(closes, 50);
-  const e200   = calcEMA(closes, 200);
-  const rsi    = calcRSI(closes);
-  const macd   = calcMACD(closes);
-  const bb     = calcBB(closes);
-  const avgVol = data.vols.slice(-20).reduce((a,b)=>a+b,0)/20;
-  const lastVol= data.vols[data.vols.length-1];
-  const v50    = e50[e50.length-1];
-  const v200   = e200[e200.length-1];
-  let score = 0;
-  const breakdown = {};
-
-  // ── 1. USD Correlation (25% weight) ───────────────
-  // Most commodities are negatively correlated with USD
-  // Weak USD = commodity bull market
-  let usdScore = 0;
-  if (usdTrend === 'weak')    usdScore = usdCorr < -0.5 ? 25 : 18;
-  else if (usdTrend === 'neutral') usdScore = 12;
-  else if (usdTrend === 'strong')  usdScore = usdCorr < -0.7 ? 2 : 6;
-  score += usdScore;
-  breakdown.usd = usdScore;
-
-  // ── 2. EMA Trend (25% weight) ─────────────────────
-  // Commodities trend for weeks/months — EMA alignment is key
-  let emaScore = 0;
-  if (v50 && v200) {
-    if (price > v50 && v50 > v200)        emaScore = 25; // perfect uptrend
-    else if (price > v50 && v50 < v200)   emaScore = 15; // recovering
-    else if (price < v50 && v50 > v200)   emaScore = 10; // pullback in uptrend
-    else if (price < v50 && v50 < v200)   emaScore = 3;  // downtrend
-  }
-  score += emaScore;
-  breakdown.ema = emaScore;
-
-  // ── 3. RSI Momentum (20% weight) ──────────────────
-  // Commodities: RSI 40-65 = accumulation zone
-  // Unlike stocks/crypto — don't chase overbought commodities
-  let rsiScore = 0;
-  if (rsi) {
-    if (rsi >= 45 && rsi <= 65)      rsiScore = 20; // sweet spot
-    else if (rsi >= 35 && rsi < 45)  rsiScore = 14; // recovering
-    else if (rsi > 65 && rsi <= 75)  rsiScore = 10; // getting extended
-    else if (rsi > 75)               rsiScore = 3;  // overbought — avoid
-    else if (rsi < 35)               rsiScore = 12; // oversold bounce
-  }
-  score += rsiScore;
-  breakdown.rsi = rsiScore;
-
-  // ── 4. Volume Confirmation (15% weight) ───────────
-  let volScore = 0;
-  const vRatio = lastVol / (avgVol || 1);
-  if (vRatio > 2)        volScore = 15;
-  else if (vRatio > 1.5) volScore = 10;
-  else if (vRatio > 1.2) volScore = 7;
-  else if (vRatio > 0.8) volScore = 4;
-  score += volScore;
-  breakdown.volume = volScore;
-
-  // ── 5. MACD Momentum (15% weight) ────────────────
-  let macdScore = 0;
-  if (macd.lm > 0 && macd.hist > 0) macdScore = 15;
-  else if (macd.hist > 0)            macdScore = 9;
-  else if (macd.hist < 0)            macdScore = 3;
-  score += macdScore;
-  breakdown.macd = macdScore;
-
-  return { total: Math.min(Math.max(score, 0), 100), breakdown };
-}
-
-// ── Commodity Pattern Detection ────────
-function detectCommodityPatterns(closes, highs, vols) {
-  const patterns = [];
-  const price   = closes[closes.length-1];
-  const e50     = calcEMA(closes, 50);
-  const e200    = calcEMA(closes, 200);
-  const v50     = e50[e50.length-1];
-  const v200    = e200[e200.length-1];
-  const pv50    = e50[e50.length-2];
-  const pv200   = e200[e200.length-2];
-  const avgVol  = vols.slice(-20).reduce((a,b)=>a+b,0)/20;
-  const lastVol = vols[vols.length-1];
-  const high52w = Math.max(...(highs.slice(-252)||highs));
-  const rsi     = calcRSI(closes);
-  const macd    = calcMACD(closes);
-
-  // Golden cross
-  if (v50 && v200 && pv50 && pv200 && v50>v200 && pv50<=pv200)
-    patterns.push({type:'GOLDEN CROSS', color:'var(--purple)'});
-
-  // Perfect uptrend
-  if (v50 && v200 && price>v50 && v50>v200)
-    patterns.push({type:'UPTREND', color:'var(--accent2)'});
-
-  // Breakout near 52w high with volume
-  if (price >= high52w * 0.97 && lastVol > avgVol * 1.3)
-    patterns.push({type:'BREAKOUT', color:'var(--warn)'});
-
-  // Momentum — MACD + RSI aligned
-  if (macd.hist > 0 && macd.lm > 0 && rsi >= 50 && rsi <= 70)
-    patterns.push({type:'MOMENTUM', color:'var(--green)'});
-
-  // Oversold bounce (inflation hedge buy)
-  if (rsi && rsi < 35 && v50 && price < v50 * 0.95)
-    patterns.push({type:'OVERSOLD', color:'var(--purple)'});
-
-  return patterns;
-}
-
-// ── Load key commodity prices ──────────
-async function loadCommodityPrices() {
-  document.getElementById('cmGrid').innerHTML = '<div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 4"><span class="spin"></span> Loading commodity prices...</div>';
-
-  // Load key metric prices
-  for (const cm of CM_KEY) {
-    try {
-      const data = await fetchPrices(cm.sym, 5);
-      if (!data) continue;
-      const price = data.closes[data.closes.length-1];
-      const prev  = data.closes[data.closes.length-2];
-      const chg   = prev ? ((price-prev)/prev*100) : 0;
-      setEl(cm.id, '$'+fn(price,2));
-      setEl(cm.id+'-chg', (chg>=0?'+':'')+fn(chg,2)+'% today');
-      document.getElementById(cm.id).className='mval '+(chg>=0?'up':'down');
-    } catch(e) {}
-  }
-
-  // Load all ETF prices for grid
-  const all = Object.values(COMMODITY_UNIVERSE).flat();
-  const grid = document.getElementById('cmGrid');
-  grid.innerHTML = '';
-  for (const c of all) {
-    try {
-      const data = await fetchPrices(c.sym, 5);
-      if (!data) continue;
-      const price = data.closes[data.closes.length-1];
-      const prev  = data.closes[data.closes.length-2] || price;
-      const chg   = ((price-prev)/prev*100);
-      const bg    = chg>2?'rgba(34,197,94,.12)':chg>0?'rgba(34,197,94,.05)':chg<-2?'rgba(244,63,94,.12)':'rgba(244,63,94,.05)';
-      const col   = chg>=0?'var(--green)':'var(--red)';
-      const catCol= c.cat==='Precious Metal'?'var(--warn)':c.cat==='Energy'?'var(--red)':c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
-      grid.innerHTML += `<div style="background:${bg};border:1px solid var(--border);border-radius:7px;padding:9px;cursor:pointer" onclick="document.getElementById('iSym').value='${c.sym}';nav('ind',null);computeInd()">
-        <div style="font-size:.72rem;font-weight:800;font-family:var(--mono)">${c.sym}</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-top:2px">${c.name}</div>
-        <div style="font-size:.75rem;font-weight:700;margin-top:4px">$${fn(price,2)}</div>
-        <div style="font-size:.63rem;color:${col};margin-top:1px">${chg>=0?'+':''}${fn(chg,2)}%</div>
-        <div style="font-size:.58rem;font-family:var(--mono);color:${catCol};margin-top:3px">${c.cat}</div>
-      </div>`;
-    } catch(e) {}
-  }
-  log('Commodity prices loaded', 'ok');
-}
-
-// ── Main Commodity Scanner ─────────────
-async function runCommodityScan() {
-  const filter = document.getElementById('cm-filter')?.value || 'all';
-  let universe = filter==='all'
-    ? Object.values(COMMODITY_UNIVERSE).flat()
-    : COMMODITY_UNIVERSE[filter] || Object.values(COMMODITY_UNIVERSE).flat();
-
-  document.getElementById('cmScanBtn').textContent = '⏳ Scanning...';
-  document.getElementById('cmScanBtn').disabled = true;
-  document.getElementById('cmProgress').style.display = 'block';
-  document.getElementById('cmBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Fetching USD trend...</td></tr>`;
-
-  // Fetch USD trend first — critical for commodities
-  USD_TREND = await fetchUSDTrend();
-  const usdLabel = USD_TREND==='weak'?'🟢 WEAK (bullish for commodities)':USD_TREND==='strong'?'🔴 STRONG (bearish for commodities)':'🟡 NEUTRAL';
-  log(`USD Trend: ${usdLabel}`, 'ok');
-  document.getElementById('cmBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${universe.length} commodities... USD: ${usdLabel}</td></tr>`;
-
-  const winners = [];
-  let scanned = 0;
-  const total = universe.length;
-
-  for (const c of universe) {
-    try {
-      const data = await fetchPrices(c.sym, 260);
-      if (!data || data.closes.length < 50) { scanned++; continue; }
-
-      const scoreResult = commodityScore(data, USD_TREND, c.usdCorr);
-      const score = scoreResult.total;
-      const patterns = detectCommodityPatterns(data.closes, data.highs, data.vols);
-      const rsi = calcRSI(data.closes);
-
-      const minScore = COMMODITY_RISK.minScore;
-      if (score >= minScore && patterns.length > 0) {
-        winners.push({c, data, score, breakdown: scoreResult.breakdown, patterns, rsi});
-        winners.sort((a,b)=>b.score-a.score);
-        renderCommodityResults(winners.slice(0,20), usdLabel);
-      }
-    } catch(e) {}
-
-    scanned++;
-    const pct = Math.round(scanned/total*100);
-    document.getElementById('cmBar').style.width = pct+'%';
-    document.getElementById('cmCount').textContent = `${scanned} / ${total}`;
-    document.getElementById('cmStatus').textContent = `Scanning ${c.sym}... (${winners.length} found)`;
-    document.getElementById('cmScanned').textContent = scanned;
-    document.getElementById('cmBullish').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='UPTREND'||p.type==='MOMENTUM')).length;
-    document.getElementById('cmBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
-    document.getElementById('cmAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
-  }
-
-  winners.sort((a,b)=>b.score-a.score);
-  const top20 = winners.slice(0,20);
-  renderCommodityResults(top20, usdLabel);
-  renderCommodityReasons(top20.slice(0,4));
-  document.getElementById('cmProgress').style.display = 'none';
-  document.getElementById('cmScanBtn').textContent = '⚡ Scan Commodities';
-  document.getElementById('cmScanBtn').disabled = false;
-  log(`Commodity scan done — ${scanned} scanned, ${top20.length} picks found`, 'ok');
-}
-
-function renderCommodityResults(winners, usdLabel) {
-  if (!winners.length) return;
-  const usdBanner = `<tr><td colspan="12" style="background:${USD_TREND==='weak'?'rgba(34,197,94,.05)':USD_TREND==='strong'?'rgba(244,63,94,.05)':'rgba(245,158,11,.05)'};border-bottom:1px solid var(--border);padding:7px;font-size:.7rem;font-family:var(--mono);color:${USD_TREND==='weak'?'var(--green)':USD_TREND==='strong'?'var(--red)':'var(--warn)'};text-align:center">USD: ${usdLabel} | SL: ${(COMMODITY_RISK.stopLoss*100).toFixed(0)}% | TP: ${(COMMODITY_RISK.takeProfit*100).toFixed(0)}% | Max position: ${(COMMODITY_RISK.maxPosition*100).toFixed(0)}%</td></tr>`;
-
-  document.getElementById('cmBody').innerHTML = usdBanner + winners.map((w,i) => {
-    const price = w.data.closes[w.data.closes.length-1];
-    const prev  = w.data.closes[w.data.closes.length-2] || price;
-    const chg   = ((price-prev)/prev*100);
-    const sl    = fn(price*(1-COMMODITY_RISK.stopLoss),2);
-    const tp    = fn(price*(1+COMMODITY_RISK.takeProfit),2);
-    const catCol= w.c.cat==='Precious Metal'?'var(--warn)':w.c.cat==='Energy'?'var(--red)':w.c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
-    const usdCorrCol = w.c.usdCorr < -0.6 ? 'var(--green)' : w.c.usdCorr < -0.3 ? 'var(--warn)' : 'var(--muted)';
-    const patBadges = w.patterns.map(p=>`<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`).join('');
-    const sig = w.score>=78?'STRONG BUY':w.score>=65?'BUY':'WATCH';
-    const sigCls = w.score>=65?'bdg-buy':'bdg-hold';
-    const bd = w.breakdown||{};
-    const bdTip = `USD:${bd.usd||0} EMA:${bd.ema||0} RSI:${bd.rsi||0} Vol:${bd.volume||0} MACD:${bd.macd||0}`;
-    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
-<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem">${w.c.sym} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
-<td style="font-size:.75rem;color:var(--muted2)">${w.c.name}</td>
-<td><span style="font-size:.62rem;font-family:var(--mono);color:${catCol};padding:1px 5px;border-radius:3px;border:1px solid ${catCol}40">${w.c.cat}</span></td>
-<td style="font-family:var(--mono)">$${fn(price,2)}</td>
-<td title="${bdTip}">
-  <div style="display:flex;align-items:center;gap:5px">
-    <div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${w.score}%;background:var(--green)"></div></div>
-    <span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">${w.score}</span>
-  </div>
-</td>
-<td style="font-family:var(--mono);color:${w.rsi?w.rsi>70?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)'}">${w.rsi?fn(w.rsi,1):'—'}</td>
-<td>${patBadges}</td>
-<td style="font-family:var(--mono);font-size:.68rem;color:${w.breakdown?.ema>=20?'var(--green)':w.breakdown?.ema>=10?'var(--warn)':'var(--red)'}">${w.breakdown?.ema>=20?'UPTREND':w.breakdown?.ema>=10?'RECOVERING':'DOWNTREND'}</td>
-<td style="font-family:var(--mono);font-size:.68rem;color:${usdCorrCol}" title="USD correlation: ${w.c.usdCorr}">${w.c.usdCorr < -0.6?'HIGH -ve':w.c.usdCorr < -0.3?'MED -ve':'LOW'}</td>
-<td><span class="bdg ${sigCls}">${sig}</span></td>
-<td style="display:flex;gap:3px">
-  <button class="btn b-out b-xs" onclick="document.getElementById('iSym').value='${w.c.sym}';nav('ind',null);computeInd()" title="SL:$${sl} TP:$${tp}">Chart ↗</button>
-</td>
-</tr>`;
-  }).join('');
-}
-
-function renderCommodityReasons(winners) {
-  if (!winners.length) return;
-  document.getElementById('cmReasonCard').style.display = 'block';
-  document.getElementById('cmReasons').innerHTML = winners.map(w => {
-    const price = w.data.closes[w.data.closes.length-1];
-    const sl  = fn(price*(1-COMMODITY_RISK.stopLoss),2);
-    const tp  = fn(price*(1+COMMODITY_RISK.takeProfit),2);
-    const pts = [];
-    w.patterns.forEach(p=>{
-      if(p.type==='GOLDEN CROSS') pts.push('Golden cross confirmed — EMA50 crossed above EMA200, strong long-term signal');
-      if(p.type==='UPTREND') pts.push('Price above EMA50 and EMA200 — established uptrend');
-      if(p.type==='BREAKOUT') pts.push('Breaking near 52-week high with volume — potential continuation');
-      if(p.type==='MOMENTUM') pts.push(`RSI ${fn(w.rsi,1)} in momentum zone with positive MACD — buyers in control`);
-      if(p.type==='OVERSOLD') pts.push('Oversold on quality commodity — inflation hedge buy opportunity');
-    });
-    if (USD_TREND==='weak') pts.push(`USD weakening (${USD_TREND}) — tailwind for ${w.c.name} (corr: ${w.c.usdCorr})`);
-    const bd = w.breakdown||{};
-    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
-<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
-<span style="font-size:.9rem;font-weight:700">${w.c.sym}</span>
-<span style="font-size:.75rem;color:var(--muted2)">${w.c.name} — ${w.c.full}</span>
-<span class="bdg bdg-buy">BUY</span>
-<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${w.score}/100</strong></span>
-<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $${fn(price,2)} | SL $${sl} | TP $${tp}</span>
-</div>
-<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:8px">
-${[['USD Corr',bd.usd||0,25],['EMA Trend',bd.ema||0,25],['RSI Zone',bd.rsi||0,20],['Volume',bd.volume||0,15],['MACD',bd.macd||0,15]].map(([n,v,max])=>`
-<div style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center">
-<div style="font-size:.58rem;font-family:var(--mono);color:var(--muted)">${n} (${max}%)</div>
-<div style="font-size:.82rem;font-weight:700;color:${v>=max*0.7?'var(--green)':v>=max*0.4?'var(--warn)':'var(--red)'}">${v}</div>
-</div>`).join('')}
-</div>
-<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.join('. ')||'Commodity momentum signal.'}</div>
-<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${w.score}%;background:var(--green)"></div></div>
-<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">⚠ Commodity risk: SL ${(COMMODITY_RISK.stopLoss*100).toFixed(0)}% | TP ${(COMMODITY_RISK.takeProfit*100).toFixed(0)}% | Max position ${(COMMODITY_RISK.maxPosition*100).toFixed(0)}%</div>
-</div>`;
-  }).join('');
-}
-// ═══════════════════════════════════════
-
-// Broker profiles — detect by key format
-const BROKERS = {
-  t212: {
-    name: 'Trade 212',
-    icon: '📊',
-    detect: k => k.length > 30 && !k.startsWith('PK') && !k.startsWith('SK') && !k.includes('-'),
-    modes: { demo: 'https://demo.trading212.com/api/v0', live: 'https://live.trading212.com/api/v0' },
-    endpoints: {
-      account:   '/equity/account/cash',
-      portfolio: '/equity/portfolio',
-      orders:    '/equity/orders',
-      buy:       '/equity/orders/market',
-      sell:      '/equity/orders/market',
-    },
-    authHeader: k => ({ Authorization: k }),
-    helpText: 'Get your key: Trade 212 app → Settings → API (Beta) → Generate key. Use Demo mode first.',
-  },
-  alpaca: {
-    name: 'Alpaca',
-    icon: '🦙',
-    detect: k => k.startsWith('PK') || k.startsWith('AK') || (k.length === 20 && k === k.toUpperCase()),
-    modes: { demo: 'https://paper-api.alpaca.markets/v2', live: 'https://api.alpaca.markets/v2' },
-    endpoints: {
-      account:   '/account',
-      portfolio: '/positions',
-      orders:    '/orders',
-      buy:       '/orders',
-      sell:      '/orders',
-    },
-    authHeader: (k, secret) => ({ 'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': secret || '' }),
-    helpText: 'Get your key: alpaca.markets → Sign up free → API Keys → Generate. You need both API Key and Secret Key.',
-  },
-  binance: {
-    name: 'Binance',
-    icon: '🟡',
-    detect: k => k.length === 64 && /^[A-Za-z0-9]+$/.test(k),
-    modes: { demo: 'https://testnet.binance.vision/api/v3', live: 'https://api.binance.com/api/v3' },
-    endpoints: {
-      account:   '/account',
-      portfolio: '/openOrders',
-      orders:    '/allOrders',
-    },
-    authHeader: k => ({ 'X-MBX-APIKEY': k }),
-    helpText: 'Get your key: binance.com → Profile → API Management → Create API. Crypto trading only.',
-  },
-  ibkr: {
-    name: 'Interactive Brokers',
-    icon: '🏦',
-    detect: k => k.length > 10 && k.includes('-'),
-    modes: { demo: 'https://localhost:5000/v1/api', live: 'https://localhost:5000/v1/api' },
-    endpoints: { account: '/portfolio/accounts' },
-    authHeader: k => ({ Authorization: `Bearer ${k}` }),
-    helpText: 'IBKR requires TWS or Client Portal running locally. Complex setup — recommended for advanced users.',
-  },
-};
-
-function detectBroker(apiKey) {
-  if (!apiKey || apiKey.length < 5) return null;
-  for (const [id, broker] of Object.entries(BROKERS)) {
-    if (broker.detect(apiKey)) return { id, ...broker };
-  }
-  return null;
-}
-
-function autoDetectBroker(key) {
-  const broker = detectBroker(key);
-  const box = document.getElementById('brokerDetected');
-  const nameEl = document.getElementById('brokerName');
-  const modeEl = document.getElementById('brokerMode');
-  const iconEl = document.getElementById('brokerIcon');
-  if (broker) {
-    box.style.display = 'block';
-    nameEl.textContent = broker.name;
-    iconEl.textContent = broker.icon;
-    modeEl.textContent = `(${broker.id === 'alpaca' ? 'Paper + Live' : 'Demo + Live'})`;
-    box.style.borderColor = 'rgba(0,200,150,0.3)';
-    nameEl.style.color = 'var(--accent)';
-    S.detectedBroker = broker.id;
-  } else {
-    box.style.display = key.length > 3 ? 'block' : 'none';
-    if (key.length > 3) {
-      nameEl.textContent = 'Unknown — will try Trade 212';
-      iconEl.textContent = '❓';
-      modeEl.textContent = '';
-      S.detectedBroker = 't212';
-    }
-  }
-}
-
-function showBrokerHelp(id) {
-  const broker = BROKERS[id];
-  const el = document.getElementById('brokerHelp');
-  el.style.display = 'block';
-  el.textContent = `${broker.icon} ${broker.name}: ${broker.helpText}`;
-}
-
-// ── Multi-broker API call ──────────────
-async function brokerCall(path, method='GET', body=null) {
-  const broker = BROKERS[S.broker] || BROKERS.t212;
-  const mode = S.mode || 'demo';
-  const baseUrl = broker.modes[mode];
-  const url = baseUrl + path;
-  const headers = { 'Content-Type': 'application/json', ...broker.authHeader(S.apiKey, S.secretKey) };
-  try {
-    const opts = { method, headers };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
-    const txt = await res.text();
-    if (!res.ok) { log(`${broker.name} ${res.status}: ${txt.slice(0,100)}`, 'err'); return null; }
-    return txt ? JSON.parse(txt) : {};
-  } catch(e) { log(`${broker.name} error: ${e.message}`, 'err'); return null; }
-}
 const BASE = {
   demo: 'https://demo.trading212.com/api/v0',
   live: 'https://live.trading212.com/api/v0',
@@ -1884,119 +974,32 @@ function renderOrders(){
 // ── PLACE ORDER ──────────────────────────
 async function placeTrade(ticker, dir, qty, reason='Auto', limitPrice=null){
   if(!S.apiKey){ log('No API key','err'); return null; }
-
-  // For German market (XETRA) — append _EQ suffix if needed
-  const t212Ticker = formatTicker(ticker);
-
   const ep = dir==='BUY'
     ? (limitPrice ? '/equity/orders/limit' : '/equity/orders/market')
     : '/equity/orders/market';
-  const body = { ticker: t212Ticker, quantity:qty, timeValidity:'DAY' };
+  const body = { ticker, quantity:qty, timeValidity:'DAY' };
   if(limitPrice) body.limitPrice = limitPrice;
-  log(`Placing ${dir} ${t212Ticker} ×${qty} [${S.mode.toUpperCase()}]`,'ok');
+  log(`Placing ${dir} ${ticker} ×${qty} [${S.mode.toUpperCase()}]`,'ok');
   const res = await t212(ep,'POST',body);
-
   if(res){
     S.todayTrades++;
     const order = {
-      id: res.id ?? Date.now(),
-      ticker: t212Ticker,
-      originalTicker: ticker,
-      type:`MARKET_${dir}`,
-      quantity: qty,
+      ticker, type:`MARKET_${dir}`, quantity:qty,
       filledPrice: res.filledPrice ?? limitPrice ?? 0,
-      limitPrice: limitPrice,
-      status: res.status ?? (S.mode==='demo' ? 'FILLED' : 'PENDING'),
+      status: res.status ?? 'FILLED',
       dateCreated: new Date().toISOString(),
       _reason: reason,
-      _exchange: detectExchange(ticker),
     };
     S.orders.unshift(order);
-
-    // Persist orders to localStorage so they survive page refresh
-    persistOrders();
     renderOrders();
+    log(`${dir} ${ticker} ×${qty} — ${res.status??'submitted'}`,'ok');
+    if(dir==='BUY' && res.filledPrice) setStopLoss(ticker, qty, res.filledPrice*(1-getSL()/100));
+    addRecent({ticker,dir,qty,price:res.filledPrice??0,status:res.status??'FILLED',reason});
     deriveStats();
-
-    log(`${dir} ${t212Ticker} ×${qty} — Status: ${order.status} | Reason: ${reason}`,'ok');
-
-    // Set stop loss after buy
-    if(dir==='BUY'){
-      const slPrice = (order.filledPrice || limitPrice || 0) * (1 - getSL()/100);
-      if(slPrice > 0) await setStopLoss(t212Ticker, qty, slPrice);
-    }
-
-    addRecent({ticker:t212Ticker, dir, qty, price:order.filledPrice, status:order.status, reason});
     return res;
   }
   return null;
 }
-
-// ── Format ticker for T212 (German = XETRA suffix) ──
-function formatTicker(sym) {
-  const clean = sym.replace(/_US_EQ|_EQ|_GY|_GR/gi,'').toUpperCase();
-  // German stocks need _GY suffix for XETRA in T212
-  const germanStocks = Object.values(GERMAN_STOCKS||{}).flat().map(s=>s.sym);
-  if(germanStocks.includes(clean)) return clean+'_GY';
-  return clean;
-}
-
-function detectExchange(sym) {
-  if(sym.includes('_GY')||sym.includes('_GR')) return 'XETRA';
-  if(sym.includes('_US')) return 'NYSE/NASDAQ';
-  return 'AUTO';
-}
-
-// ── Persist orders to localStorage ────
-function persistOrders() {
-  try {
-    // Keep last 200 orders
-    const toSave = S.orders.slice(0,200).map(o => ({...o, data:undefined}));
-    localStorage.setItem('pendingOrders', JSON.stringify(toSave));
-  } catch(e) {}
-}
-
-function loadPersistedOrders() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('pendingOrders')||'[]');
-    if(saved.length) {
-      // Merge with any loaded from API — avoid duplicates
-      const existingIds = new Set(S.orders.map(o=>o.id||o.ticker+o.dateCreated));
-      saved.forEach(o => {
-        if(!existingIds.has(o.id||o.ticker+o.dateCreated)) S.orders.push(o);
-      });
-      S.orders.sort((a,b)=>new Date(b.dateCreated)-new Date(a.dateCreated));
-      renderOrders();
-      log(`Loaded ${saved.length} persisted orders from storage`,'ok');
-    }
-  } catch(e) {}
-}
-
-// ── AUTO TRADE (called from Execute button) ──
-function autoTrade(sym, price, macdSig, emaSig, rsiVal, exchange='US') {
-  const freeCash = S.account?.cash?.freeForStocks ?? 2000;
-  const pctSize  = parseInt(document.getElementById('psR')?.value||20)/100;
-  const budget   = freeCash * pctSize;
-  const qty      = Math.max(1, Math.floor(budget / price));
-  const sl       = fmtCur(price * (1-getSL()/100));
-  const tp       = fmtCur(price * (1+getTP()/100));
-  const exLabel  = exchange==='DE' ? '🇩🇪 XETRA' : '🇺🇸 US';
-  const reason   = `Score signal: RSI ${rsiVal} | MACD ${macdSig} | EMA ${emaSig}`;
-  const t212sym  = exchange==='DE' ? sym+'_GY' : sym;
-
-  confirm2(
-    `BUY ${qty} × ${sym}\n\nExchange: ${exLabel}\nT212 Ticker: ${t212sym}\nPrice: ~${fmtCur(price)}\nBudget: ${fmtCur(budget)}\n\nStop Loss: ${sl}\nTake Profit: ${tp}\n\nSignal: ${reason}\n\n⚠ Order placed as LIMIT order valid for TODAY.\nIf market is closed, it queues for next open.`,
-    'Confirm Trade',
-    () => {
-      // Place as limit order slightly below ask for better fill
-      const limitPrice = parseFloat((price * 0.999).toFixed(2));
-      placeTrade(t212sym, 'BUY', qty, reason, limitPrice);
-      // Remove from scan winners so it's not shown again
-      S.scanWinners = (S.scanWinners||[]).filter(w => w.s !== sym);
-    }
-  );
-}
-
 
 async function setStopLoss(ticker,qty,price){
   const res = await t212('/equity/orders/stop','POST',{ticker,quantity:qty,stopPrice:+price.toFixed(2),timeValidity:'GTC'});
@@ -2072,69 +1075,27 @@ function sLabel(s){if(s>=80)return{l:'STRONG BUY',col:'var(--green)'};if(s>=70)r
 //  PRICE DATA
 // ═══════════════════════════════════════
 async function fetchPrices(ticker, days=60){
-  const yt = ticker.replace(/_US_EQ|_EQ|_UK_EQ/g,'');
-  const to = Math.floor(Date.now()/1000);
-  const from = to - days * 86400;
-
-  // Try primary Yahoo Finance proxy
-  const sources = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`)}`,
-  ];
-
-  for (const src of sources) {
-    try {
-      const r = await fetch(src, {signal: AbortSignal.timeout(8000)});
-      const d = await r.json();
-      const q = d?.chart?.result?.[0];
-      if (!q) continue;
-
-      const raw = q.indicators.quote[0];
-      const timestamps = q.timestamp;
-      if (!timestamps || !raw.close) continue;
-
-      // Filter out null values
-      const idx = raw.close.map((v,i) => v != null && v > 0 ? i : -1).filter(i => i >= 0);
-      if (idx.length < 20) continue;
-
-      const closes = idx.map(i => raw.close[i]);
-      const highs  = idx.map(i => raw.high[i] ?? raw.close[i]);
-      const lows   = idx.map(i => raw.low[i] ?? raw.close[i]);
-      const vols   = idx.map(i => raw.volume[i] ?? 0);
-      const times  = idx.map(i => new Date(timestamps[i]*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
-
-      // ── VALIDATE: check last price is recent (within 5 trading days) ──
-      const lastTs = timestamps[idx[idx.length-1]];
-      const daysSinceLastPrice = (Date.now()/1000 - lastTs) / 86400;
-      if (daysSinceLastPrice > 7) {
-        log(`${yt}: stale data (${Math.round(daysSinceLastPrice)}d old) — skipping`, 'warn');
-        continue;
-      }
-
-      // ── VALIDATE: price sanity check (not zero, not absurdly high) ──
-      const lastPrice = closes[closes.length-1];
-      if (lastPrice <= 0 || lastPrice > 100000) {
-        log(`${yt}: invalid price $${lastPrice} — skipping`, 'warn');
-        continue;
-      }
-
-      // ── VALIDATE: price consistency (no sudden 50%+ jumps = bad data) ──
-      const prev = closes[closes.length-2];
-      if (prev && Math.abs(lastPrice - prev) / prev > 0.5) {
-        log(`${yt}: suspicious price jump — skipping`, 'warn');
-        continue;
-      }
-
-      log(`Prices OK: ${yt} — $${lastPrice.toFixed(2)}, ${closes.length} candles`, 'info');
-      return { closes, highs, lows, vols, times };
-
-    } catch(e) { /* try next source */ }
-  }
-
-  // All sources failed — do NOT use simulated data for scanner
-  // Simulated prices caused the fake $359 bug
-  log(`${yt}: real price unavailable — skipping`, 'warn');
-  return null; // return null so scanner skips this stock
+  const yt=ticker.replace(/_US_EQ|_EQ|_UK_EQ/g,'');
+  const to=Math.floor(Date.now()/1000),from=to-days*86400;
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`;
+  try{
+    const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+    const d=await r.json();
+    const q=d?.chart?.result?.[0];
+    if(q){
+      const raw=q.indicators.quote[0];
+      const idx=raw.close.map((v,i)=>v!=null?i:-1).filter(i=>i>=0);
+      const closes=idx.map(i=>raw.close[i]);
+      const highs=idx.map(i=>raw.high[i]);
+      const lows=idx.map(i=>raw.low[i]);
+      const vols=idx.map(i=>raw.volume[i]??0);
+      const times=idx.map(i=>new Date(q.timestamp[i]*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
+      log(`Prices: ${yt} — ${closes.length} candles`,'info');
+      return{closes,highs,lows,vols,times};
+    }
+  }catch(e){}
+  log(`Simulated prices for ${yt}`,'warn');
+  return mockPrices(days);
 }
 function mockPrices(days,base=null){
   let p=base||(130+Math.random()*200);
@@ -2151,164 +1112,12 @@ function mockPrices(days,base=null){
 
 // ═══════════════════════════════════════
 //  FULL MARKET SCANNER
-//  Dynamically fetches S&P500 + NASDAQ100
-//  + Russell 2000 from free APIs
-//  Scans 2000+ stocks, returns top 20
+//  Scans 200+ large/mid/small cap stocks
+//  Filters for momentum, uptrend, breakout
+//  Returns top 20 sure-shot winners only
 // ═══════════════════════════════════════
 
-// ── German stocks (XETRA) ─────────────
-const GERMAN_STOCKS = {
-  dax: [
-    {sym:'SAP',   name:'SAP SE',              cap:'Large', ex:'DE'},
-    {sym:'SIE',   name:'Siemens',             cap:'Large', ex:'DE'},
-    {sym:'ALV',   name:'Allianz',             cap:'Large', ex:'DE'},
-    {sym:'MUV2',  name:'Munich Re',           cap:'Large', ex:'DE'},
-    {sym:'DTE',   name:'Deutsche Telekom',    cap:'Large', ex:'DE'},
-    {sym:'BAYN',  name:'Bayer',               cap:'Large', ex:'DE'},
-    {sym:'BMW',   name:'BMW',                 cap:'Large', ex:'DE'},
-    {sym:'MBG',   name:'Mercedes-Benz',       cap:'Large', ex:'DE'},
-    {sym:'VOW3',  name:'Volkswagen',          cap:'Large', ex:'DE'},
-    {sym:'BAS',   name:'BASF',               cap:'Large', ex:'DE'},
-    {sym:'ADS',   name:'Adidas',             cap:'Large', ex:'DE'},
-    {sym:'DBK',   name:'Deutsche Bank',       cap:'Large', ex:'DE'},
-    {sym:'RWE',   name:'RWE',                cap:'Large', ex:'DE'},
-    {sym:'ENR',   name:'Siemens Energy',      cap:'Large', ex:'DE'},
-    {sym:'EOAN',  name:'E.ON',               cap:'Large', ex:'DE'},
-    {sym:'HEN3',  name:'Henkel',             cap:'Large', ex:'DE'},
-    {sym:'MRK',   name:'Merck KGaA',         cap:'Large', ex:'DE'},
-    {sym:'QGEN',  name:'Qiagen',             cap:'Large', ex:'DE'},
-    {sym:'DPW',   name:'Deutsche Post',       cap:'Large', ex:'DE'},
-    {sym:'HAG',   name:'Henkel pref.',        cap:'Large', ex:'DE'},
-    {sym:'FRE',   name:'Fresenius',          cap:'Large', ex:'DE'},
-    {sym:'CON',   name:'Continental',        cap:'Large', ex:'DE'},
-    {sym:'ZAL',   name:'Zalando',            cap:'Large', ex:'DE'},
-    {sym:'AIR',   name:'Airbus',             cap:'Large', ex:'DE'},
-    {sym:'BEI',   name:'Beiersdorf',         cap:'Large', ex:'DE'},
-    {sym:'MTX',   name:'MTU Aero Engines',   cap:'Large', ex:'DE'},
-    {sym:'SHL',   name:'Siemens Healthineers',cap:'Large',ex:'DE'},
-    {sym:'VNA',   name:'Vonovia',            cap:'Large', ex:'DE'},
-    {sym:'DHL',   name:'DHL Group',          cap:'Large', ex:'DE'},
-    {sym:'DHER',  name:'Delivery Hero',      cap:'Large', ex:'DE'},
-  ],
-  mdax: [
-    {sym:'AFX',   name:'Carl Zeiss Meditec', cap:'Mid', ex:'DE'},
-    {sym:'AIXA',  name:'Aixtron',            cap:'Mid', ex:'DE'},
-    {sym:'AR4',   name:'Aareal Bank',        cap:'Mid', ex:'DE'},
-    {sym:'BOSS',  name:'Hugo Boss',          cap:'Mid', ex:'DE'},
-    {sym:'Ceconomic',name:'Covestro',         cap:'Mid', ex:'DE'},
-    {sym:'CWC',   name:'Claas',              cap:'Mid', ex:'DE'},
-    {sym:'EVD',   name:'CTS Eventim',        cap:'Mid', ex:'DE'},
-    {sym:'FME',   name:'Fresenius Med',      cap:'Mid', ex:'DE'},
-    {sym:'GXI',   name:'Gerresheimer',       cap:'Mid', ex:'DE'},
-    {sym:'HAB',   name:'Hamborner REIT',     cap:'Mid', ex:'DE'},
-    {sym:'HFG',   name:'HelloFresh',         cap:'Mid', ex:'DE'},
-    {sym:'HOT',   name:'Hochtief',           cap:'Mid', ex:'DE'},
-    {sym:'KGX',   name:'Kion Group',         cap:'Mid', ex:'DE'},
-    {sym:'LEG',   name:'LEG Immobilien',     cap:'Mid', ex:'DE'},
-    {sym:'LXS',   name:'Lanxess',            cap:'Mid', ex:'DE'},
-    {sym:'NDX1',  name:'Nordex',             cap:'Mid', ex:'DE'},
-    {sym:'PSM',   name:'ProSiebenSat.1',     cap:'Mid', ex:'DE'},
-    {sym:'PUM',   name:'Puma',              cap:'Mid', ex:'DE'},
-    {sym:'RHM',   name:'Rheinmetall',        cap:'Mid', ex:'DE'},
-    {sym:'SDAX',  name:'Scout24',            cap:'Mid', ex:'DE'},
-    {sym:'SDF',   name:'K+S',               cap:'Mid', ex:'DE'},
-    {sym:'SFQ',   name:'SAF-Holland',        cap:'Mid', ex:'DE'},
-    {sym:'SY1',   name:'Symrise',            cap:'Mid', ex:'DE'},
-    {sym:'TUI1',  name:'TUI',               cap:'Mid', ex:'DE'},
-    {sym:'WAF',   name:'Siltronic',          cap:'Mid', ex:'DE'},
-    {sym:'WDI',   name:'Wirecard (legacy)',  cap:'Mid', ex:'DE'},
-  ],
-  sdax: [
-    {sym:'3V64',  name:'Varta',              cap:'Small', ex:'DE'},
-    {sym:'DKAM',  name:'Dermapharm',         cap:'Small', ex:'DE'},
-    {sym:'DRW8',  name:'Deutsche Wohnen',    cap:'Small', ex:'DE'},
-    {sym:'FNTN',  name:'freenet',            cap:'Small', ex:'DE'},
-    {sym:'GBF',   name:'Bilfinger',          cap:'Small', ex:'DE'},
-    {sym:'HAWE',  name:'HAWE Hydraulik',     cap:'Small', ex:'DE'},
-    {sym:'HPBK',  name:'Hypoport',           cap:'Small', ex:'DE'},
-    {sym:'IFX',   name:'Infineon',           cap:'Small', ex:'DE'},
-    {sym:'INH',   name:'Innogy',             cap:'Small', ex:'DE'},
-    {sym:'MWNG',  name:'Medion',             cap:'Small', ex:'DE'},
-    {sym:'O2D',   name:'Telefónica DE',      cap:'Small', ex:'DE'},
-    {sym:'PNE3',  name:'PNE Wind',           cap:'Small', ex:'DE'},
-    {sym:'RRTL',  name:'RTL Group',          cap:'Small', ex:'DE'},
-    {sym:'SKB',   name:'SKW Metallurgie',    cap:'Small', ex:'DE'},
-    {sym:'SZG',   name:'Salzgitter',         cap:'Small', ex:'DE'},
-    {sym:'TNET',  name:'Telenet',            cap:'Small', ex:'DE'},
-    {sym:'TOI',   name:'Tonies',             cap:'Small', ex:'DE'},
-    {sym:'TRK2',  name:'Takkt',              cap:'Small', ex:'DE'},
-    {sym:'VBK',   name:'Verbio',             cap:'Small', ex:'DE'},
-    {sym:'WUW',   name:'Wüstenrot',          cap:'Small', ex:'DE'},
-  ],
-};
-
-// ── Build full universe including German stocks ──
-async function fetchStockUniverse() {
-  if (_cachedUniverse) return _cachedUniverse;
-  log('Fetching stock universe...', 'info');
-  let all = [];
-
-  // German stocks first (our primary exchange)
-  Object.values(GERMAN_STOCKS).flat().forEach(s => {
-    all.push({s: s.sym, cap: s.cap, name: s.name, ex: 'DE'});
-  });
-  log(`German stocks (XETRA): ${all.length} loaded`, 'ok');
-
-  // Try fetching S&P 500 from Wikipedia
-  try {
-    const url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies';
-    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
-    const html = await res.text();
-    const matches = [...html.matchAll(/<td><a[^>]+>([A-Z]{1,5})<\/a><\/td>/g)];
-    const sp500 = [...new Set(matches.map(m=>m[1]).filter(s=>s.length>=1&&s.length<=5))];
-    sp500.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s, cap:'Large', ex:'US'}); });
-    log(`S&P 500: ${sp500.length} US stocks added`, 'ok');
-  } catch(e) {
-    log('S&P 500 fetch failed — using fallback', 'warn');
-    LARGE_CAP.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s, cap:'Large', ex:'US'}); });
-  }
-
-  MID_CAP.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s, cap:'Mid', ex:'US'}); });
-  SMALL_CAP.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s, cap:'Small', ex:'US'}); });
-
-  // Deduplicate
-  const seen = new Set();
-  all = all.filter(x => { if(seen.has(x.s)) return false; seen.add(x.s); return true; });
-  log(`Total universe: ${all.length} stocks (German + US)`, 'ok');
-  _cachedUniverse = all;
-  return all;
-}
-
-// ── Cumulative scan state ──────────────
-// Keeps winners across multiple scans
-// Each scan checks NEW stocks, adds to the global list
-// Always shows top 3 picks
-S.scanWinners  = JSON.parse(localStorage.getItem('scanWinners')||'[]');
-S.scannedSyms  = new Set(JSON.parse(localStorage.getItem('scannedSyms')||'[]'));
-
-function persistScanState() {
-  try {
-    // Only persist serialisable parts
-    const toSave = S.scanWinners.slice(0,50).map(w=>({
-      s:w.s, cap:w.cap, price:w.price, score:w.score,
-      rsiV:w.rsiV, ex:w.ex||'US', name:w.name||w.s,
-      patterns:w.patterns, lbl:w.lbl,
-      ts: w.ts || Date.now(),
-    }));
-    localStorage.setItem('scanWinners', JSON.stringify(toSave));
-    localStorage.setItem('scannedSyms', JSON.stringify([...S.scannedSyms].slice(0,1000)));
-  } catch(e) {}
-}
-
-function clearScanState() {
-  S.scanWinners = [];
-  S.scannedSyms = new Set();
-  localStorage.removeItem('scanWinners');
-  localStorage.removeItem('scannedSyms');
-  log('Scan history cleared — full rescan on next run', 'ok');
-}
-
-// ── Fallback hardcoded universe ────────
+// ── Universe of stocks by cap ──────────
 // ── Stock Name Lookup ──────────────────
 const STOCK_NAMES = {
   // Mega cap tech
@@ -2571,204 +1380,96 @@ async function runMarketScan() {
   const capFilter     = document.getElementById('capFilter')?.value || 'all';
   const patternFilter = document.getElementById('patternFilter')?.value || 'all';
 
-  // ── CUMULATIVE SCAN ──
-  // Skip already-scanned symbols, add new winners to global list
-  // This way each scan explores NEW territory
-  const isFirstScan = S.scannedSyms.size === 0;
+  // Build universe based on cap filter
+  let universe = [];
+  if (capFilter === 'all' || capFilter === 'large') universe.push(...LARGE_CAP.map(s=>({s,cap:'Large'})));
+  if (capFilter === 'all' || capFilter === 'mid')   universe.push(...MID_CAP.map(s=>({s,cap:'Mid'})));
+  if (capFilter === 'all' || capFilter === 'small') universe.push(...SMALL_CAP.map(s=>({s,cap:'Small'})));
 
-  document.getElementById('scanBtn').textContent = '⏳ Loading universe...';
+  // Shuffle for variety
+  universe = universe.sort(() => Math.random() - 0.5);
+
+  const total = universe.length;
+  let scanned = 0;
+  const winners = [];
+
+  // UI
+  document.getElementById('scanBtn').textContent = '⏳ Scanning...';
   document.getElementById('scanBtn').disabled = true;
   document.getElementById('scanProgress').style.display = 'block';
   document.getElementById('scanStats').style.display = 'grid';
+  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${total} stocks for momentum, uptrend & breakout patterns...</td></tr>`;
 
-  const prevCount = S.scanWinners.length;
-  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> ${isFirstScan ? 'Starting fresh scan...' : `Continuing scan — ${S.scanWinners.length} winners found so far, scanning new stocks...`}</td></tr>`;
-
-  // Fetch full universe (includes German + US stocks)
-  let universe = await fetchStockUniverse();
-
-  // Apply cap filter
-  if (capFilter !== 'all') universe = universe.filter(x => x.cap?.toLowerCase() === capFilter);
-
-  // ── SKIP ALREADY SCANNED SYMBOLS ──
-  // Only scan stocks we haven't checked yet
-  const newStocks = universe.filter(x => !S.scannedSyms.has(x.s));
-  const toScan    = [...newStocks].sort(() => Math.random() - 0.5);
-
-  if (toScan.length === 0) {
-    log('All stocks already scanned — clearing history for fresh scan', 'warn');
-    clearScanState();
-    document.getElementById('scanBtn').textContent = '⚡ Scan Market';
-    document.getElementById('scanBtn').disabled = false;
-    runMarketScan(); // restart with clean state
-    return;
-  }
-
-  log(`Scanning ${toScan.length} new stocks (${S.scannedSyms.size} already checked)`, 'ok');
-  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${toScan.length} new stocks (skipping ${S.scannedSyms.size} already analysed)...</td></tr>`;
-
-  const total = toScan.length;
-  let scanned = 0;
-
-  for (const stock of toScan) {
-    const {s, cap, ex} = stock;
-    S.scannedSyms.add(s); // mark as scanned immediately
-
+  for (const {s, cap} of universe) {
     try {
-      // For German stocks use Yahoo Finance with .DE suffix
-      const yfSym = ex==='DE' ? s+'.DE' : s;
-      const data = await fetchPrices(yfSym, 260);
-      if (!data) { scanned++; continue; }
+      const data = await fetchPrices(s, 260); // 1 year of data
       const c = data.closes;
-      if (c.length < 60) { scanned++; continue; }
+      if (c.length < 60) { scanned++; continue; } // skip if not enough data
 
-      const price    = c[c.length-1];
+      const price = c[c.length - 1];
       const patterns = detectPatterns(c, data.highs, data.lows, data.vols);
-      const score    = momentumScore(c, data.highs, data.lows, data.vols);
-      const rsiV     = calcRSI(c);
-      const macdV    = calcMACD(c);
+      const score = momentumScore(c, data.highs, data.lows, data.vols);
+      const rsiV = calcRSI(c);
+      const macdV = calcMACD(c);
 
-      if (patterns.length === 0 || score < 72 || (rsiV && rsiV > 80)) { scanned++; continue; }
-      if (patternFilter !== 'all' && !patterns.some(p=>p.type.toLowerCase().includes(patternFilter))) { scanned++; continue; }
+      // ── FILTER: must have at least one pattern ──
+      if (patterns.length === 0) { scanned++; continue; }
 
-      // Add to cumulative winners list
-      // Remove duplicate if this stock was found in a previous scan
-      S.scanWinners = S.scanWinners.filter(w => w.s !== s);
-      S.scanWinners.push({
-        s, cap, ex: ex||'US',
-        name: stock.name || getStockName(s),
-        price, patterns, score, rsiV, macdV,
-        lbl: sLabel(score),
-        ts: Date.now(),
-      });
+      // ── FILTER: pattern type filter ──
+      if (patternFilter !== 'all') {
+        const hasPattern = patterns.some(p => p.type.toLowerCase().includes(patternFilter));
+        if (!hasPattern) { scanned++; continue; }
+      }
 
-      // Real-time render of cumulative top 20
-      S.scanWinners.sort((a,b) => b.score - a.score);
-      renderScanResults(S.scanWinners.slice(0, 20));
+      // ── FILTER: minimum score 72 to be a "sure-shot" ──
+      if (score < 72) { scanned++; continue; }
 
-    } catch(e) { /* skip failed */ }
+      // ── FILTER: RSI not overbought (< 80) ──
+      if (rsiV && rsiV > 80) { scanned++; continue; }
+
+      winners.push({ s, cap, price, patterns, score, rsiV, macdV });
+    } catch(e) { /* skip failed fetches */ }
 
     scanned++;
-    S.scannedSyms.add(s);
 
-    const pct = Math.round(scanned/total*100);
-    document.getElementById('scanBar').style.width = pct+'%';
+    // Update progress
+    const pct = Math.round(scanned / total * 100);
+    document.getElementById('scanBar').style.width = pct + '%';
     document.getElementById('scanCount').textContent = `${scanned} / ${total}`;
-    document.getElementById('scanStatus').textContent = `Scanning ${ex==='DE'?'🇩🇪':'🇺🇸'} ${s}... (${S.scanWinners.length} total winners)`;
-    document.getElementById('stScanned').textContent = S.scannedSyms.size;
-    document.getElementById('stWinners').textContent = Math.min(S.scanWinners.length, 20);
-    document.getElementById('stBreakouts').textContent = S.scanWinners.filter(w=>w.patterns?.some(p=>p.type==='BREAKOUT')).length;
-    document.getElementById('stAvg').textContent = S.scanWinners.length ? Math.round(S.scanWinners.reduce((a,b)=>a+b.score,0)/S.scanWinners.length) : 0;
+    document.getElementById('scanStatus').textContent = `Scanning ${s}...`;
+    document.getElementById('stScanned').textContent = scanned;
+    document.getElementById('stWinners').textContent = winners.length;
+    document.getElementById('stBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
+    document.getElementById('stAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
 
-    if (S.scanWinners.length >= 60) break;
+    // Stop once we have enough candidates (speed optimisation)
+    if (winners.length >= 60) break;
   }
 
-  // Persist cumulative state for next scan
-  persistScanState();
+  // Sort by score, take top 20
+  winners.sort((a,b) => b.score - a.score);
+  const top20 = winners.slice(0, 20);
 
-  // Final render — top 20, highlight top 3
-  S.scanWinners.sort((a,b) => b.score - a.score);
-  const top20 = S.scanWinners.slice(0, 20);
-  const top3  = S.scanWinners.slice(0, 3);
-
+  // Render
   document.getElementById('scanProgress').style.display = 'none';
-  document.getElementById('scanBtn').textContent = '⚡ Scan More';
+  document.getElementById('scanBtn').textContent = '⚡ Scan Market';
   document.getElementById('scanBtn').disabled = false;
-  document.getElementById('stScanned').textContent = S.scannedSyms.size;
+  document.getElementById('stScanned').textContent = scanned;
   document.getElementById('stWinners').textContent = top20.length;
 
   if (!top20.length) {
-    document.getElementById('sigBody').innerHTML = '<tr><td class="te" colspan="12">No winners found yet — click Scan More to continue scanning</td></tr>';
+    document.getElementById('sigBody').innerHTML = '<tr><td class="te" colspan="12">No sure-shot winners found — try changing cap or pattern filter</td></tr>';
     return;
   }
 
-  renderScanResults(top20);
-  renderMarketReasons(top3); // Show only top 3 in reasons
-  log(`Scan batch done — ${scanned} new stocks checked | Total scanned: ${S.scannedSyms.size} | Winners: ${top20.length} | 🏆 Top 3: ${top3.map(w=>w.s).join(', ')}`, 'ok');
-
-  // Show top 3 banner
-  if (top3.length) {
-    const banner = top3.map((w,i)=>`${['🏆','🥈','🥉'][i]} ${w.s} (${w.score})`).join(' · ');
-    log(`TOP 3 PICKS: ${banner}`, 'ok');
-  }
-}
-
-// ── Filter scan results by exchange ───
-function filterByExchange() {
-  if (!S.scanWinners.length) return;
-  const exFilter = document.getElementById('exchangeFilter')?.value || 'all';
-  let filtered = S.scanWinners.slice(0,20);
-  if (exFilter !== 'all') filtered = S.scanWinners.filter(w=>(w.ex||'US')===exFilter).slice(0,20);
-  renderScanResults(filtered);
-}
-
-// ── Render scan results table ──────────
-function renderScanResults(top20) {
-  if (!top20.length) return;
-
-  // Update scan history info
-  const scannedCount = S.scannedSyms.size;
-  const remaining    = (_cachedUniverse?.length || 0) - scannedCount;
-  setEl('scanHistoryInfo', `${scannedCount} stocks scanned · ${S.scanWinners.length} winners found · ${remaining > 0 ? remaining+' remaining' : 'all scanned'} · Click ⚡ to scan more`);
-
-  // Top 3 banner
-  const top3 = S.scanWinners.slice(0,3);
-  const top3Banner = top3.length ? `<tr><td colspan="12" style="background:rgba(0,200,150,.04);border-bottom:1px solid rgba(0,200,150,.15);padding:8px 10px;font-size:.7rem;font-family:var(--mono);color:var(--accent)">
-    🏆 TOP 3 PICKS: ${top3.map((w,i)=>`${['🥇','🥈','🥉'][i]} <strong>${w.s}</strong> (${w.score}) ${(w.ex||'US')==='DE'?'🇩🇪':'🇺🇸'}`).join(' &nbsp;·&nbsp; ')}
-    &nbsp;|&nbsp; <span style="color:var(--muted)">Click Execute on rank #1 for best entry</span>
-  </td></tr>` : '';
-
-  document.getElementById('sigBody').innerHTML = top3Banner + top20.map((r, i) => {
-    const isTop3    = i < 3;
-    const exFlag    = (r.ex||'US')==='DE' ? '🇩🇪' : '🇺🇸';
-    const patBadges = (r.patterns||[]).map(p =>
-      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
-    ).join('');
-    const capCol = r.cap==='Large'?'var(--accent2)':r.cap==='Mid'?'var(--warn)':'var(--purple)';
-    const rsiCol = r.rsiV>70?'var(--warn)':r.rsiV>55?'var(--green)':'var(--muted2)';
-    const hasBreakout = (r.patterns||[]).some(p=>p.type==='BREAKOUT');
-    const hasUptrend  = (r.patterns||[]).some(p=>p.type==='UPTREND'||p.type==='GOLDEN CROSS');
-    const hasMomentum = (r.patterns||[]).some(p=>p.type==='MOMENTUM');
-    const medal = i===0?'🏆':i===1?'🥈':i===2?'🥉':'';
-    const age   = r.ts ? Math.round((Date.now()-r.ts)/60000)+'m ago' : '';
-    return `<tr style="${isTop3?'background:rgba(0,200,150,.03);border-left:2px solid var(--accent)':''}">
-<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem">${exFlag} ${r.s} ${medal}</td>
-<td style="font-size:.73rem;color:var(--muted2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name||getStockName(r.s)}</td>
-<td><span style="font-size:.6rem;font-family:var(--mono);color:${capCol};padding:1px 5px;border-radius:3px;border:1px solid ${capCol}40">${r.cap}</span></td>
-<td style="font-family:var(--mono)">$${fn(r.price)}</td>
-<td>
-  <div style="display:flex;align-items:center;gap:5px">
-    <div style="width:42px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.score}%;background:${r.lbl?.col||'var(--green)'}"></div></div>
-    <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:${r.lbl?.col||'var(--green)'}">${r.score}</span>
-  </div>
-</td>
-<td>${patBadges}</td>
-<td style="font-family:var(--mono);color:${rsiCol}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓':'—'}</span></td>
-<td style="display:flex;gap:4px">
-  ${isTop3 ? `<button class="btn b-acc b-xs" style="${i===0?'ring:2px solid var(--accent)':''}" onclick="autoTrade('${r.s}',${r.price},'${(r.patterns||[]).map(p=>p.type).join('+')}','UPTREND',${fn(r.rsiV,1)},'${r.ex||'US'}')">Execute</button>` : ''}
-  <button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${(r.ex||'US')==='DE'?r.s+'.DE':r.s}';computeInd()">Chart</button>
-</td>
-</tr>`;
-  }).join('');
-
-  // Update overview score ring
-  if (top20[0]) {
-    setEl('m-score', top20[0].score);
-    setEl('m-scores', top20[0].s + ' ' + (top20[0].lbl?.l||'BUY'));
-    document.getElementById('rNum').textContent = top20[0].score;
-    document.getElementById('rLbl').textContent = top20[0].lbl?.l || 'BUY';
-  }
-}
   document.getElementById('sigBody').innerHTML = top20.map((r, i) => {
+    const mainPat = r.patterns[0];
     const patBadges = r.patterns.map(p =>
       `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
     ).join('');
     const capCol = r.cap==='Large'?'var(--accent2)':r.cap==='Mid'?'var(--warn)':'var(--purple)';
     const rsiCol = r.rsiV>70?'var(--warn)':r.rsiV>55?'var(--green)':'var(--muted2)';
+    const macdCol = r.macdV.lm>0?'var(--green)':'var(--red)';
     const hasBreakout = r.patterns.some(p=>p.type==='BREAKOUT');
     const hasUptrend  = r.patterns.some(p=>p.type==='UPTREND'||p.type==='GOLDEN CROSS');
     const hasMomentum = r.patterns.some(p=>p.type==='MOMENTUM');
@@ -2786,9 +1487,9 @@ function renderScanResults(top20) {
 </td>
 <td>${patBadges}</td>
 <td style="font-family:var(--mono);color:${rsiCol}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓ YES':'—'}</span></td>
 <td style="display:flex;gap:4px">
   <button class="btn b-acc b-xs" onclick="autoTrade('${r.s}',${r.price},'${r.patterns.map(p=>p.type).join('+')}','UPTREND',${fn(r.rsiV,1)})">Execute</button>
   <button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${r.s}';computeInd()">Chart</button>
@@ -2802,6 +1503,9 @@ function renderScanResults(top20) {
     document.getElementById('rNum').textContent = top20[0].score;
     document.getElementById('rLbl').textContent = 'STRONG BUY';
   }
+
+  renderMarketReasons(top20.slice(0, 4));
+  log(`Market scan done — ${scanned} stocks scanned, ${top20.length} sure-shot winners found`, 'ok');
 }
 
 // Keep runScan as alias for backward compatibility
@@ -2810,32 +1514,23 @@ async function runScan() { return runMarketScan(); }
 function renderMarketReasons(results) {
   if (!results.length) return;
   document.getElementById('aiCard').style.display = 'block';
-  const top3 = results.slice(0,3);
-  document.getElementById('aiReasons').innerHTML = top3.map((r,i) => {
-    const exFlag = (r.ex||'US')==='DE' ? '🇩🇪 XETRA' : '🇺🇸 US';
-    const t212sym = (r.ex||'US')==='DE' ? r.s+'_GY' : r.s;
-    const sl = fn(r.price*(1-getSL()/100));
-    const tp = fn(r.price*(1+getTP()/100));
+  document.getElementById('aiReasons').innerHTML = results.map(r => {
     const pts = [];
-    (r.patterns||[]).forEach(p => {
-      if (p.type==='MOMENTUM')    pts.push(`Strong momentum — RSI ${fn(r.rsiV,1)} in sweet spot, MACD positive`);
-      if (p.type==='BREAKOUT')    pts.push(`Breakout — price near 52-week high with volume confirmation`);
-      if (p.type==='UPTREND')     pts.push(`Perfect uptrend — price above EMA20 > EMA50 > EMA200`);
-      if (p.type==='GOLDEN CROSS')pts.push(`Golden cross — EMA50 just crossed above EMA200`);
+    r.patterns.forEach(p => {
+      if (p.type === 'MOMENTUM') pts.push(`Strong momentum — RSI ${fn(r.rsiV,1)} in sweet spot, MACD positive and rising`);
+      if (p.type === 'BREAKOUT') pts.push(`Breakout pattern detected — price near 52-week high with volume confirmation`);
+      if (p.type === 'UPTREND') pts.push(`Perfect uptrend stack — price above EMA20 > EMA50 > EMA200`);
+      if (p.type === 'GOLDEN CROSS') pts.push(`Fresh golden cross — EMA50 just crossed above EMA200, historically bullish`);
     });
-    const medal = ['🏆 #1 PICK','🥈 #2 PICK','🥉 #3 PICK'][i];
-    return `<div style="background:var(--bg3);border:1px solid ${i===0?'rgba(0,200,150,.3)':'var(--border)'};border-radius:8px;padding:.85rem;margin-bottom:7px">
+    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
 <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">
   <span style="font-size:.9rem;font-weight:800">${r.s}</span>
-  <span style="font-size:.72rem;color:var(--muted2)">${r.name||getStockName(r.s)}</span>
-  <span class="bdg bdg-buy">${medal}</span>
+  <span class="bdg bdg-buy">SURE-SHOT BUY</span>
   <span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${r.score}/100</strong></span>
-  <span style="font-size:.62rem;font-family:var(--mono);padding:1px 6px;border-radius:3px;background:rgba(255,255,255,.05);color:var(--muted2)">${exFlag}</span>
-  <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">T212: <strong>${t212sym}</strong> | Entry ~$${fn(r.price)} | SL $${sl} | TP $${tp}</span>
+  <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry ~$${fn(r.price)} | SL $${fn(r.price*.95)} | TP $${fn(r.price*1.1)}</span>
 </div>
-<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.8">${pts.join('<br>')||'Composite momentum signal.'}</div>
+<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.8">${pts.join('<br>')}</div>
 <div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${r.score}%;background:var(--green)"></div></div>
-<div style="margin-top:6px;font-size:.63rem;font-family:var(--mono);color:var(--muted)">Found ${r.ts?Math.round((Date.now()-r.ts)/60000)+'m ago':'recently'} · Exchange: ${exFlag} · T212 ticker: <strong style="color:var(--accent)">${t212sym}</strong></div>
 </div>`;
   }).join('');
 }
@@ -2847,11 +1542,7 @@ let pCI=null,mCI=null;
 async function computeInd(){
   const sym=document.getElementById('iSym').value.trim().toUpperCase();if(!sym)return;
   log(`Computing: ${sym}`,'info');
-  let data = await fetchPrices(sym, 200);
-  if (!data) {
-    log(`Using simulated data for ${sym} (real price unavailable)`,'warn');
-    data = mockPrices(200); // only use mock for indicator tab, not scanner
-  }
+  const data=await fetchPrices(sym,200);
   const c=data.closes,price=c[c.length-1];
   const rsiV=calcRSI(c),macdV=calcMACD(c),bbV=calcBB(c);
   const e50=calcEMA(c,50),e200=calcEMA(c,200);
@@ -2941,67 +1632,40 @@ function startTimer(){
 function openM(id){document.getElementById(id).classList.add('open');loadCfg();}
 function closeM(id){document.getElementById(id).classList.remove('open');}
 function loadCfg(){
-  document.getElementById('c-apikey').value = S.apiKey;
-  document.getElementById('c-secret').value = S.secretKey || '';
-  document.getElementById('c-claude').value = S.claudeKey;
-  document.getElementById('c-news').value = S.newsKey;
-  document.getElementById('c-mode').value = S.mode;
-  document.getElementById('c-backend').value = localStorage.getItem('backendUrl') || '';
-  if (S.apiKey) autoDetectBroker(S.apiKey);
+  document.getElementById('c-t212').value=S.apiKey;
+  document.getElementById('c-claude').value=S.claudeKey;
+  document.getElementById('c-news').value=S.newsKey;
+  document.getElementById('c-mode').value=S.mode;
+  document.getElementById('c-backend').value=localStorage.getItem('backendUrl')||'';
 }
-
 function saveConfig(){
-  S.apiKey    = document.getElementById('c-apikey').value.trim();
-  S.secretKey = document.getElementById('c-secret').value.trim();
-  S.claudeKey = document.getElementById('c-claude').value.trim();
-  S.newsKey   = document.getElementById('c-news').value.trim();
-  S.mode      = document.getElementById('c-mode').value;
-
-  // Auto-detect broker
-  const detected = detectBroker(S.apiKey);
-  S.broker = detected ? detected.id : 't212';
-  S.detectedBroker = S.broker;
-
-  const backend = document.getElementById('c-backend').value.trim();
-  localStorage.setItem('t212k', S.apiKey);
-  localStorage.setItem('secretk', S.secretKey);
-  localStorage.setItem('claudek', S.claudeKey);
-  localStorage.setItem('newsk', S.newsKey);
-  localStorage.setItem('t212m', S.mode);
-  localStorage.setItem('broker', S.broker);
-  if (backend) localStorage.setItem('backendUrl', backend);
+  S.apiKey=document.getElementById('c-t212').value.trim();
+  S.claudeKey=document.getElementById('c-claude').value.trim();
+  S.newsKey=document.getElementById('c-news').value.trim();
+  S.mode=document.getElementById('c-mode').value;
+  const backend=document.getElementById('c-backend').value.trim();
+  localStorage.setItem('t212k',S.apiKey);
+  localStorage.setItem('claudek',S.claudeKey);
+  localStorage.setItem('newsk',S.newsKey);
+  localStorage.setItem('t212m',S.mode);
+  if(backend) localStorage.setItem('backendUrl',backend);
   else localStorage.removeItem('backendUrl');
-
-  setEl('sbMode', S.mode.toUpperCase());
+  setEl('sbMode',S.mode.toUpperCase());
   updateConnBadge(!!S.apiKey);
   closeM('cfgM');
-
-  const brokerName = BROKERS[S.broker]?.name || 'Trade 212';
-  log(`Connected: ${brokerName} — Mode: ${S.mode.toUpperCase()}`, 'ok');
-  if (S.apiKey) fetchAccount();
+  log(`Config saved — Mode: ${S.mode.toUpperCase()}, Backend: ${backend||'auto-detect'}`,S.apiKey?'ok':'err');
+  if(S.apiKey||backend) fetchAccount();
 }
 async function testConn(){
-  const key = document.getElementById('c-apikey').value.trim();
-  const secret = document.getElementById('c-secret').value.trim();
-  const mode = document.getElementById('c-mode').value;
-  if (!key) { showCT('err', 'Paste your API key first'); return; }
-  const broker = detectBroker(key) || BROKERS.t212;
-  showCT('info', `Testing ${broker.icon} ${broker.name} connection...`);
-  try {
-    const baseUrl = broker.modes[mode];
-    const ep = broker.endpoints.account;
-    const headers = { 'Content-Type': 'application/json', ...broker.authHeader(key, secret) };
-    const res = await fetch(baseUrl + ep, { headers, signal: AbortSignal.timeout(8000) });
-    if (res.ok) {
-      const d = await res.json();
-      const info = d.email || d.id || d.uid || d.accountId || 'Connected';
-      showCT('ok', `✓ ${broker.name} connected! Account: ${info} — ${mode.toUpperCase()} mode`);
-    } else {
-      showCT('err', `✗ ${broker.name} returned HTTP ${res.status} — check your API key`);
-    }
-  } catch(e) {
-    showCT('warn', `Network error — CORS may block direct browser calls. Save and use the Engine instead.`);
-  }
+  const key=document.getElementById('c-t212').value.trim();
+  const mode=document.getElementById('c-mode').value;
+  if(!key){showCT('err','Enter API key first');return;}
+  showCT('info','Testing connection...');
+  try{
+    const r=await fetch(BASE[mode]+'/equity/account/info',{headers:{Authorization:key}});
+    if(r.ok){const d=await r.json();showCT('ok',`✓ Connected! Account: ${d.email||'OK'} — ${d.currencyCode||'EUR'} — ${mode.toUpperCase()} mode`);}
+    else showCT('err',`✗ HTTP ${r.status} — Check API key and mode selection`);
+  }catch(e){showCT('warn','Network error — CORS may block browser → direct API calls. Save and use the Engine instead.');}
 }
 function showCT(t,msg){const el=document.getElementById('connTest');el.style.display='block';el.className=`al al-${t==='ok'?'ok':t==='info'?'info':'err'}`;el.textContent=msg;}
 function updateConnBadge(ok){
@@ -3101,8 +1765,6 @@ function nav(id,el){
   if(id==='port'){fetchPositions();}
   if(id==='ord'){fetchOrders();}
   if(id==='logs'){renderLogs();}
-  if(id==='crypto'){loadCryptoPrices();}
-  if(id==='commodity'){loadCommodityPrices();}
 }
 
 // ═══════════════════════════════════════
@@ -3118,697 +1780,40 @@ function getSL(){return parseInt(document.getElementById('slR')?.value||5);}
 function getTP(){return parseInt(document.getElementById('tpR')?.value||8);}
 
 // ═══════════════════════════════════════
-//  CRYPTO SCANNER ENGINE
-//  Uses CoinGecko free API (no key needed)
-//  Scans 100+ coins for momentum/breakout
-// ═══════════════════════════════════════
-
-const CRYPTO_UNIVERSE = {
-  large: [
-    {id:'bitcoin',sym:'BTC',name:'Bitcoin'},
-    {id:'ethereum',sym:'ETH',name:'Ethereum'},
-    {id:'binancecoin',sym:'BNB',name:'BNB'},
-    {id:'solana',sym:'SOL',name:'Solana'},
-    {id:'ripple',sym:'XRP',name:'XRP'},
-    {id:'cardano',sym:'ADA',name:'Cardano'},
-    {id:'avalanche-2',sym:'AVAX',name:'Avalanche'},
-    {id:'dogecoin',sym:'DOGE',name:'Dogecoin'},
-    {id:'polkadot',sym:'DOT',name:'Polkadot'},
-    {id:'chainlink',sym:'LINK',name:'Chainlink'},
-    {id:'tron',sym:'TRX',name:'TRON'},
-    {id:'shiba-inu',sym:'SHIB',name:'Shiba Inu'},
-    {id:'litecoin',sym:'LTC',name:'Litecoin'},
-    {id:'uniswap',sym:'UNI',name:'Uniswap'},
-  ],
-  mid: [
-    {id:'near',sym:'NEAR',name:'NEAR Protocol'},
-    {id:'aptos',sym:'APT',name:'Aptos'},
-    {id:'sui',sym:'SUI',name:'Sui'},
-    {id:'arbitrum',sym:'ARB',name:'Arbitrum'},
-    {id:'optimism',sym:'OP',name:'Optimism'},
-    {id:'injective-protocol',sym:'INJ',name:'Injective'},
-    {id:'sei-network',sym:'SEI',name:'Sei'},
-    {id:'celestia',sym:'TIA',name:'Celestia'},
-    {id:'starknet',sym:'STRK',name:'Starknet'},
-    {id:'pyth-network',sym:'PYTH',name:'Pyth Network'},
-    {id:'jito-governance-token',sym:'JTO',name:'Jito'},
-    {id:'jupiter-exchange-solana',sym:'JUP',name:'Jupiter'},
-    {id:'wormhole',sym:'W',name:'Wormhole'},
-    {id:'eigenlayer',sym:'EIGEN',name:'EigenLayer'},
-    {id:'pendle',sym:'PENDLE',name:'Pendle'},
-  ],
-  defi: [
-    {id:'aave',sym:'AAVE',name:'Aave'},
-    {id:'maker',sym:'MKR',name:'Maker'},
-    {id:'lido-dao',sym:'LDO',name:'Lido DAO'},
-    {id:'curve-dao-token',sym:'CRV',name:'Curve'},
-    {id:'compound-governance-token',sym:'COMP',name:'Compound'},
-    {id:'synthetix-network-token',sym:'SNX',name:'Synthetix'},
-    {id:'yearn-finance',sym:'YFI',name:'Yearn Finance'},
-    {id:'1inch',sym:'1INCH',name:'1inch'},
-    {id:'pancakeswap-token',sym:'CAKE',name:'PancakeSwap'},
-    {id:'raydium',sym:'RAY',name:'Raydium'},
-    {id:'orca',sym:'ORCA',name:'Orca'},
-    {id:'dydx',sym:'DYDX',name:'dYdX'},
-    {id:'gmx',sym:'GMX',name:'GMX'},
-    {id:'gains-network',sym:'GNS',name:'Gains Network'},
-  ],
-  ai: [
-    {id:'render-token',sym:'RENDER',name:'Render'},
-    {id:'fetch-ai',sym:'FET',name:'Fetch.ai'},
-    {id:'singularitynet',sym:'AGIX',name:'SingularityNET'},
-    {id:'ocean-protocol',sym:'OCEAN',name:'Ocean Protocol'},
-    {id:'bittensor',sym:'TAO',name:'Bittensor'},
-    {id:'akash-network',sym:'AKT',name:'Akash Network'},
-    {id:'numeraire',sym:'NMR',name:'Numeraire'},
-    {id:'cortex',sym:'CTXC',name:'Cortex'},
-    {id:'matrix-ai-network',sym:'MAN',name:'Matrix AI'},
-    {id:'vectorspace-ai',sym:'VXV',name:'VectorSpace AI'},
-  ],
-  small: [
-    {id:'bonk',sym:'BONK',name:'Bonk'},
-    {id:'dogwifcoin',sym:'WIF',name:'dogwifhat'},
-    {id:'pepe',sym:'PEPE',name:'Pepe'},
-    {id:'floki',sym:'FLOKI',name:'Floki'},
-    {id:'book-of-meme',sym:'BOME',name:'Book of Meme'},
-    {id:'cat-in-a-dogs-world',sym:'MEW',name:'cat in a dogs world'},
-    {id:'notcoin',sym:'NOT',name:'Notcoin'},
-    {id:'hamster-kombat',sym:'HMSTR',name:'Hamster Kombat'},
-    {id:'dogs-huahua',sym:'DOGS',name:'DOGS'},
-    {id:'mog-coin',sym:'MOG',name:'Mog Coin'},
-    {id:'turbo',sym:'TURBO',name:'Turbo'},
-    {id:'brett',sym:'BRETT',name:'Brett'},
-  ],
-};
-
-// ── Fetch live crypto prices from CoinGecko (free, no key) ──
-async function fetchCryptoPrices() {
-  const allIds = Object.values(CRYPTO_UNIVERSE).flat().map(c=>c.id).join(',');
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${allIds}&order=market_cap_desc&per_page=250&sparkline=false&price_change_percentage=24h,7d`;
-    const res = await fetch(url, {signal: AbortSignal.timeout(10000)});
-    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-    const data = await res.json();
-    log(`CoinGecko: ${data.length} coins loaded`, 'ok');
-    return data;
-  } catch(e) {
-    log(`CoinGecko error: ${e.message}`, 'err');
-    return [];
-  }
-}
-
-// ── Fetch OHLC for RSI/MACD calculation ──
-async function fetchCryptoOHLC(coinId, days=30) {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`;
-    const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
-    if (!res.ok) return null;
-    const data = await res.json();
-    const closes = data.map(d => d[4]).filter(v => v > 0);
-    return closes;
-  } catch(e) { return null; }
-}
-
-// ═══════════════════════════════════════
-//  CRYPTO-SPECIFIC STRATEGY ENGINE
-//  Completely different from stock strategy
-//  Crypto needs wider stops, different RSI
-//  thresholds, volume dominance, BTC trend
-// ═══════════════════════════════════════
-
-// Global BTC trend — fetched once per scan
-let BTC_TREND = null; // 'bull' | 'bear' | 'neutral'
-let FEAR_GREED = 50;  // 0-100
-
-async function fetchBTCTrend() {
-  try {
-    // Get BTC 30d OHLC to determine trend
-    const closes = await fetchCryptoOHLC('bitcoin', 30);
-    if (!closes || closes.length < 20) return 'neutral';
-    const ema7  = calcEMA(closes, 7);
-    const ema21 = calcEMA(closes, 21);
-    const v7  = ema7[ema7.length-1];
-    const v21 = ema21[ema21.length-1];
-    const price = closes[closes.length-1];
-    if (v7 > v21 && price > v7) return 'bull';
-    if (v7 < v21 && price < v7) return 'bear';
-    return 'neutral';
-  } catch(e) { return 'neutral'; }
-}
-
-async function fetchFearGreed() {
-  try {
-    const res = await fetch('https://api.alternative.me/fng/?limit=1');
-    const d = await res.json();
-    return parseInt(d?.data?.[0]?.value || 50);
-  } catch(e) { return 50; }
-}
-
-// ── Strategy Tab Switching ─────────────
-function switchStratTab(tab) {
-  ['stock','crypto','commodity','exec'].forEach(t => {
-    const panel = document.getElementById('st-'+t);
-    const btn   = document.getElementById('stTab-'+t);
-    if (panel) panel.style.display = t===tab ? 'block' : 'none';
-    if (btn) {
-      btn.className = t===tab ? 'btn b-acc b-sm' : 'btn b-out b-sm';
-    }
-  });
-  localStorage.setItem('stratTab', tab);
-}
-
-// ── Commodity Risk Update ──────────────
-function updateCommodityRisk() {
-  const sl = parseInt(document.getElementById('cmSlR')?.value || 7);
-  const tp = parseInt(document.getElementById('cmTpR')?.value || 15);
-  const ps = parseInt(document.getElementById('cmPsR')?.value || 15);
-  const ms = parseInt(document.getElementById('cmMsR')?.value || 65);
-  document.getElementById('cmSlD').textContent = sl + '%';
-  document.getElementById('cmTpD').textContent = tp + '%';
-  document.getElementById('cmPsD').textContent = ps + '%';
-  document.getElementById('cmMsD').textContent = ms;
-  COMMODITY_RISK.stopLoss   = sl / 100;
-  COMMODITY_RISK.takeProfit = tp / 100;
-  COMMODITY_RISK.maxPosition= ps / 100;
-  COMMODITY_RISK.minScore   = ms;
-  const rr = (tp/sl).toFixed(1);
-  const rrEl = document.getElementById('cmRR');
-  if (rrEl) { rrEl.textContent = rr+':1'; rrEl.style.color = parseFloat(rr)>=2?'var(--green)':parseFloat(rr)>=1.5?'var(--warn)':'var(--red)'; }
-}
-
-function saveCommodityStrategy() {
-  updateCommodityRisk();
-  const s = {
-    sl: parseInt(document.getElementById('cmSlR')?.value||7),
-    tp: parseInt(document.getElementById('cmTpR')?.value||15),
-    ps: parseInt(document.getElementById('cmPsR')?.value||15),
-    ms: parseInt(document.getElementById('cmMsR')?.value||65),
-    usdFilter:  document.getElementById('cmUsdFilter')?.value||'weak',
-    catFilter:  document.getElementById('cmCatFilter')?.value||'all',
-    inflation:  document.getElementById('cmInflation')?.checked??true,
-    seasonal:   document.getElementById('cmSeasonal')?.checked??true,
-  };
-  localStorage.setItem('commodityStrategy', JSON.stringify(s));
-  log(`Commodity strategy saved — SL: ${s.sl}% | TP: ${s.tp}% | MaxPos: ${s.ps}%`, 'ok');
-}
-
-function loadCommodityStrategy() {
-  const saved = JSON.parse(localStorage.getItem('commodityStrategy')||'null');
-  if (!saved) return;
-  if (document.getElementById('cmSlR'))  document.getElementById('cmSlR').value = saved.sl;
-  if (document.getElementById('cmTpR'))  document.getElementById('cmTpR').value = saved.tp;
-  if (document.getElementById('cmPsR'))  document.getElementById('cmPsR').value = saved.ps;
-  if (document.getElementById('cmMsR'))  document.getElementById('cmMsR').value = saved.ms;
-  if (document.getElementById('cmUsdFilter')) document.getElementById('cmUsdFilter').value = saved.usdFilter;
-  if (document.getElementById('cmCatFilter')) document.getElementById('cmCatFilter').value = saved.catFilter;
-  if (document.getElementById('cmInflation')) document.getElementById('cmInflation').checked = saved.inflation;
-  if (document.getElementById('cmSeasonal'))  document.getElementById('cmSeasonal').checked  = saved.seasonal;
-  updateCommodityRisk();
-}
-function updateCryptoRisk() {
-  const sl  = parseInt(document.getElementById('crSlR')?.value || 12);
-  const tp  = parseInt(document.getElementById('crTpR')?.value || 35);
-  const ps  = parseInt(document.getElementById('crPsR')?.value || 8);
-  const ms  = parseInt(document.getElementById('crMsR')?.value || 60);
-  const rsi = parseInt(document.getElementById('crRsiR')?.value || 80);
-
-  document.getElementById('crSlD').textContent = sl + '%';
-  document.getElementById('crTpD').textContent = tp + '%';
-  document.getElementById('crPsD').textContent = ps + '%';
-  document.getElementById('crMsD').textContent = ms;
-  document.getElementById('crRsiD').textContent = rsi;
-
-  // Update live CRYPTO_RISK object
-  CRYPTO_RISK.stopLoss      = sl / 100;
-  CRYPTO_RISK.takeProfit    = tp / 100;
-  CRYPTO_RISK.maxPosition   = ps / 100;
-  CRYPTO_RISK.minScore      = ms;
-  CRYPTO_RISK.rsiOverbought = rsi;
-
-  // Update risk/reward ratio display
-  const rr = (tp / sl).toFixed(1);
-  const rrEl = document.getElementById('crRR');
-  if (rrEl) {
-    rrEl.textContent = rr + ':1';
-    rrEl.style.color = parseFloat(rr) >= 2 ? 'var(--green)' : parseFloat(rr) >= 1.5 ? 'var(--warn)' : 'var(--red)';
-  }
-}
-
-function saveCryptoWeights() {
-  // Weights are visual only — cryptoScore uses hardcoded weights internally
-  // This allows user to see and adjust what matters most
-  log('Crypto weights updated (applied on next scan)', 'ok');
-}
-
-function saveCryptoStrategy() {
-  updateCryptoRisk();
-  const settings = {
-    sl:  parseInt(document.getElementById('crSlR')?.value || 12),
-    tp:  parseInt(document.getElementById('crTpR')?.value || 35),
-    ps:  parseInt(document.getElementById('crPsR')?.value || 8),
-    ms:  parseInt(document.getElementById('crMsR')?.value || 60),
-    rsi: parseInt(document.getElementById('crRsiR')?.value || 80),
-    btcFilter: document.getElementById('crBtcFilter')?.value || 'bull',
-    fgFilter:  document.getElementById('crFgFilter')?.value || 'fear',
-    skipBear:  document.getElementById('crSkipBear')?.checked ?? true,
-  };
-  localStorage.setItem('cryptoStrategy', JSON.stringify(settings));
-  log(`Crypto strategy saved — SL: ${settings.sl}% | TP: ${settings.tp}% | MaxPos: ${settings.ps}%`, 'ok');
-}
-
-function loadCryptoStrategy() {
-  const saved = JSON.parse(localStorage.getItem('cryptoStrategy') || 'null');
-  if (!saved) return;
-  if (document.getElementById('crSlR'))  { document.getElementById('crSlR').value = saved.sl;  }
-  if (document.getElementById('crTpR'))  { document.getElementById('crTpR').value = saved.tp;  }
-  if (document.getElementById('crPsR'))  { document.getElementById('crPsR').value = saved.ps;  }
-  if (document.getElementById('crMsR'))  { document.getElementById('crMsR').value = saved.ms;  }
-  if (document.getElementById('crRsiR')) { document.getElementById('crRsiR').value = saved.rsi; }
-  if (document.getElementById('crBtcFilter')) document.getElementById('crBtcFilter').value = saved.btcFilter;
-  if (document.getElementById('crFgFilter'))  document.getElementById('crFgFilter').value = saved.fgFilter;
-  if (document.getElementById('crSkipBear'))  document.getElementById('crSkipBear').checked = saved.skipBear;
-  updateCryptoRisk();
-}
-const CRYPTO_RISK = {
-  stopLoss:     0.12,   // 12% stop loss (not 5% like stocks)
-  takeProfit:   0.35,   // 35% take profit
-  maxPosition:  0.08,   // 8% max position size
-  minScore:     60,     // min score to consider
-  rsiOverbought: 80,    // crypto can stay above 70 for weeks
-  rsiOversold:   30,
-  rsiMomentum: [45, 75], // sweet spot for crypto momentum
-};
-
-// ── Crypto Scoring (weights are different from stocks) ──
-function cryptoScore(coin, closes) {
-  const chg24 = coin.price_change_percentage_24h ?? 0;
-  const chg7d  = coin.price_change_percentage_7d_in_currency ?? 0;
-  const volRatio = (coin.total_volume / (coin.market_cap || 1));
-  const athPct = coin.ath_change_percentage ?? -100;
-  let score = 0;
-  const breakdown = {};
-
-  // ── 1. VOLUME SPIKE (30% weight) ──────────────────
-  // Volume is the most important crypto signal
-  // High volume = real move, low volume = fake out
-  let volScore = 0;
-  if (volRatio > 0.5)       volScore = 30;  // extreme volume — very bullish
-  else if (volRatio > 0.3)  volScore = 25;
-  else if (volRatio > 0.15) volScore = 18;
-  else if (volRatio > 0.08) volScore = 10;
-  else if (volRatio > 0.04) volScore = 5;
-  else volScore = 0; // low volume = not reliable
-  score += volScore;
-  breakdown.volume = volScore;
-
-  // ── 2. BTC MARKET TREND (25% weight) ──────────────
-  // Never fight Bitcoin — if BTC is dumping, altcoins dump harder
-  let btcScore = 0;
-  if (BTC_TREND === 'bull')         btcScore = 25;
-  else if (BTC_TREND === 'neutral') btcScore = 12;
-  else if (BTC_TREND === 'bear')    btcScore = 0; // strong penalty in bear market
-  score += btcScore;
-  breakdown.btcTrend = btcScore;
-
-  // ── 3. RSI MOMENTUM ZONE (20% weight) ─────────────
-  // Crypto RSI rules are different from stocks:
-  // 45-75 = momentum zone (not 50-70 like stocks)
-  // >80 = still ok but getting extended
-  // <35 = oversold bounce opportunity
-  let rsiScore = 0;
-  if (closes && closes.length >= 14) {
-    const rsi = calcRSI(closes);
-    if (rsi) {
-      if (rsi >= 55 && rsi <= 75)      rsiScore = 20; // sweet spot
-      else if (rsi >= 45 && rsi < 55)  rsiScore = 14; // building momentum
-      else if (rsi > 75 && rsi <= 80)  rsiScore = 10; // extended but still going
-      else if (rsi > 80)               rsiScore = 4;  // overbought — caution
-      else if (rsi < 35)               rsiScore = 16; // oversold bounce setup
-      else if (rsi >= 35 && rsi < 45)  rsiScore = 8;  // recovering
-    }
-  } else {
-    rsiScore = 10; // no data = neutral
-  }
-  score += rsiScore;
-  breakdown.rsi = rsiScore;
-
-  // ── 4. PRICE MOMENTUM (15% weight) ────────────────
-  // Short-term (24h) and medium-term (7d) price action
-  // Crypto needs bigger moves to be meaningful
-  let momScore = 0;
-  // 24h momentum
-  if (chg24 > 10)       momScore += 8;   // big move
-  else if (chg24 > 5)   momScore += 6;
-  else if (chg24 > 2)   momScore += 4;
-  else if (chg24 > 0)   momScore += 2;
-  else if (chg24 < -10) momScore -= 5;   // dumping
-  else if (chg24 < -5)  momScore -= 3;
-  // 7d trend confirmation
-  if (chg7d > 20)       momScore += 7;
-  else if (chg7d > 10)  momScore += 5;
-  else if (chg7d > 5)   momScore += 3;
-  else if (chg7d > 0)   momScore += 1;
-  else if (chg7d < -15) momScore -= 4;
-  momScore = Math.max(0, Math.min(15, momScore));
-  score += momScore;
-  breakdown.momentum = momScore;
-
-  // ── 5. FEAR & GREED INDEX (10% weight) ────────────
-  // Market sentiment matters a lot in crypto
-  // Extreme fear = good buy, extreme greed = caution
-  let fgScore = 0;
-  if (FEAR_GREED >= 25 && FEAR_GREED <= 55)      fgScore = 10; // fear/neutral = buy zone
-  else if (FEAR_GREED > 55 && FEAR_GREED <= 70)  fgScore = 7;  // greed = ok
-  else if (FEAR_GREED > 70)                       fgScore = 3;  // extreme greed = caution
-  else if (FEAR_GREED < 25)                       fgScore = 8;  // extreme fear = contrarian buy
-  score += fgScore;
-  breakdown.fearGreed = fgScore;
-
-  return { total: Math.min(Math.max(score, 0), 100), breakdown };
-}
-
-// ── Crypto Pattern Detection ───────────
-function detectCryptoPatterns(coin, closes) {
-  const patterns = [];
-  const chg24 = coin.price_change_percentage_24h ?? 0;
-  const chg7d  = coin.price_change_percentage_7d_in_currency ?? 0;
-  const volRatio = coin.total_volume / (coin.market_cap || 1);
-  const athPct = coin.ath_change_percentage ?? -100;
-
-  // MOMENTUM — strong 24h move with volume
-  if (chg24 > 5 && volRatio > 0.15) {
-    patterns.push({ type:'MOMENTUM', strength:'STRONG', color:'var(--green)' });
-  } else if (chg24 > 2 && volRatio > 0.08) {
-    patterns.push({ type:'MOMENTUM', strength:'MILD', color:'var(--accent)' });
-  }
-
-  // BREAKOUT — near all-time high with volume
-  if (athPct > -5 && volRatio > 0.1) {
-    patterns.push({ type:'BREAKOUT', strength:'ATH', color:'var(--warn)' });
-  } else if (athPct > -15 && chg24 > 3) {
-    patterns.push({ type:'BREAKOUT', strength:'FORMING', color:'var(--warn)' });
-  }
-
-  // UPTREND — sustained weekly + daily positive
-  if (chg7d > 15 && chg24 > 0) {
-    patterns.push({ type:'UPTREND', strength:'CONFIRMED', color:'var(--accent2)' });
-  } else if (chg7d > 5 && chg24 > 0) {
-    patterns.push({ type:'UPTREND', strength:'BUILDING', color:'var(--accent2)' });
-  }
-
-  // OVERSOLD BOUNCE — RSI low, starting to recover
-  if (closes && closes.length >= 14) {
-    const rsi = calcRSI(closes);
-    if (rsi && rsi < 35 && chg24 > 0) {
-      patterns.push({ type:'OVERSOLD BOUNCE', strength:'SETUP', color:'var(--purple)' });
-    }
-  }
-
-  // BTC SEASON — altcoins pumping when BTC stable
-  if (BTC_TREND === 'bull' && coin.symbol !== 'btc' && chg24 > chg7d/7) {
-    patterns.push({ type:'ALT SEASON', strength:'ACTIVE', color:'var(--purple)' });
-  }
-
-  return patterns;
-}
-
-// ── Load live prices into heatmap ──
-async function loadCryptoPrices() {
-  document.getElementById('crHeatmap').innerHTML = '<div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5"><span class="spin"></span> Loading live prices...</div>';
-  // Load BTC, ETH, market cap
-  try {
-    const global = await fetch('https://api.coingecko.com/api/v3/global').then(r=>r.json());
-    const mcap = global?.data?.total_market_cap?.usd ?? 0;
-    const fg_res = await fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json());
-    const fg = fg_res?.data?.[0];
-    setEl('cr-mcap', '$'+fmtLarge(mcap));
-    setEl('cr-fg', fg?.value ?? '—');
-    setEl('cr-fg-lbl', fg?.value_classification ?? 'Market sentiment');
-    document.getElementById('cr-fg').className = 'mval ' + (parseInt(fg?.value||50) > 60 ? 'up' : parseInt(fg?.value||50) < 40 ? 'down' : 'nu');
-  } catch(e) {}
-
-  const coins = await fetchCryptoPrices();
-  if (!coins.length) {
-    document.getElementById('crHeatmap').innerHTML = '<div style="color:var(--red);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Failed to load — CoinGecko may be rate limiting. Try again in 1 minute.</div>';
-    return;
-  }
-
-  // Update BTC and ETH metrics
-  const btc = coins.find(c=>c.symbol==='btc');
-  const eth = coins.find(c=>c.symbol==='eth');
-  if (btc) {
-    setEl('cr-btc', '$'+fmtN(btc.current_price, 0));
-    setEl('cr-btc-chg', (btc.price_change_percentage_24h>=0?'+':'')+fmtN(btc.price_change_percentage_24h,2)+'% 24h');
-    document.getElementById('cr-btc').className = 'mval '+(btc.price_change_percentage_24h>=0?'up':'down');
-  }
-  if (eth) {
-    setEl('cr-eth', '$'+fmtN(eth.current_price, 2));
-    setEl('cr-eth-chg', (eth.price_change_percentage_24h>=0?'+':'')+fmtN(eth.price_change_percentage_24h,2)+'% 24h');
-    document.getElementById('cr-eth').className = 'mval '+(eth.price_change_percentage_24h>=0?'up':'down');
-  }
-
-  // Render heatmap
-  document.getElementById('crHeatmap').innerHTML = coins.slice(0, 20).map(c => {
-    const chg = c.price_change_percentage_24h ?? 0;
-    const bg = chg > 5 ? 'rgba(34,197,94,.15)' : chg > 0 ? 'rgba(34,197,94,.07)' : chg < -5 ? 'rgba(244,63,94,.15)' : 'rgba(244,63,94,.07)';
-    const col = chg >= 0 ? 'var(--green)' : 'var(--red)';
-    return `<div style="background:${bg};border:1px solid var(--border);border-radius:7px;padding:8px;text-align:center;cursor:pointer" onclick="document.getElementById('cr-filter').value='all';runCryptoScan()">
-      <div style="font-size:.7rem;font-weight:800;font-family:var(--mono)">${c.symbol.toUpperCase()}</div>
-      <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted2);margin-top:2px">$${fmtPrice(c.current_price)}</div>
-      <div style="font-size:.65rem;font-family:var(--mono);color:${col};margin-top:2px">${chg>=0?'+':''}${fmtN(chg,2)}%</div>
-    </div>`;
-  }).join('');
-}
-
-// ── Main Crypto Scanner ──
-async function runCryptoScan() {
-  const filter = document.getElementById('cr-filter')?.value || 'all';
-  let universe = [];
-  if (filter === 'all') {
-    Object.values(CRYPTO_UNIVERSE).flat().forEach(c => { if(!universe.find(x=>x.id===c.id)) universe.push(c); });
-  } else {
-    universe = CRYPTO_UNIVERSE[filter] || Object.values(CRYPTO_UNIVERSE).flat();
-  }
-
-  document.getElementById('crScanBtn').textContent = '⏳ Scanning...';
-  document.getElementById('crScanBtn').disabled = true;
-  document.getElementById('crProgress').style.display = 'block';
-  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching BTC trend + Fear & Greed...</td></tr>`;
-
-  // ── Step 1: Fetch BTC trend and Fear & Greed first ──
-  // These affect ALL coin scores so we need them upfront
-  [BTC_TREND, FEAR_GREED] = await Promise.all([fetchBTCTrend(), fetchFearGreed()]);
-  log(`BTC Trend: ${BTC_TREND.toUpperCase()} | Fear & Greed: ${FEAR_GREED}`, 'ok');
-
-  // Update Fear & Greed display
-  setEl('cr-fg', FEAR_GREED);
-  const fgLabel = FEAR_GREED >= 75 ? 'Extreme Greed' : FEAR_GREED >= 55 ? 'Greed' : FEAR_GREED >= 45 ? 'Neutral' : FEAR_GREED >= 25 ? 'Fear' : 'Extreme Fear';
-  setEl('cr-fg-lbl', fgLabel);
-  document.getElementById('cr-fg').className = 'mval ' + (FEAR_GREED > 55 ? 'up' : FEAR_GREED < 45 ? 'down' : 'nu');
-
-  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching ${universe.length} crypto prices... BTC: ${BTC_TREND.toUpperCase()} | F&G: ${FEAR_GREED} (${fgLabel})</td></tr>`;
-
-  // Fetch all prices at once
-  const ids = universe.map(c=>c.id).join(',');
-  let coins = [];
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=250&sparkline=false&price_change_percentage=24h,7d`;
-    const res = await fetch(url, {signal: AbortSignal.timeout(15000)});
-    coins = await res.json();
-    log(`Crypto prices loaded: ${coins.length} coins`, 'ok');
-  } catch(e) {
-    log(`CoinGecko error: ${e.message}`, 'err');
-    document.getElementById('crBody').innerHTML = '<tr><td class="te" colspan="11">CoinGecko rate limit — wait 1 minute and try again</td></tr>';
-    document.getElementById('crScanBtn').textContent = '⚡ Scan Crypto';
-    document.getElementById('crScanBtn').disabled = false;
-    return;
-  }
-
-  const winners = [];
-  let scanned = 0;
-
-  for (const coin of coins) {
-    const meta = universe.find(u => u.id === coin.id);
-    if (!meta) { scanned++; continue; }
-
-    // Fetch OHLC for RSI (rate limited — only for top candidates)
-    let closes = null;
-    const chg24 = coin.price_change_percentage_24h ?? 0;
-    if (Math.abs(chg24) > 2) { // only fetch OHLC if showing movement
-      closes = await fetchCryptoOHLC(coin.id, 30);
-      await new Promise(r => setTimeout(r, 300)); // respect rate limit
-    }
-
-    const scoreResult = cryptoScore(coin, closes);
-    const score = scoreResult.total;
-    const rsi = closes ? calcRSI(closes) : null;
-    const patterns = detectCryptoPatterns(coin, closes);
-
-    // Only show if score meets minimum AND has at least one pattern
-    // In bear market (BTC_TREND=bear) raise the bar higher
-    const minScore = BTC_TREND === 'bear' ? 70 : CRYPTO_RISK.minScore;
-
-    if (score >= minScore && patterns.length > 0) {
-      winners.push({ coin, meta, score, scoreBreakdown: scoreResult.breakdown, rsi, patterns, closes });
-      winners.sort((a,b) => b.score - a.score);
-      renderCryptoResults(winners.slice(0, 20));
-    }
-
-    scanned++;
-    const pct = Math.round(scanned / coins.length * 100);
-    document.getElementById('crBar').style.width = pct + '%';
-    document.getElementById('crCount').textContent = `${scanned} / ${coins.length}`;
-    document.getElementById('crStatus').textContent = `Scanning ${meta?.sym || coin.symbol.toUpperCase()}... (${winners.length} found)`;
-    document.getElementById('crScanned').textContent = scanned;
-    document.getElementById('crBullish').textContent = winners.filter(w=>w.patterns.includes('MOMENTUM')||w.patterns.includes('UPTREND')).length;
-    document.getElementById('crBreakouts').textContent = winners.filter(w=>w.patterns.includes('BREAKOUT')).length;
-    document.getElementById('crAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
-
-    if (winners.length >= 30) break;
-  }
-
-  winners.sort((a,b) => b.score - a.score);
-  renderCryptoResults(winners.slice(0, 20));
-  renderCryptoReasons(winners.slice(0, 4));
-  document.getElementById('crProgress').style.display = 'none';
-  document.getElementById('crScanBtn').textContent = '⚡ Scan Crypto';
-  document.getElementById('crScanBtn').disabled = false;
-  log(`Crypto scan done — ${scanned} scanned, ${winners.length} picks found`, 'ok');
-}
-
-function renderCryptoResults(winners) {
-  if (!winners.length) return;
-  const btcWarning = BTC_TREND === 'bear'
-    ? `<tr><td colspan="11" style="background:rgba(244,63,94,.05);border-bottom:1px solid rgba(244,63,94,.2);padding:8px;font-size:.7rem;font-family:var(--mono);color:var(--red);text-align:center">⚠ BTC DOWNTREND — higher threshold applied. Smaller position sizes recommended. SL: ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | TP: ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}%</td></tr>`
-    : BTC_TREND === 'bull'
-    ? `<tr><td colspan="11" style="background:rgba(34,197,94,.04);border-bottom:1px solid rgba(34,197,94,.15);padding:8px;font-size:.7rem;font-family:var(--mono);color:var(--green);text-align:center">✓ BTC UPTREND — altcoin conditions favourable | SL: ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | TP: ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}% | Max position: ${(CRYPTO_RISK.maxPosition*100).toFixed(0)}%</td></tr>`
-    : '';
-  document.getElementById('crBody').innerHTML = btcWarning + winners.map((w, i) => {
-    const c = w.coin;
-    const chg24 = c.price_change_percentage_24h ?? 0;
-    const volRatio = ((c.total_volume / c.market_cap) * 100).toFixed(1);
-    const sl = fmtPrice(c.current_price * (1 - CRYPTO_RISK.stopLoss));
-    const tp = fmtPrice(c.current_price * (1 + CRYPTO_RISK.takeProfit));
-    const patBadges = w.patterns.map(p =>
-      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
-    ).join('');
-    const sig = w.score >= 75 ? 'STRONG BUY' : w.score >= 60 ? 'BUY' : 'WATCH';
-    const sigCls = w.score >= 75 ? 'bdg-buy' : w.score >= 60 ? 'bdg-buy' : 'bdg-hold';
-    const bd = w.scoreBreakdown || {};
-    const bdTip = `Vol:${bd.volume||0} BTC:${bd.btcTrend||0} RSI:${bd.rsi||0} Mom:${bd.momentum||0} F&G:${bd.fearGreed||0}`;
-    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
-<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem">${w.meta.sym} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
-<td style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</td>
-<td style="font-family:var(--mono)">$${fmtPrice(c.current_price)}</td>
-<td class="${chg24>=0?'up':'down'}" style="font-family:var(--mono)">${chg24>=0?'+':''}${fmtN(chg24,2)}%</td>
-<td title="${bdTip}">
-  <div style="display:flex;align-items:center;gap:5px">
-    <div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${w.score}%;background:var(--green)"></div></div>
-    <span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">${w.score}</span>
-  </div>
-</td>
-<td style="font-family:var(--mono);color:${w.rsi?w.rsi>75?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)'}">${w.rsi?fmtN(w.rsi,1):'—'}</td>
-<td>${patBadges}</td>
-<td style="font-family:var(--mono);font-size:.7rem;color:var(--muted2)">${volRatio}%</td>
-<td><span class="bdg ${sigCls}">${sig}</span></td>
-<td><button class="btn b-out b-xs" onclick="window.open('https://www.coingecko.com/en/coins/${w.coin.id}','_blank')" title="SL:$${sl} TP:$${tp}">Chart ↗</button></td>
-</tr>`;
-  }).join('');
-  if (winners[0]) { document.getElementById('rNum').textContent = winners[0].score; document.getElementById('rLbl').textContent = 'CRYPTO BUY'; }
-}
-
-function renderCryptoReasons(winners) {
-  if (!winners.length) return;
-  document.getElementById('crReasonCard').style.display = 'block';
-  document.getElementById('crReasons').innerHTML = winners.map(w => {
-    const c = w.coin;
-    const chg24 = c.price_change_percentage_24h ?? 0;
-    const athChg = c.ath_change_percentage ?? 0;
-    const sl = fmtPrice(c.current_price * (1 - CRYPTO_RISK.stopLoss));
-    const tp = fmtPrice(c.current_price * (1 + CRYPTO_RISK.takeProfit));
-    const pts = [];
-    w.patterns.forEach(p => {
-      if (p.type === 'MOMENTUM') pts.push(`Strong 24h momentum +${fmtN(chg24,2)}% with volume spike — real buying pressure`);
-      if (p.type === 'BREAKOUT') pts.push(`Near all-time high (${fmtN(athChg,1)}% from ATH) — breakout territory`);
-      if (p.type === 'UPTREND') pts.push(`7-day uptrend confirmed — sustained accumulation`);
-      if (p.type === 'OVERSOLD BOUNCE') pts.push(`RSI ${fmtN(w.rsi,1)} — oversold on high-quality coin, mean reversion likely`);
-      if (p.type === 'ALT SEASON') pts.push(`Alt season signal — BTC stable while altcoins outperform`);
-    });
-    const bd = w.scoreBreakdown || {};
-    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
-<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
-<span style="font-size:.9rem;font-weight:700">${w.meta.sym}</span>
-<span style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</span>
-<span class="bdg bdg-buy">BUY</span>
-<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${w.score}/100</strong></span>
-<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $${fmtPrice(c.current_price)} | SL $${sl} | TP $${tp}</span>
-</div>
-<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:8px">
-${[['Volume',bd.volume||0,30],['BTC Trend',bd.btcTrend||0,25],['RSI Zone',bd.rsi||0,20],['Momentum',bd.momentum||0,15],['Fear&Greed',bd.fearGreed||0,10]].map(([n,v,max])=>`
-  <div style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center">
-    <div style="font-size:.58rem;font-family:var(--mono);color:var(--muted)">${n} (${max}%)</div>
-    <div style="font-size:.82rem;font-weight:700;color:${v>=max*0.7?'var(--green)':v>=max*0.4?'var(--warn)':'var(--red)'}">${v}</div>
-  </div>`).join('')}
-</div>
-<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.join('. ')||'Composite crypto momentum score.'}</div>
-<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${w.score}%;background:var(--green)"></div></div>
-<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">⚠ Crypto risk: Stop Loss ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | Take Profit ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}% | Max position ${(CRYPTO_RISK.maxPosition*100).toFixed(0)}% of portfolio</div>
-</div>`;
-  }).join('');
-}
-
-function fmtPrice(p) {
-  if (!p) return '—';
-  if (p >= 1000) return p.toLocaleString('en-US', {maximumFractionDigits:0});
-  if (p >= 1) return fmtN(p, 2);
-  if (p >= 0.01) return fmtN(p, 4);
-  return p.toFixed(8).replace(/\.?0+$/, '');
-}
-
-function fmtLarge(n) {
-  if (n >= 1e12) return '$' + fmtN(n/1e12, 2) + 'T';
-  if (n >= 1e9) return '$' + fmtN(n/1e9, 2) + 'B';
-  if (n >= 1e6) return '$' + fmtN(n/1e6, 2) + 'M';
-  return '$' + fmtN(n, 0);
-}
+//  AUTO-LOAD CONFIG FROM BACKEND
 //  Reads API key + mode from server.py
 //  No manual configuration needed
 // ═══════════════════════════════════════
 async function loadConfigFromBackend(){
+  // Try to fetch config from local backend server
+  // Works when served via python server.py at localhost:8000
   const origins = [
-    window.location.origin,
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
+    window.location.origin,         // same origin (localhost:8000 or cloudflare URL)
+    'http://localhost:8000',         // fallback direct
+    'http://127.0.0.1:8000',         // fallback direct IP
   ];
   for(const origin of origins){
     try{
       const res = await fetch(`${origin}/api/config`, {signal: AbortSignal.timeout(3000)});
       if(res.ok){
         const cfg = await res.json();
-
-        // Load whichever broker is active
         if(cfg.api_key){
-          S.apiKey    = cfg.api_key;
-          S.secretKey = cfg.alpaca_secret || '';
-          S.mode      = cfg.mode || 'demo';
-          S.broker    = cfg.broker || 't212';
-
-          localStorage.setItem('t212k',   S.apiKey);
-          localStorage.setItem('secretk', S.secretKey);
-          localStorage.setItem('t212m',   S.mode);
-          localStorage.setItem('broker',  S.broker);
-
-          const brokerName = BROKERS[S.broker]?.name || 'Trade 212';
-          log(`Auto-connected: ${brokerName} — Mode: ${S.mode.toUpperCase()}`, 'ok');
+          S.apiKey   = cfg.api_key;
+          S.mode     = cfg.mode || 'demo';
+          // Also store in localStorage as fallback
+          localStorage.setItem('t212k', S.apiKey);
+          localStorage.setItem('t212m', S.mode);
+          log(`Auto-connected from backend — Mode: ${S.mode.toUpperCase()}`,'ok');
           return true;
         }
       }
-    }catch(e){}
+    }catch(e){
+      // Try next origin
+    }
   }
-  // Fall back to localStorage
+  // Fall back to localStorage if backend unreachable
   if(S.apiKey){
-    log(`Using cached key — Broker: ${BROKERS[S.broker]?.name||'T212'} — Mode: ${S.mode.toUpperCase()}`, 'ok');
+    log(`Using cached API key — Mode: ${S.mode.toUpperCase()}`,'ok');
     return true;
   }
   return false;
@@ -3821,17 +1826,6 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   renderWTags();
   renderWCtrls();
   drawEqChart();
-  loadCryptoStrategy();
-  loadCommodityStrategy();
-  loadPersistedOrders();
-  switchStratTab(localStorage.getItem('stratTab')||'stock');
-
-  // Restore previous scan winners if any
-  if (S.scanWinners.length) {
-    renderScanResults(S.scanWinners.slice(0,20));
-    setEl('scanHistoryInfo', `${S.scannedSyms.size} stocks scanned previously · ${S.scanWinners.length} winners · Click ⚡ Scan More to continue`);
-    log(`Restored ${S.scanWinners.length} scan winners from previous session`, 'ok');
-  }
 
   log('RaanuTradingBot v2.1 starting...','info');
   log('Auto-loading config from backend...','info');
