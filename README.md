@@ -11,8 +11,7 @@
 **Owner:** Archana Arjunraj (GitHub: Prakash Rajamani)  
 **GitHub:** https://github.com/raanutradingbot/raanutradingbot  
 **Local URL:** http://localhost:8000  
-**Public URL:** https://unvalued-unskilled-virtual.ngrok-free.dev (changes on restart)  
-
+**Public URL:**https://raanutradingbot.vercel.app
 ---
 
 ## 🗂 File Structure
