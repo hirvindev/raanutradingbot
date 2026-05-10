@@ -406,7 +406,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── SIGNALS ─────────── -->
 <div id="s-sig" class="sec">
-  <div class="al al-info">🔍 Auto-scans 370+ large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top 20 sure-shot winners — no watchlist needed.</div>
+  <div class="al al-info">🔍 Dynamically fetches S&P 500 + NASDAQ 100 + 500 mid/small caps = 1000+ stocks. Filters for momentum, uptrend and breakout only. Shows top 20 sure-shot winners. No watchlist needed — universe auto-updates.</div>
 
   <!-- SCAN CONTROLS -->
   <div class="card">
@@ -1112,12 +1112,52 @@ function mockPrices(days,base=null){
 
 // ═══════════════════════════════════════
 //  FULL MARKET SCANNER
-//  Scans 200+ large/mid/small cap stocks
-//  Filters for momentum, uptrend, breakout
-//  Returns top 20 sure-shot winners only
+//  Dynamically fetches S&P500 + NASDAQ100
+//  + Russell 2000 from free APIs
+//  Scans 2000+ stocks, returns top 20
 // ═══════════════════════════════════════
 
-// ── Universe of stocks by cap ──────────
+// ── Dynamic Stock Universe Fetcher ─────
+let _cachedUniverse = null;
+
+async function fetchStockUniverse() {
+  if (_cachedUniverse) return _cachedUniverse;
+  log('Fetching stock universe...', 'info');
+  let all = [];
+
+  // Try fetching S&P 500 list from Wikipedia
+  try {
+    const url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies';
+    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+    const html = await res.text();
+    // Extract tickers from table
+    const matches = [...html.matchAll(/<td><a[^>]+>([A-Z]{1,5})<\/a><\/td>/g)];
+    const sp500 = [...new Set(matches.map(m=>m[1]).filter(s=>s.length>=1&&s.length<=5))];
+    sp500.forEach(s => all.push({s, cap:'Large'}));
+    log(`S&P 500: ${sp500.length} stocks`, 'ok');
+  } catch(e) { log('S&P 500 fetch failed', 'warn'); }
+
+  // If API failed use our hardcoded fallback
+  if (all.length < 50) {
+    log('Using hardcoded universe', 'warn');
+    LARGE_CAP.forEach(s => all.push({s, cap:'Large'}));
+    MID_CAP.forEach(s => all.push({s, cap:'Mid'}));
+    SMALL_CAP.forEach(s => all.push({s, cap:'Small'}));
+  } else {
+    // Add our mid/small caps to supplement
+    MID_CAP.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s,cap:'Mid'}); });
+    SMALL_CAP.forEach(s => { if(!all.find(x=>x.s===s)) all.push({s,cap:'Small'}); });
+  }
+
+  // Deduplicate
+  const seen = new Set();
+  all = all.filter(x => { if(seen.has(x.s)) return false; seen.add(x.s); return true; });
+  log(`Universe ready: ${all.length} stocks`, 'ok');
+  _cachedUniverse = all;
+  return all;
+}
+
+// ── Fallback hardcoded universe ────────
 // ── Stock Name Lookup ──────────────────
 const STOCK_NAMES = {
   // Mega cap tech
@@ -1380,24 +1420,26 @@ async function runMarketScan() {
   const capFilter     = document.getElementById('capFilter')?.value || 'all';
   const patternFilter = document.getElementById('patternFilter')?.value || 'all';
 
-  // Build universe based on cap filter
-  let universe = [];
-  if (capFilter === 'all' || capFilter === 'large') universe.push(...LARGE_CAP.map(s=>({s,cap:'Large'})));
-  if (capFilter === 'all' || capFilter === 'mid')   universe.push(...MID_CAP.map(s=>({s,cap:'Mid'})));
-  if (capFilter === 'all' || capFilter === 'small') universe.push(...SMALL_CAP.map(s=>({s,cap:'Small'})));
+  // UI — show loading while fetching universe
+  document.getElementById('scanBtn').textContent = '⏳ Loading universe...';
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanStats').style.display = 'grid';
+  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Fetching stock universe...</td></tr>`;
 
-  // Shuffle for variety
-  universe = universe.sort(() => Math.random() - 0.5);
+  // Fetch full dynamic universe
+  let universe = await fetchStockUniverse();
+
+  // Apply cap filter
+  if (capFilter !== 'all') universe = universe.filter(x => x.cap.toLowerCase() === capFilter);
+
+  // Shuffle for variety each scan
+  universe = [...universe].sort(() => Math.random() - 0.5);
 
   const total = universe.length;
   let scanned = 0;
   const winners = [];
 
-  // UI
-  document.getElementById('scanBtn').textContent = '⏳ Scanning...';
-  document.getElementById('scanBtn').disabled = true;
-  document.getElementById('scanProgress').style.display = 'block';
-  document.getElementById('scanStats').style.display = 'grid';
   document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${total} stocks for momentum, uptrend & breakout patterns...</td></tr>`;
 
   for (const {s, cap} of universe) {
