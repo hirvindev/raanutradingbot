@@ -658,43 +658,8 @@ const BASE = {
 };
 
 async function t212(path, method='GET', body=null){
-  log(`${method} ${path}`,'info');
-
-  // ── Route through backend server (avoids CORS, keeps key secure) ──
-  // Map T212 API paths to our local backend endpoints
-  const backendMap = {
-    'GET /equity/account/summary': '/api/account/cash',
-    'GET /equity/account/info':    '/api/account/info',
-    'GET /equity/portfolio':        '/api/portfolio',
-    'GET /equity/orders':           '/api/orders',
-    'POST /equity/orders/market':   '/api/orders/buy',
-    'POST /equity/orders/stop':     null, // handled below
-  };
-  const mapKey = `${method} ${path}`;
-  const backendPath = backendMap[mapKey];
-
-  // Use backend proxy if available
-  const backendOrigin = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
-    ? window.location.origin
-    : window.location.origin; // works for cloudflare tunnel too
-
-  if(backendPath !== undefined){
-    try{
-      const opts = { method: backendPath ? method : 'GET', headers:{'Content-Type':'application/json'} };
-      if(body && method==='POST') opts.body = JSON.stringify(body);
-      const url = backendPath ? `${backendOrigin}${backendPath}` : null;
-      if(!url){ log(`Stop order skipped in demo mode`,'warn'); return {}; }
-      const res = await fetch(url, opts);
-      const txt = await res.text();
-      if(!res.ok){ log(`Backend ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
-      return txt ? JSON.parse(txt) : {};
-    }catch(e){
-      log(`Backend error: ${e.message} — falling back to direct API`,'warn');
-    }
-  }
-
-  // ── Direct T212 API fallback (needs API key) ──
   if(!S.apiKey){ log('No API key — click Configure','err'); return null; }
+  log(`${method} ${path}`,'info');
   try{
     const opts = {
       method,
@@ -1388,70 +1353,21 @@ function getSL(){return parseInt(document.getElementById('slR')?.value||5);}
 function getTP(){return parseInt(document.getElementById('tpR')?.value||8);}
 
 // ═══════════════════════════════════════
-//  AUTO-LOAD CONFIG FROM BACKEND
-//  Reads API key + mode from server.py
-//  No manual configuration needed
-// ═══════════════════════════════════════
-async function loadConfigFromBackend(){
-  // Try to fetch config from local backend server
-  // Works when served via python server.py at localhost:8000
-  const origins = [
-    window.location.origin,         // same origin (localhost:8000 or cloudflare URL)
-    'http://localhost:8000',         // fallback direct
-    'http://127.0.0.1:8000',         // fallback direct IP
-  ];
-  for(const origin of origins){
-    try{
-      const res = await fetch(`${origin}/api/config`, {signal: AbortSignal.timeout(3000)});
-      if(res.ok){
-        const cfg = await res.json();
-        if(cfg.api_key){
-          S.apiKey   = cfg.api_key;
-          S.mode     = cfg.mode || 'demo';
-          // Also store in localStorage as fallback
-          localStorage.setItem('t212k', S.apiKey);
-          localStorage.setItem('t212m', S.mode);
-          log(`Auto-connected from backend — Mode: ${S.mode.toUpperCase()}`,'ok');
-          return true;
-        }
-      }
-    }catch(e){
-      // Try next origin
-    }
-  }
-  // Fall back to localStorage if backend unreachable
-  if(S.apiKey){
-    log(`Using cached API key — Mode: ${S.mode.toUpperCase()}`,'ok');
-    return true;
-  }
-  return false;
-}
-
-// ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
-document.addEventListener('DOMContentLoaded', async ()=>{
+document.addEventListener('DOMContentLoaded',()=>{
   renderWTags();
   renderWCtrls();
   drawEqChart();
 
-  log('AlgoTrader v2.1 starting...','info');
-  log('Auto-loading config from backend...','info');
-
-  // Try to load API key from backend automatically
-  const connected = await loadConfigFromBackend();
-
   setEl('sbMode', S.mode.toUpperCase());
-
-  if(connected && S.apiKey){
+  if(S.apiKey){
     updateConnBadge(true);
-    // Auto-start data load — no manual config needed
-    await fetchAccount();
-    await fetchPositions();
-    await fetchOrders();
-    log('All data loaded successfully','ok');
+    log(`API key found — Mode: ${S.mode.toUpperCase()}`,'ok');
+    fetchAccount().then(()=>fetchPositions()).then(()=>fetchOrders());
   }else{
-    log('Backend not reachable — click ⚙ Configure to enter API key manually','warn');
+    log('No API key — click ⚙ Configure to connect Trade 212','warn');
+    // Show skeleton state in metrics
     ['m-wr','m-avg','m-sl'].forEach(id=>{
       setEl(id,'—');
       document.getElementById(id).className='mval nu';
@@ -1461,7 +1377,8 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     setEl('m-sl-sub','Awaiting connection');
   }
 
-  log('Indicators: RSI(14), MACD(12,26,9), BB(20,2σ), EMA(50/200), ATR(14)','info');
+  log('AlgoTrader v2.1 ready — RSI, MACD, BB, EMA engines loaded','ok');
+  log('Metrics: Portfolio Value, Open P&L, Win Rate, Avg Trade, SL Hits — all from T212 API','info');
 
   document.querySelectorAll('.modal-bg').forEach(m=>
     m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');})

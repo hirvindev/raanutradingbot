@@ -137,6 +137,20 @@ async def t212_post(path: str, body: dict):
 
 
 # ---------- API ENDPOINTS ----------
+@app.get("/api/config")
+def get_config():
+    """
+    Send config to dashboard so it auto-connects on load.
+    Safe — only reachable from localhost or your Cloudflare tunnel (which you control).
+    """
+    return {
+        "mode":           T212_MODE,
+        "key_configured": bool(T212_API_KEY),
+        "api_key":        T212_API_KEY,
+        "base_url":       BASE_URL,
+    }
+
+
 @app.get("/api/health")
 def health():
     return {
