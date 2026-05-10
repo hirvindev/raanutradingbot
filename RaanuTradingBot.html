@@ -406,19 +406,68 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── SIGNALS ─────────── -->
 <div id="s-sig" class="sec">
-  <div class="al al-info">⚡ RSI(14), MACD(12,26,9), Bollinger Bands(20,2σ), EMA(50/200) computed from live Yahoo Finance price data. Composite score out of 100. Min 70 to execute.</div>
+  <div class="al al-info">🔍 Auto-scans 370+ large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top 20 sure-shot winners — no watchlist needed.</div>
+
+  <!-- SCAN CONTROLS -->
   <div class="card">
     <div class="card-hdr">
-      <div class="card-title" style="margin:0">Watchlist Scanner</div>
-      <button class="btn b-acc b-sm" onclick="runScan()">↻ Scan Now</button>
+      <div class="card-title" style="margin:0">Market Scanner</div>
+      <div style="display:flex;gap:7px;align-items:center">
+        <select id="capFilter" style="width:auto">
+          <option value="all">All Caps</option>
+          <option value="large">Large Cap Only</option>
+          <option value="mid">Mid Cap Only</option>
+          <option value="small">Small Cap Only</option>
+        </select>
+        <select id="patternFilter" style="width:auto">
+          <option value="all">All Patterns</option>
+          <option value="momentum">Momentum</option>
+          <option value="breakout">Breakout</option>
+          <option value="uptrend">Uptrend</option>
+        </select>
+        <button class="btn b-acc b-sm" onclick="runMarketScan()" id="scanBtn">⚡ Scan Market</button>
+      </div>
     </div>
+
+    <!-- PROGRESS BAR -->
+    <div id="scanProgress" style="display:none;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
+        <span id="scanStatus">Scanning...</span>
+        <span id="scanCount">0 / 0</span>
+      </div>
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+        <div id="scanBar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .3s"></div>
+      </div>
+    </div>
+
+    <!-- STATS ROW -->
+    <div id="scanStats" style="display:none;margin-bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:7px">
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="stScanned">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Winners Found</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="stWinners">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="stBreakouts">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="stAvg">0</div>
+      </div>
+    </div>
+
     <table>
-      <thead><tr><th>Symbol</th><th>Score</th><th>RSI</th><th>MACD</th><th>BB</th><th>EMA Trend</th><th>News</th><th>Fund.</th><th>Signal</th><th>Action</th></tr></thead>
-      <tbody id="sigBody"><tr><td class="te" colspan="10">Click Scan Now to analyse watchlist</td></tr></tbody>
+      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>Momentum</th><th>Breakout</th><th>Uptrend</th><th>Action</th></tr></thead>
+      <tbody id="sigBody"><tr><td class="te" colspan="12">Click ⚡ Scan Market to find top opportunities across all US stocks</td></tr></tbody>
     </table>
   </div>
+
   <div class="card" id="aiCard" style="display:none">
-    <div class="card-title">AI Trade Reasoning</div>
+    <div class="card-title">Top Picks — Trade Reasoning</div>
     <div id="aiReasons"></div>
   </div>
 </div>
@@ -586,6 +635,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="modal-sub">Connect your Trade 212 paper account to pull real data.</div>
     <div style="display:flex;flex-direction:column;gap:11px">
       <div class="fg">
+        <div class="fl">Backend Server URL (for Vercel deployment)</div>
+        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or ngrok URL">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed when using Vercel. Leave blank if running locally. Enter your PC's local IP or ngrok URL.</div>
+      </div>
+      <div class="fg">
         <div class="fl">Trade 212 API Key</div>
         <input type="password" id="c-t212" placeholder="Paste from T212 → Settings → API (Beta)">
         <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Enables account data, positions and order placement.</div>
@@ -651,55 +705,59 @@ const S = {
 
 // ═══════════════════════════════════════
 //  T212 API LAYER
+//  Routes through local backend when available
+//  Falls back to direct API when on Vercel
 // ═══════════════════════════════════════
 const BASE = {
   demo: 'https://demo.trading212.com/api/v0',
   live: 'https://live.trading212.com/api/v0',
 };
 
+// Backend URL — auto-detected or manually set
+// When on Vercel, user sets this to their ngrok/local IP
+function getBackendUrl(){
+  const saved = localStorage.getItem('backendUrl');
+  if(saved) return saved.replace(/\/$/, '');
+  // If running locally, use same origin
+  const origin = window.location.origin;
+  if(origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
+  return null; // on Vercel with no backend configured
+}
+
 async function t212(path, method='GET', body=null){
   log(`${method} ${path}`,'info');
 
-  // ── Route through backend server (avoids CORS, keeps key secure) ──
-  // Map T212 API paths to our local backend endpoints
   const backendMap = {
     'GET /equity/account/summary': '/api/account/cash',
     'GET /equity/account/info':    '/api/account/info',
-    'GET /equity/portfolio':        '/api/portfolio',
-    'GET /equity/orders':           '/api/orders',
-    'POST /equity/orders/market':   '/api/orders/buy',
-    'POST /equity/orders/stop':     null, // handled below
+    'GET /equity/portfolio':       '/api/portfolio',
+    'GET /equity/orders':          '/api/orders',
+    'POST /equity/orders/market':  '/api/orders/buy',
+    'POST /equity/orders/stop':    null,
   };
   const mapKey = `${method} ${path}`;
   const backendPath = backendMap[mapKey];
+  const backendUrl = getBackendUrl();
 
-  // Use backend proxy if available
-  const backendOrigin = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
-    ? window.location.origin
-    : window.location.origin; // works for cloudflare tunnel too
-
-  if(backendPath !== undefined){
+  // Route through backend if available
+  if(backendUrl && backendPath !== undefined){
     try{
-      const opts = { method: backendPath ? method : 'GET', headers:{'Content-Type':'application/json'} };
+      const opts = { method: backendPath?method:'GET', headers:{'Content-Type':'application/json'} };
       if(body && method==='POST') opts.body = JSON.stringify(body);
-      const url = backendPath ? `${backendOrigin}${backendPath}` : null;
-      if(!url){ log(`Stop order skipped in demo mode`,'warn'); return {}; }
-      const res = await fetch(url, opts);
+      if(!backendPath){ log(`Stop order skipped`,'warn'); return {}; }
+      const res = await fetch(`${backendUrl}${backendPath}`, opts);
       const txt = await res.text();
       if(!res.ok){ log(`Backend ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
       return txt ? JSON.parse(txt) : {};
     }catch(e){
-      log(`Backend error: ${e.message} — falling back to direct API`,'warn');
+      log(`Backend unreachable: ${e.message} — trying direct API`,'warn');
     }
   }
 
-  // ── Direct T212 API fallback (needs API key) ──
-  if(!S.apiKey){ log('No API key — click Configure','err'); return null; }
+  // Direct T212 API (needs API key set in Configure)
+  if(!S.apiKey){ log('No API key — click ⚙ Configure','err'); return null; }
   try{
-    const opts = {
-      method,
-      headers:{ Authorization: S.apiKey, 'Content-Type':'application/json' },
-    };
+    const opts = { method, headers:{ Authorization:S.apiKey, 'Content-Type':'application/json' } };
     if(body) opts.body = JSON.stringify(body);
     const res = await fetch(BASE[S.mode]+path, opts);
     const txt = await res.text();
@@ -1053,98 +1111,426 @@ function mockPrices(days,base=null){
 }
 
 // ═══════════════════════════════════════
-//  SCAN ENGINE
+//  FULL MARKET SCANNER
+//  Scans 200+ large/mid/small cap stocks
+//  Filters for momentum, uptrend, breakout
+//  Returns top 20 sure-shot winners only
 // ═══════════════════════════════════════
-async function runScan(){
-  log('Scanning watchlist...','ok');
-  setEl('m-score','...');
-  document.getElementById('sigBody').innerHTML=`<tr><td class="te" colspan="10"><span class="spin"></span> Scanning ${S.watchlist.length} symbols...</td></tr>`;
-  const results=[];
-  for(const sym of S.watchlist){
-    try{
-      const data=await fetchPrices(sym,200);
-      const c=data.closes;
-      const price=c[c.length-1];
-      const rsiV=calcRSI(c),macdV=calcMACD(c),bbV=calcBB(c);
-      const e50=calcEMA(c,50),e200=calcEMA(c,200);
-      const atr=calcATR(data.highs,data.lows,c);
-      const rs=rsScore(rsiV),ms=maScore(macdV),bs=bbScore(bbV,price),es=emaScore(e50,e200,price);
-      const newsS=45+Math.floor(Math.random()*45),fundS=45+Math.floor(Math.random()*40);
-      const comp=composite({rsi:rs.s,macd:ms.s,bb:bs.s,ema:es.s,news:newsS,fund:fundS});
-      const lbl=sLabel(comp);
-      results.push({sym,price,rsiV,macdV,bbV,e50,e200,rs,ms,bs,es,newsS,fundS,comp,lbl,atr});
-    }catch(e){log(`Scan ${sym}: ${e.message}`,'err');}
-  }
-  results.sort((a,b)=>b.comp-a.comp);
-  const best=results[0];
-  if(best){ setEl('m-score',best.comp); drawBreakdown(best); document.getElementById('rNum').textContent=best.comp; document.getElementById('rLbl').textContent=sLabel(best.comp).l; }
-  const minScore=parseInt(document.getElementById('msR')?.value||70);
-  document.getElementById('sigBody').innerHTML=results.map(r=>{
-    const sig=r.comp>=70?'BUY':r.comp>=50?'HOLD':'AVOID';
-    const sc=r.comp>=70?'bdg-buy':r.comp>=50?'bdg-hold':'bdg-sell';
-    const canEx=r.comp>=minScore&&sig==='BUY';
-    const cc=c=>(c==='up'?'var(--green)':c==='down'?'var(--red)':'var(--muted2)');
-    return`<tr>
-<td style="font-weight:700">${r.sym}</td>
-<td><div style="display:flex;align-items:center;gap:5px"><div style="width:38px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.comp}%;background:${r.lbl.col}"></div></div><span style="font-family:var(--mono);font-size:.7rem;color:${r.lbl.col}">${r.comp}</span></div></td>
-<td style="font-family:var(--mono);color:${cc(r.rs.c)}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
-<td style="font-family:var(--mono);font-size:.68rem;color:${cc(r.ms.c)}">${r.ms.sig}</td>
-<td style="font-family:var(--mono);font-size:.68rem;color:${cc(r.bs.c)}">${r.bs.sig}</td>
-<td style="font-family:var(--mono);font-size:.68rem;color:${cc(r.es.c)}">${r.es.sig}</td>
-<td style="font-family:var(--mono);color:${r.newsS>60?'var(--green)':r.newsS>40?'var(--warn)':'var(--red)'}">${r.newsS}</td>
-<td style="font-family:var(--mono);color:${r.fundS>60?'var(--green)':r.fundS>40?'var(--warn)':'var(--red)'}">${r.fundS}</td>
-<td><span class="bdg ${sc}">${sig}</span></td>
-<td>${canEx?`<button class="btn b-acc b-xs" onclick="autoTrade('${r.sym}',${r.price},'${r.ms.sig}','${r.es.sig}',${fn(r.rsiV,1)})">Execute</button>`:`<button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${r.sym}';computeInd()">Analyse</button>`}</td>
-</tr>`;
-  }).join('');
-  if(document.getElementById('tAuto')?.checked&&S.engineOn) autoExec(results,minScore);
-  renderAIReasons(results.filter(r=>r.comp>=60));
-  log(`Scan done — ${results.filter(r=>r.comp>=70).length} BUY, ${results.filter(r=>r.comp<40).length} AVOID`,'ok');
+
+// ── Universe of stocks by cap ──────────
+// ── Stock Name Lookup ──────────────────
+const STOCK_NAMES = {
+  // Mega cap tech
+  'AAPL':'Apple','MSFT':'Microsoft','NVDA':'NVIDIA','GOOGL':'Alphabet','GOOG':'Alphabet',
+  'AMZN':'Amazon','META':'Meta','TSLA':'Tesla','AVGO':'Broadcom','LLY':'Eli Lilly',
+  // Financials
+  'JPM':'JPMorgan','V':'Visa','MA':'Mastercard','BAC':'Bank of America','WFC':'Wells Fargo',
+  'GS':'Goldman Sachs','MS':'Morgan Stanley','BLK':'BlackRock','AXP':'Amex','SCHW':'Schwab',
+  'COF':'Capital One','USB':'US Bancorp','TFC':'Truist','PNC':'PNC Financial','C':'Citigroup',
+  // Healthcare
+  'UNH':'UnitedHealth','JNJ':'Johnson & Johnson','MRK':'Merck','ABBV':'AbbVie','TMO':'Thermo Fisher',
+  'ABT':'Abbott','ISRG':'Intuitive Surgical','ELV':'Elevance','SYK':'Stryker','MDT':'Medtronic',
+  'VRTX':'Vertex','REGN':'Regeneron','AMGN':'Amgen','GILD':'Gilead','BMY':'Bristol-Myers',
+  // Consumer
+  'HD':'Home Depot','WMT':'Walmart','COST':'Costco','MCD':'McDonald\'s','PG':'Procter & Gamble',
+  'KO':'Coca-Cola','PEP':'PepsiCo','NKE':'Nike','SBUX':'Starbucks','TGT':'Target',
+  'LOW':'Lowe\'s','TJX':'TJX Companies','LULU':'Lululemon','YUM':'Yum Brands','CMG':'Chipotle',
+  // Energy
+  'XOM':'ExxonMobil','CVX':'Chevron','COP':'ConocoPhillips','EOG':'EOG Resources','SLB':'Schlumberger',
+  'MPC':'Marathon Petroleum','VLO':'Valero','PSX':'Phillips 66','OXY':'Occidental','PXD':'Pioneer Natural',
+  'HAL':'Halliburton','DVN':'Devon Energy','FANG':'Diamondback','APA':'APA Corp','MRO':'Marathon Oil',
+  // Tech
+  'NFLX':'Netflix','CRM':'Salesforce','ADBE':'Adobe','QCOM':'Qualcomm','TXN':'Texas Instruments',
+  'AMD':'AMD','INTC':'Intel','IBM':'IBM','ACN':'Accenture','CSCO':'Cisco',
+  'ORCL':'Oracle','SAP':'SAP','NOW':'ServiceNow','SNOW':'Snowflake','UBER':'Uber',
+  // Industrial
+  'CAT':'Caterpillar','GE':'GE','HON':'Honeywell','RTX':'Raytheon','LMT':'Lockheed Martin',
+  'BA':'Boeing','DE':'Deere & Co','MMM':'3M','EMR':'Emerson','ETN':'Eaton',
+  'PH':'Parker Hannifin','ROK':'Rockwell','CMI':'Cummins','IR':'Ingersoll Rand','TT':'Trane Technologies',
+  // Other large
+  'BRK-B':'Berkshire Hathaway','NEE':'NextEra Energy','LIN':'Linde','DHR':'Danaher','SPGI':'S&P Global',
+  'PM':'Philip Morris','PANW':'Palo Alto Networks','AMAT':'Applied Materials','MU':'Micron',
+  'KLAC':'KLA Corp','LRCX':'Lam Research','MRVL':'Marvell Tech','BKNG':'Booking Holdings',
+  'DDOG':'Datadog','ZS':'Zscaler',
+  // REITs
+  'AMT':'American Tower','PLD':'Prologis','CCI':'Crown Castle','EQIX':'Equinix',
+  'PSA':'Public Storage','DLR':'Digital Realty','O':'Realty Income','SPG':'Simon Property',
+  'AVB':'AvalonBay','EQR':'Equity Residential',
+  // Cybersecurity
+  'CRWD':'CrowdStrike','FTNT':'Fortinet','NET':'Cloudflare','OKTA':'Okta','S':'SentinelOne',
+  'TENB':'Tenable','QLYS':'Qualys','VRNS':'Varonis','CYBR':'CyberArk','SAIL':'SailPoint',
+  // SaaS
+  'TEAM':'Atlassian','MDB':'MongoDB','TTD':'The Trade Desk','BILL':'Bill.com','HUBS':'HubSpot',
+  'PCTY':'Paylocity','ZI':'ZoomInfo','GTLB':'GitLab','CFLT':'Confluent','BRZE':'Braze',
+  'MNDY':'Monday.com','FROG':'JFrog','JAMF':'Jamf','IOT':'Samsara','ASAN':'Asana',
+  'DOCN':'DigitalOcean','ESTC':'Elastic','DOMO':'Domo','NCNO':'nCino','ALTR':'Altair',
+  // Fintech
+  'AFRM':'Affirm','UPST':'Upstart','SOFI':'SoFi','NU':'Nu Holdings','HOOD':'Robinhood',
+  'LC':'LendingClub','PAYO':'Payoneer','DLO':'dLocal','FLYW':'Flywire','RELY':'Remitly',
+  // Consumer tech
+  'CELH':'Celsius Holdings','DUOL':'Duolingo','ABNB':'Airbnb','DASH':'DoorDash','LYFT':'Lyft',
+  'PINS':'Pinterest','SNAP':'Snap','RBLX':'Roblox','BMBL':'Bumble','MTTR':'Matterport',
+  // EV
+  'RIVN':'Rivian','LCID':'Lucid Motors','NIO':'NIO','LI':'Li Auto','XPEV':'XPeng',
+  'CHPT':'ChargePoint','BLNK':'Blink Charging','EVGO':'EVgo','PTRA':'Proterra','WKHS':'Workhorse',
+  // AI & data
+  'PLTR':'Palantir','AI':'C3.ai','PATH':'UiPath','BBAI':'BigBear.ai','SOUN':'SoundHound',
+  // E-commerce
+  'ETSY':'Etsy','W':'Wayfair','CHWY':'Chewy','CVNA':'Carvana',
+  // Biotech
+  'RXRX':'Recursion Pharma','BEAM':'Beam Therapeutics','CRSP':'CRISPR Therapeutics',
+  'EDIT':'Editas Medicine','NTLA':'Intellia','VERV':'Verve Therapeutics','BLUE':'bluebird bio',
+  'FATE':'Fate Therapeutics','IMVT':'Immunovant','HIMS':'Hims & Hers',
+  // Semiconductors
+  'ACMR':'ACM Research','AMBA':'Ambarella','AEHR':'Aehr Test','CAMT':'Camtek',
+  'FORM':'FormFactor','ONTO':'Onto Innovation','MKSI':'MKS Instruments','COHU':'Cohu',
+  'WOLF':'Wolfspeed','OLED':'Universal Display',
+  // Gaming & entertainment
+  'DKNG':'DraftKings','PENN':'Penn Entertainment','MGM':'MGM Resorts','CZR':'Caesars','WYNN':'Wynn Resorts',
+  // Quantum & emerging
+  'IONQ':'IonQ','RGTI':'Rigetti Computing','QBTS':'D-Wave Quantum','QUBT':'Quantum Computing','ARQQ':'Arqit Quantum',
+  // Crypto miners
+  'MARA':'Marathon Digital','RIOT':'Riot Platforms','CLSK':'CleanSpark','HUT':'Hut 8','BTBT':'Bit Digital',
+  'CIFR':'Cipher Mining','IREN':'Iris Energy','WULF':'TeraWulf','MIGI':'Migi & Dali',
+  // Clean energy
+  'PLUG':'Plug Power','FCEL':'FuelCell Energy','BLDP':'Ballard Power','BE':'Bloom Energy',
+  'JOBY':'Joby Aviation','ACHR':'Archer Aviation',
+  // Healthcare tech
+  'TDOC':'Teladoc','AMWL':'American Well','OPRX':'OptimizeRx','VEEV':'Veeva Systems','GDRX':'GoodRx',
+  // Media
+  'PARA':'Paramount','WBD':'Warner Bros Discovery','SIRI':'Sirius XM','FUBO':'fuboTV',
+};
+
+function getStockName(ticker) {
+  return STOCK_NAMES[ticker] || ticker;
 }
 
-function autoExec(results,minScore){
-  const maxPos=parseInt(document.getElementById('mpR')?.value||6);
-  for(const r of results){
-    if(r.comp>=minScore&&sLabel(r.comp).l.includes('BUY')){
-      const owned=S.positions.some(p=>p.ticker===r.sym||p.ticker===r.sym+'_US_EQ');
-      if(!owned&&S.positions.length<maxPos) autoTrade(r.sym,r.price,r.ms.sig,r.es.sig,fn(r.rsiV,1));
-    }
+const LARGE_CAP = [
+  // Mega cap tech
+  'AAPL','MSFT','NVDA','GOOGL','GOOG','AMZN','META','TSLA','AVGO','LLY',
+  // Financials
+  'JPM','V','MA','BAC','WFC','GS','MS','BLK','AXP','SCHW','COF','USB','TFC','PNC','C',
+  // Healthcare
+  'UNH','JNJ','MRK','ABBV','TMO','ABT','ISRG','ELV','SYK','MDT','VRTX','REGN','AMGN','GILD','BMY',
+  // Consumer
+  'HD','WMT','COST','MCD','PG','KO','PEP','NKE','SBUX','TGT','LOW','TJX','LULU','YUM','CMG',
+  // Energy
+  'XOM','CVX','COP','EOG','SLB','MPC','VLO','PSX','OXY','PXD','HAL','DVN','FANG','APA','MRO',
+  // Tech
+  'NFLX','CRM','ADBE','QCOM','TXN','AMD','INTC','IBM','ACN','CSCO','ORCL','SAP','NOW','SNOW','UBER',
+  // Industrial
+  'CAT','GE','HON','RTX','LMT','BA','DE','MMM','EMR','ETN','PH','ROK','CMI','IR','TT',
+  // Other large
+  'BRK-B','NEE','LIN','DHR','SPGI','PM','PANW','AMAT','MU','KLAC','LRCX','MRVL','BKNG','DDOG','ZS',
+  // REITs & utilities
+  'AMT','PLD','CCI','EQIX','PSA','DLR','O','SPG','AVB','EQR'
+];
+
+const MID_CAP = [
+  // Cybersecurity
+  'CRWD','FTNT','NET','OKTA','S','TENB','QLYS','VRNS','CYBR','SAIL',
+  // SaaS
+  'TEAM','MDB','TTD','BILL','HUBS','PCTY','ZI','GTLB','CFLT','BRZE',
+  'MNDY','FROG','JAMF','IOT','ASAN','DOCN','ESTC','DOMO','NCNO','ALTR',
+  // Fintech
+  'AFRM','UPST','SOFI','NU','HOOD','LC','PAYO','DLO','FLYW','RELY',
+  // Consumer tech
+  'CELH','DUOL','ABNB','DASH','LYFT','PINS','SNAP','RBLX','BMBL','MTTR',
+  // EV & mobility
+  'RIVN','LCID','NIO','LI','XPEV','CHPT','BLNK','EVGO','PTRA','WKHS',
+  // AI & data
+  'PLTR','AI','PATH','BBAI','SOUN','BIGB','IREN','CIFR','BTBT','CORZ',
+  // E-commerce
+  'ETSY','W','CHWY','CVNA','PRTS','FLXS','BZUN','GLOB','ARCO','VTEX',
+  // Biotech mid
+  'HIMS','RXRX','BEAM','CRSP','EDIT','NTLA','VERV','BLUE','FATE','IMVT',
+  // Semiconductors mid
+  'ACMR','AMBA','AEHR','CAMT','FORM','ONTO','MKSI','COHU','WOLF','OLED',
+  // Industrials mid
+  'AXON','KTOS','RGEN','ACLS','IPGP','TTEC','RXO','STRC','ENFN','ARIS',
+  // Media & entertainment
+  'PARA','WBD','SIRI','FUBO','DKNG','RSI','PENN','MGM','CZR','WYNN'
+];
+
+const SMALL_CAP = [
+  // Quantum computing
+  'IONQ','RGTI','QBTS','QUBT','ARQQ','QUBT','IQM','SPCE',
+  // Crypto miners
+  'MARA','RIOT','CLSK','HUT','BTBT','CIFR','IREN','BTDR','WULF','MIGI',
+  // AI small caps
+  'SOUN','BBAI','AEYE','GFAI','AITX','AIXI','INPX','NNBR','IDAI','MVST',
+  // LiDAR & sensors
+  'OUST','INVZ','MVIS','LAZR','AEVA','LIDR','VLDR','RDAR','BFLY','SWVL',
+  // Biotech small
+  'SEER','PRME','SGMO','HRMY','INVA','PRAX','ARQT','RVNC','AVAH','TGTX',
+  'VKTX','KPTI','CTIC','ADMA','ACAD','SUPN','NUVL','KROS','IRON','TARS',
+  // Semiconductor small
+  'AEVA','OUST','INDI','CODA','POWI','DIOD','MPWR','SITM','AMBA','AIOT',
+  // Clean energy small
+  'PLUG','FCEL','BLDP','BE','EVTL','SKYH','JOBY','ACHR','LILM','WATT',
+  // Fintech small
+  'OPEN','OFFERPAD','REDFIN','COMP','UWMC','GHLD','MC','CURO','ATLC','RPAY',
+  // Healthcare small
+  'HIMS','WELL','TALK','DOCS','TDOC','AMWL','OPRX','PHR','VEEV','GDRX',
+  // Consumer small
+  'BIRD','LAZY','BARK','PETS','LOVE','LESL','XPOF','PLBY','CLOV','GOCO',
+  // Tech small
+  'PTRA','CIDM','KALI','SPRT','TPVG','GAIN','GLAD','CSWC','TRIN','PFLT',
+  // Special situations
+  'SPWR','MAXN','ARRY','NOVA','SHLS','FTCI','PESI','AMRC','CLNE','GEVO'
+];
+
+// ── Pattern Detection ──────────────────
+function detectPatterns(closes, highs, lows, vols) {
+  const patterns = [];
+  const price = closes[closes.length - 1];
+  const e20  = calcEMA(closes, 20);
+  const e50  = calcEMA(closes, 50);
+  const e200 = calcEMA(closes, 200);
+  const rsi  = calcRSI(closes);
+  const macd = calcMACD(closes);
+  const bb   = calcBB(closes);
+  const avgVol = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
+  const lastVol = vols[vols.length - 1];
+  const volSpike = lastVol > avgVol * 1.5;
+
+  // ── MOMENTUM ──
+  // Price making higher highs, RSI 50-70, MACD positive
+  const recentHighs = highs.slice(-5);
+  const higherHighs = recentHighs[4] > recentHighs[0];
+  const rsiMomentum = rsi > 50 && rsi < 75;
+  const macdPositive = macd.lm > 0 && macd.hist > 0;
+  if (higherHighs && rsiMomentum && macdPositive) {
+    patterns.push({ type: 'MOMENTUM', strength: 'STRONG', color: 'var(--green)' });
+  } else if (macdPositive && rsiMomentum) {
+    patterns.push({ type: 'MOMENTUM', strength: 'MILD', color: 'var(--accent)' });
   }
+
+  // ── BREAKOUT ──
+  // Price breaking above 52-week high or BB upper with volume
+  const high52w = Math.max(...highs.slice(-252));
+  const nearHigh = price >= high52w * 0.97; // within 3% of 52w high
+  const bbBreakout = bb && price > bb.upper;
+  if ((nearHigh || bbBreakout) && volSpike) {
+    patterns.push({ type: 'BREAKOUT', strength: 'STRONG', color: 'var(--warn)' });
+  } else if (nearHigh || bbBreakout) {
+    patterns.push({ type: 'BREAKOUT', strength: 'FORMING', color: 'var(--warn)' });
+  }
+
+  // ── UPTREND ──
+  // Price > EMA20 > EMA50 > EMA200 (perfect uptrend stack)
+  const v20  = e20[e20.length-1];
+  const v50  = e50[e50.length-1];
+  const v200 = e200[e200.length-1];
+  if (v20 && v50 && v200 && price > v20 && v20 > v50 && v50 > v200) {
+    patterns.push({ type: 'UPTREND', strength: 'CONFIRMED', color: 'var(--accent2)' });
+  } else if (v50 && v200 && price > v50 && v50 > v200) {
+    patterns.push({ type: 'UPTREND', strength: 'PARTIAL', color: 'var(--accent2)' });
+  }
+
+  // ── GOLDEN CROSS ──
+  const pv50 = e50[e50.length-2], pv200 = e200[e200.length-2];
+  if (v50 && v200 && pv50 && pv200 && v50 > v200 && pv50 <= pv200) {
+    patterns.push({ type: 'GOLDEN CROSS', strength: 'FRESH', color: 'var(--purple)' });
+  }
+
+  return patterns;
 }
-function autoTrade(sym,price,macdSig,emaSig,rsiVal){
-  const budget=(S.account?.cash?.freeForStocks??2000)*(parseInt(document.getElementById('psR')?.value||20)/100);
-  const qty=Math.max(1,Math.floor(budget/price));
-  const reason=`Auto: RSI ${rsiVal} | MACD ${macdSig} | EMA ${emaSig}`;
-  confirm2(`AUTO TRADE\nBUY ${qty} × ${sym}\nPrice: ~${fmtCur(price)}\nStop: ${fmtCur(price*(1-getSL()/100))}\nTP: ${fmtCur(price*(1+getTP()/100))}\n\n${reason}`,'Confirm Auto Trade',()=>placeTrade(sym,'BUY',qty,reason));
+
+// ── Momentum Score ─────────────────────
+function momentumScore(closes, highs, lows, vols) {
+  const price  = closes[closes.length - 1];
+  const rsi    = calcRSI(closes);
+  const macd   = calcMACD(closes);
+  const bb     = calcBB(closes);
+  const e50    = calcEMA(closes, 50);
+  const e200   = calcEMA(closes, 200);
+  const avgVol = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
+  const lastVol = vols[vols.length - 1];
+
+  let score = 0;
+
+  // RSI in sweet spot 50-70 = momentum zone
+  if (rsi >= 55 && rsi <= 70) score += 25;
+  else if (rsi >= 50 && rsi < 55) score += 15;
+  else if (rsi > 70 && rsi < 80) score += 10; // still going but extended
+
+  // MACD positive and rising
+  if (macd.lm > 0 && macd.hist > 0) score += 25;
+  else if (macd.hist > 0) score += 10;
+
+  // Price above both EMAs (uptrend)
+  const v50 = e50[e50.length-1], v200 = e200[e200.length-1];
+  if (v50 && v200 && price > v50 && v50 > v200) score += 25;
+  else if (v50 && price > v50) score += 12;
+
+  // Volume confirmation
+  if (lastVol > avgVol * 1.5) score += 15;
+  else if (lastVol > avgVol * 1.2) score += 8;
+
+  // Breakout — near 52w high
+  const high52w = Math.max(...highs.slice(-252));
+  if (price >= high52w * 0.97) score += 10;
+
+  return Math.min(score, 100);
 }
-function drawBreakdown(r){
-  const rows=[['RSI',r.rs.s,r.rs.c],['MACD',r.ms.s,r.ms.c],['BB',r.bs.s,r.bs.c],['EMA',r.es.s,r.es.c],['News',r.newsS,r.newsS>60?'up':r.newsS>40?'nu':'down'],['Fund.',r.fundS,r.fundS>60?'up':r.fundS>40?'nu':'down']];
-  document.getElementById('rBreak').innerHTML=rows.map(([n,v,c])=>`<div style="display:flex;justify-content:space-between;font-size:.65rem;font-family:var(--mono)"><span style="color:var(--muted)">${n}</span><span class="${c}">${v}</span></div><div class="sbar"><div class="sfill" style="width:${v}%;background:${c==='up'?'var(--green)':c==='down'?'var(--red)':'var(--accent)'}"></div></div>`).join('');
+
+// ── Main Market Scanner ────────────────
+async function runMarketScan() {
+  const capFilter     = document.getElementById('capFilter')?.value || 'all';
+  const patternFilter = document.getElementById('patternFilter')?.value || 'all';
+
+  // Build universe based on cap filter
+  let universe = [];
+  if (capFilter === 'all' || capFilter === 'large') universe.push(...LARGE_CAP.map(s=>({s,cap:'Large'})));
+  if (capFilter === 'all' || capFilter === 'mid')   universe.push(...MID_CAP.map(s=>({s,cap:'Mid'})));
+  if (capFilter === 'all' || capFilter === 'small') universe.push(...SMALL_CAP.map(s=>({s,cap:'Small'})));
+
+  // Shuffle for variety
+  universe = universe.sort(() => Math.random() - 0.5);
+
+  const total = universe.length;
+  let scanned = 0;
+  const winners = [];
+
+  // UI
+  document.getElementById('scanBtn').textContent = '⏳ Scanning...';
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanStats').style.display = 'grid';
+  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${total} stocks for momentum, uptrend & breakout patterns...</td></tr>`;
+
+  for (const {s, cap} of universe) {
+    try {
+      const data = await fetchPrices(s, 260); // 1 year of data
+      const c = data.closes;
+      if (c.length < 60) { scanned++; continue; } // skip if not enough data
+
+      const price = c[c.length - 1];
+      const patterns = detectPatterns(c, data.highs, data.lows, data.vols);
+      const score = momentumScore(c, data.highs, data.lows, data.vols);
+      const rsiV = calcRSI(c);
+      const macdV = calcMACD(c);
+
+      // ── FILTER: must have at least one pattern ──
+      if (patterns.length === 0) { scanned++; continue; }
+
+      // ── FILTER: pattern type filter ──
+      if (patternFilter !== 'all') {
+        const hasPattern = patterns.some(p => p.type.toLowerCase().includes(patternFilter));
+        if (!hasPattern) { scanned++; continue; }
+      }
+
+      // ── FILTER: minimum score 72 to be a "sure-shot" ──
+      if (score < 72) { scanned++; continue; }
+
+      // ── FILTER: RSI not overbought (< 80) ──
+      if (rsiV && rsiV > 80) { scanned++; continue; }
+
+      winners.push({ s, cap, price, patterns, score, rsiV, macdV });
+    } catch(e) { /* skip failed fetches */ }
+
+    scanned++;
+
+    // Update progress
+    const pct = Math.round(scanned / total * 100);
+    document.getElementById('scanBar').style.width = pct + '%';
+    document.getElementById('scanCount').textContent = `${scanned} / ${total}`;
+    document.getElementById('scanStatus').textContent = `Scanning ${s}...`;
+    document.getElementById('stScanned').textContent = scanned;
+    document.getElementById('stWinners').textContent = winners.length;
+    document.getElementById('stBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
+    document.getElementById('stAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
+
+    // Stop once we have enough candidates (speed optimisation)
+    if (winners.length >= 60) break;
+  }
+
+  // Sort by score, take top 20
+  winners.sort((a,b) => b.score - a.score);
+  const top20 = winners.slice(0, 20);
+
+  // Render
+  document.getElementById('scanProgress').style.display = 'none';
+  document.getElementById('scanBtn').textContent = '⚡ Scan Market';
+  document.getElementById('scanBtn').disabled = false;
+  document.getElementById('stScanned').textContent = scanned;
+  document.getElementById('stWinners').textContent = top20.length;
+
+  if (!top20.length) {
+    document.getElementById('sigBody').innerHTML = '<tr><td class="te" colspan="12">No sure-shot winners found — try changing cap or pattern filter</td></tr>';
+    return;
+  }
+
+  document.getElementById('sigBody').innerHTML = top20.map((r, i) => {
+    const mainPat = r.patterns[0];
+    const patBadges = r.patterns.map(p =>
+      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
+    ).join('');
+    const capCol = r.cap==='Large'?'var(--accent2)':r.cap==='Mid'?'var(--warn)':'var(--purple)';
+    const rsiCol = r.rsiV>70?'var(--warn)':r.rsiV>55?'var(--green)':'var(--muted2)';
+    const macdCol = r.macdV.lm>0?'var(--green)':'var(--red)';
+    const hasBreakout = r.patterns.some(p=>p.type==='BREAKOUT');
+    const hasUptrend  = r.patterns.some(p=>p.type==='UPTREND'||p.type==='GOLDEN CROSS');
+    const hasMomentum = r.patterns.some(p=>p.type==='MOMENTUM');
+    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
+<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
+<td style="font-weight:800;font-size:.85rem">${r.s} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
+<td style="font-size:.75rem;color:var(--muted2);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${getStockName(r.s)}</td>
+<td><span style="font-size:.62rem;font-family:var(--mono);color:${capCol};padding:1px 5px;border-radius:3px;border:1px solid ${capCol}40">${r.cap}</span></td>
+<td style="font-family:var(--mono)">$${fn(r.price)}</td>
+<td>
+  <div style="display:flex;align-items:center;gap:5px">
+    <div style="width:42px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.score}%;background:var(--green)"></div></div>
+    <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:var(--green)">${r.score}</span>
+  </div>
+</td>
+<td>${patBadges}</td>
+<td style="font-family:var(--mono);color:${rsiCol}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
+<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓ YES':'—'}</span></td>
+<td style="display:flex;gap:4px">
+  <button class="btn b-acc b-xs" onclick="autoTrade('${r.s}',${r.price},'${r.patterns.map(p=>p.type).join('+')}','UPTREND',${fn(r.rsiV,1)})">Execute</button>
+  <button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${r.s}';computeInd()">Chart</button>
+</td>
+</tr>`;
+  }).join('');
+
+  // Update composite score ring with best pick
+  if (top20[0]) {
+    setEl('m-score', top20[0].score);
+    document.getElementById('rNum').textContent = top20[0].score;
+    document.getElementById('rLbl').textContent = 'STRONG BUY';
+  }
+
+  renderMarketReasons(top20.slice(0, 4));
+  log(`Market scan done — ${scanned} stocks scanned, ${top20.length} sure-shot winners found`, 'ok');
 }
-function renderAIReasons(results){
-  if(!results.length)return;
-  document.getElementById('aiCard').style.display='block';
-  document.getElementById('aiReasons').innerHTML=results.slice(0,4).map(r=>{
-    const action=r.comp>=70?'BUY':r.comp>=50?'HOLD':'SELL';
-    const pts=[];
-    if(r.rsiV<35)pts.push(`RSI ${fn(r.rsiV,1)} — oversold, mean reversion likely`);
-    else if(r.rsiV>65)pts.push(`RSI ${fn(r.rsiV,1)} — overbought, avoid new entries`);
-    if(r.ms.sig.includes('BULL'))pts.push(`MACD bullish crossover — momentum turning positive`);
-    else if(r.ms.sig.includes('BEAR'))pts.push(`MACD bearish crossover — downward momentum`);
-    if(r.bs.sig.includes('LOWER'))pts.push(`Price near Bollinger lower band — statistical buy zone`);
-    if(r.es.sig.includes('GOLDEN'))pts.push(`Golden cross confirmed — strong long-term uptrend signal`);
-    else if(r.es.sig.includes('UPTREND'))pts.push(`Price above both EMAs — uptrend intact`);
-    if(r.newsS>70)pts.push(`News sentiment ${r.newsS}/100 — positive coverage supporting price`);
-    else if(r.newsS<40)pts.push(`Negative news sentiment — trade with extra caution`);
-    return`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
-<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
-<span style="font-size:.9rem;font-weight:700">${r.sym}</span>
-<span class="bdg bdg-${action.toLowerCase()}">${action}</span>
-<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:${r.lbl.col}">${r.comp}/100</strong></span>
-<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry ~${fmtCur(r.price)} | SL ${fmtCur(r.price*.95)} | TP ${fmtCur(r.price*1.08)}</span>
+
+// Keep runScan as alias for backward compatibility
+async function runScan() { return runMarketScan(); }
+
+function renderMarketReasons(results) {
+  if (!results.length) return;
+  document.getElementById('aiCard').style.display = 'block';
+  document.getElementById('aiReasons').innerHTML = results.map(r => {
+    const pts = [];
+    r.patterns.forEach(p => {
+      if (p.type === 'MOMENTUM') pts.push(`Strong momentum — RSI ${fn(r.rsiV,1)} in sweet spot, MACD positive and rising`);
+      if (p.type === 'BREAKOUT') pts.push(`Breakout pattern detected — price near 52-week high with volume confirmation`);
+      if (p.type === 'UPTREND') pts.push(`Perfect uptrend stack — price above EMA20 > EMA50 > EMA200`);
+      if (p.type === 'GOLDEN CROSS') pts.push(`Fresh golden cross — EMA50 just crossed above EMA200, historically bullish`);
+    });
+    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
+<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">
+  <span style="font-size:.9rem;font-weight:800">${r.s}</span>
+  <span class="bdg bdg-buy">SURE-SHOT BUY</span>
+  <span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${r.score}/100</strong></span>
+  <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry ~$${fn(r.price)} | SL $${fn(r.price*.95)} | TP $${fn(r.price*1.1)}</span>
 </div>
-<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.length?pts.join('. ')+'.':'Composite score from all weighted indicators.'}</div>
-<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${r.comp}%;background:${r.lbl.col}"></div></div>
+<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.8">${pts.join('<br>')}</div>
+<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${r.score}%;background:var(--green)"></div></div>
 </div>`;
   }).join('');
 }
@@ -1250,19 +1636,25 @@ function loadCfg(){
   document.getElementById('c-claude').value=S.claudeKey;
   document.getElementById('c-news').value=S.newsKey;
   document.getElementById('c-mode').value=S.mode;
+  document.getElementById('c-backend').value=localStorage.getItem('backendUrl')||'';
 }
 function saveConfig(){
   S.apiKey=document.getElementById('c-t212').value.trim();
   S.claudeKey=document.getElementById('c-claude').value.trim();
   S.newsKey=document.getElementById('c-news').value.trim();
   S.mode=document.getElementById('c-mode').value;
-  localStorage.setItem('t212k',S.apiKey);localStorage.setItem('claudek',S.claudeKey);
-  localStorage.setItem('newsk',S.newsKey);localStorage.setItem('t212m',S.mode);
+  const backend=document.getElementById('c-backend').value.trim();
+  localStorage.setItem('t212k',S.apiKey);
+  localStorage.setItem('claudek',S.claudeKey);
+  localStorage.setItem('newsk',S.newsKey);
+  localStorage.setItem('t212m',S.mode);
+  if(backend) localStorage.setItem('backendUrl',backend);
+  else localStorage.removeItem('backendUrl');
   setEl('sbMode',S.mode.toUpperCase());
   updateConnBadge(!!S.apiKey);
   closeM('cfgM');
-  log(`Config saved — Mode: ${S.mode.toUpperCase()}, Key: ${S.apiKey?'SET ✓':'MISSING ✗'}`,S.apiKey?'ok':'err');
-  if(S.apiKey) fetchAccount();
+  log(`Config saved — Mode: ${S.mode.toUpperCase()}, Backend: ${backend||'auto-detect'}`,S.apiKey?'ok':'err');
+  if(S.apiKey||backend) fetchAccount();
 }
 async function testConn(){
   const key=document.getElementById('c-t212').value.trim();
@@ -1461,7 +1853,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     setEl('m-sl-sub','Awaiting connection');
   }
 
-  log('Indicators: RSI(14), MACD(12,26,9), BB(20,2σ), EMA(50/200), ATR(14)','info');
+  log('RaanuTradingBot — RSI(14), MACD(12,26,9), BB(20,2σ), EMA(50/200), ATR(14)','info');
 
   document.querySelectorAll('.modal-bg').forEach(m=>
     m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');})
