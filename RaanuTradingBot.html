@@ -225,6 +225,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-grp">Analysis</div>
   <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
   <div class="sb-item" onclick="nav('crypto',this)"><span class="sb-icon">₿</span>Crypto Scanner</div>
+  <div class="sb-item" onclick="nav('commodity',this)"><span class="sb-icon">⛏</span>Commodity Scanner</div>
   <div class="sb-item" onclick="nav('ind',this)"><span class="sb-icon">∿</span>Indicators</div>
   <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
   <div class="sb-grp">Execution</div>
@@ -554,6 +555,98 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="card-title">Live Crypto Prices — Top 20 by Market Cap</div>
     <div id="crHeatmap" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
       <div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Click Refresh Prices to load live data</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─────────── COMMODITY SCANNER ─────────── -->
+<div id="s-commodity" class="sec">
+
+  <!-- METRIC ROW -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem">
+    <div class="mcard mc-warn">
+      <div class="mlabel">Gold (XAU/USD)</div>
+      <div class="mval" id="cm-gold">—</div>
+      <div class="msub nu" id="cm-gold-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-blue">
+      <div class="mlabel">Silver (XAG/USD)</div>
+      <div class="mval" id="cm-silver">—</div>
+      <div class="msub nu" id="cm-silver-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-red">
+      <div class="mlabel">Crude Oil (WTI)</div>
+      <div class="mval" id="cm-oil">—</div>
+      <div class="msub nu" id="cm-oil-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-teal">
+      <div class="mlabel">Natural Gas</div>
+      <div class="mval" id="cm-gas">—</div>
+      <div class="msub nu" id="cm-gas-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-green">
+      <div class="mlabel">Copper</div>
+      <div class="mval" id="cm-copper">—</div>
+      <div class="msub nu" id="cm-copper-chg">Loading...</div>
+    </div>
+  </div>
+
+  <!-- INFO -->
+  <div class="al al-info">⛏ Commodities use ETF proxies (GLD, SLV, USO, UNG, CPER etc.) traded on US exchanges — available via Trade 212 and Alpaca. Strategy differs from stocks: supply/demand cycles, USD correlation, seasonal patterns matter more than RSI.</div>
+
+  <!-- SCANNER -->
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title" style="margin:0">Commodity Momentum Scanner</div>
+      <div style="display:flex;gap:7px;align-items:center">
+        <select id="cm-filter" style="width:auto">
+          <option value="all">All Commodities</option>
+          <option value="metals">Precious Metals</option>
+          <option value="energy">Energy</option>
+          <option value="agriculture">Agriculture</option>
+          <option value="industrial">Industrial Metals</option>
+        </select>
+        <button class="btn b-acc b-sm" onclick="runCommodityScan()" id="cmScanBtn">⚡ Scan Commodities</button>
+        <button class="btn b-out b-sm" onclick="loadCommodityPrices()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- PROGRESS -->
+    <div id="cmProgress" style="display:none;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
+        <span id="cmStatus">Scanning...</span><span id="cmCount">0 / 0</span>
+      </div>
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+        <div id="cmBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="cmScanned">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="cmBullish">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="cmBreakouts">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="cmAvg">0</div></div>
+    </div>
+
+    <table>
+      <thead><tr><th>#</th><th>ETF</th><th>Commodity</th><th>Category</th><th>Price</th><th>Score</th><th>RSI</th><th>Pattern</th><th>EMA Trend</th><th>USD Corr</th><th>Signal</th><th>Action</th></tr></thead>
+      <tbody id="cmBody"><tr><td class="te" colspan="12">Click ⚡ Scan Commodities to find top opportunities</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- TOP PICKS -->
+  <div class="card" id="cmReasonCard" style="display:none">
+    <div class="card-title">🏆 Top Commodity Picks — Analysis</div>
+    <div id="cmReasons"></div>
+  </div>
+
+  <!-- PRICE GRID -->
+  <div class="card">
+    <div class="card-title">Commodity ETF Live Prices</div>
+    <div id="cmGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px">
+      <div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 4">Click Refresh to load live prices</div>
     </div>
   </div>
 
@@ -937,7 +1030,384 @@ const S = {
 };
 
 // ═══════════════════════════════════════
-//  BROKER AUTO-DETECTION
+//  COMMODITY SCANNER ENGINE
+//  Uses ETF proxies via Yahoo Finance
+//  Commodity strategy differs from stocks:
+//  - USD inverse correlation matters
+//  - Supply/demand cycles
+//  - Seasonal patterns
+//  - Inflation hedge signals
+// ═══════════════════════════════════════
+
+const COMMODITY_UNIVERSE = {
+  metals: [
+    {sym:'GLD', name:'Gold',          full:'SPDR Gold Shares',          cat:'Precious Metal', usdCorr:-0.8},
+    {sym:'SLV', name:'Silver',        full:'iShares Silver Trust',       cat:'Precious Metal', usdCorr:-0.75},
+    {sym:'PPLT',name:'Platinum',      full:'Aberdeen Platinum ETF',      cat:'Precious Metal', usdCorr:-0.6},
+    {sym:'PALL',name:'Palladium',     full:'Aberdeen Palladium ETF',     cat:'Precious Metal', usdCorr:-0.55},
+    {sym:'GDX', name:'Gold Miners',   full:'VanEck Gold Miners ETF',     cat:'Miners',         usdCorr:-0.7},
+    {sym:'GDXJ',name:'Jr Gold Miners',full:'VanEck Junior Gold Miners',  cat:'Miners',         usdCorr:-0.65},
+  ],
+  energy: [
+    {sym:'USO', name:'Crude Oil',     full:'United States Oil Fund',     cat:'Energy',         usdCorr:-0.5},
+    {sym:'BNO', name:'Brent Oil',     full:'United States Brent Oil',    cat:'Energy',         usdCorr:-0.5},
+    {sym:'UNG', name:'Natural Gas',   full:'United States Natural Gas',  cat:'Energy',         usdCorr:-0.3},
+    {sym:'UGA', name:'Gasoline',      full:'United States Gasoline Fund', cat:'Energy',        usdCorr:-0.45},
+    {sym:'XLE', name:'Energy Sector', full:'Energy Select SPDR ETF',     cat:'Energy',         usdCorr:-0.4},
+    {sym:'OIH', name:'Oil Services',  full:'VanEck Oil Services ETF',    cat:'Energy',         usdCorr:-0.35},
+    {sym:'AMLP',name:'Pipelines',     full:'Alerian MLP ETF',            cat:'Energy',         usdCorr:-0.2},
+  ],
+  agriculture: [
+    {sym:'WEAT',name:'Wheat',         full:'Teucrium Wheat Fund',        cat:'Agriculture',    usdCorr:-0.4},
+    {sym:'CORN',name:'Corn',          full:'Teucrium Corn Fund',         cat:'Agriculture',    usdCorr:-0.35},
+    {sym:'SOYB',name:'Soybeans',      full:'Teucrium Soybean Fund',      cat:'Agriculture',    usdCorr:-0.35},
+    {sym:'CANE',name:'Sugar',         full:'Teucrium Sugar Fund',        cat:'Agriculture',    usdCorr:-0.3},
+    {sym:'JO',  name:'Coffee',        full:'iPath Coffee ETN',           cat:'Agriculture',    usdCorr:-0.25},
+    {sym:'BAL', name:'Cotton',        full:'iPath Cotton ETN',           cat:'Agriculture',    usdCorr:-0.3},
+    {sym:'MOO', name:'Agribusiness',  full:'VanEck Agribusiness ETF',    cat:'Agriculture',    usdCorr:-0.2},
+  ],
+  industrial: [
+    {sym:'CPER',name:'Copper',        full:'United States Copper Index', cat:'Industrial',     usdCorr:-0.6},
+    {sym:'DBB', name:'Base Metals',   full:'Invesco DB Base Metals',     cat:'Industrial',     usdCorr:-0.55},
+    {sym:'REMX',name:'Rare Earth',    full:'VanEck Rare Earth ETF',      cat:'Industrial',     usdCorr:-0.3},
+    {sym:'LIT', name:'Lithium',       full:'Global X Lithium ETF',       cat:'Industrial',     usdCorr:-0.25},
+    {sym:'SLX', name:'Steel',         full:'VanEck Steel ETF',           cat:'Industrial',     usdCorr:-0.4},
+    {sym:'WOOD',name:'Timber',        full:'iShares Global Timber ETF',  cat:'Industrial',     usdCorr:-0.2},
+  ],
+};
+
+// Key prices for the metric row (direct ETF tickers)
+const CM_KEY = [
+  {sym:'GLD', id:'cm-gold',   label:'Gold'},
+  {sym:'SLV', id:'cm-silver', label:'Silver'},
+  {sym:'USO', id:'cm-oil',    label:'Crude Oil'},
+  {sym:'UNG', id:'cm-gas',    label:'Nat Gas'},
+  {sym:'CPER',id:'cm-copper', label:'Copper'},
+];
+
+// ── Commodity-specific risk parameters ──
+const COMMODITY_RISK = {
+  stopLoss:   0.07,   // 7% — less volatile than crypto, more than stocks
+  takeProfit: 0.15,   // 15% — commodities move slower
+  maxPosition:0.15,   // 15% — can hold larger positions
+  minScore:   65,
+};
+
+// ── USD strength indicator ─────────────
+// Commodities are priced in USD — when USD strengthens, commodities fall
+let USD_TREND = 'neutral'; // 'strong' | 'weak' | 'neutral'
+
+async function fetchUSDTrend() {
+  try {
+    const data = await fetchPrices('UUP', 30); // Invesco DB USD Index Bullish Fund
+    if (!data) return 'neutral';
+    const c = data.closes;
+    const e20 = calcEMA(c, 20);
+    const price = c[c.length-1];
+    const v20 = e20[e20.length-1];
+    const chg = ((price - c[0]) / c[0]) * 100;
+    if (price > v20 && chg > 1) return 'strong';
+    if (price < v20 && chg < -1) return 'weak';
+    return 'neutral';
+  } catch(e) { return 'neutral'; }
+}
+
+// ── Commodity scoring ─────────────────
+function commodityScore(data, usdTrend, usdCorr) {
+  const closes = data.closes;
+  const price  = closes[closes.length-1];
+  const e50    = calcEMA(closes, 50);
+  const e200   = calcEMA(closes, 200);
+  const rsi    = calcRSI(closes);
+  const macd   = calcMACD(closes);
+  const bb     = calcBB(closes);
+  const avgVol = data.vols.slice(-20).reduce((a,b)=>a+b,0)/20;
+  const lastVol= data.vols[data.vols.length-1];
+  const v50    = e50[e50.length-1];
+  const v200   = e200[e200.length-1];
+  let score = 0;
+  const breakdown = {};
+
+  // ── 1. USD Correlation (25% weight) ───────────────
+  // Most commodities are negatively correlated with USD
+  // Weak USD = commodity bull market
+  let usdScore = 0;
+  if (usdTrend === 'weak')    usdScore = usdCorr < -0.5 ? 25 : 18;
+  else if (usdTrend === 'neutral') usdScore = 12;
+  else if (usdTrend === 'strong')  usdScore = usdCorr < -0.7 ? 2 : 6;
+  score += usdScore;
+  breakdown.usd = usdScore;
+
+  // ── 2. EMA Trend (25% weight) ─────────────────────
+  // Commodities trend for weeks/months — EMA alignment is key
+  let emaScore = 0;
+  if (v50 && v200) {
+    if (price > v50 && v50 > v200)        emaScore = 25; // perfect uptrend
+    else if (price > v50 && v50 < v200)   emaScore = 15; // recovering
+    else if (price < v50 && v50 > v200)   emaScore = 10; // pullback in uptrend
+    else if (price < v50 && v50 < v200)   emaScore = 3;  // downtrend
+  }
+  score += emaScore;
+  breakdown.ema = emaScore;
+
+  // ── 3. RSI Momentum (20% weight) ──────────────────
+  // Commodities: RSI 40-65 = accumulation zone
+  // Unlike stocks/crypto — don't chase overbought commodities
+  let rsiScore = 0;
+  if (rsi) {
+    if (rsi >= 45 && rsi <= 65)      rsiScore = 20; // sweet spot
+    else if (rsi >= 35 && rsi < 45)  rsiScore = 14; // recovering
+    else if (rsi > 65 && rsi <= 75)  rsiScore = 10; // getting extended
+    else if (rsi > 75)               rsiScore = 3;  // overbought — avoid
+    else if (rsi < 35)               rsiScore = 12; // oversold bounce
+  }
+  score += rsiScore;
+  breakdown.rsi = rsiScore;
+
+  // ── 4. Volume Confirmation (15% weight) ───────────
+  let volScore = 0;
+  const vRatio = lastVol / (avgVol || 1);
+  if (vRatio > 2)        volScore = 15;
+  else if (vRatio > 1.5) volScore = 10;
+  else if (vRatio > 1.2) volScore = 7;
+  else if (vRatio > 0.8) volScore = 4;
+  score += volScore;
+  breakdown.volume = volScore;
+
+  // ── 5. MACD Momentum (15% weight) ────────────────
+  let macdScore = 0;
+  if (macd.lm > 0 && macd.hist > 0) macdScore = 15;
+  else if (macd.hist > 0)            macdScore = 9;
+  else if (macd.hist < 0)            macdScore = 3;
+  score += macdScore;
+  breakdown.macd = macdScore;
+
+  return { total: Math.min(Math.max(score, 0), 100), breakdown };
+}
+
+// ── Commodity Pattern Detection ────────
+function detectCommodityPatterns(closes, highs, vols) {
+  const patterns = [];
+  const price   = closes[closes.length-1];
+  const e50     = calcEMA(closes, 50);
+  const e200    = calcEMA(closes, 200);
+  const v50     = e50[e50.length-1];
+  const v200    = e200[e200.length-1];
+  const pv50    = e50[e50.length-2];
+  const pv200   = e200[e200.length-2];
+  const avgVol  = vols.slice(-20).reduce((a,b)=>a+b,0)/20;
+  const lastVol = vols[vols.length-1];
+  const high52w = Math.max(...(highs.slice(-252)||highs));
+  const rsi     = calcRSI(closes);
+  const macd    = calcMACD(closes);
+
+  // Golden cross
+  if (v50 && v200 && pv50 && pv200 && v50>v200 && pv50<=pv200)
+    patterns.push({type:'GOLDEN CROSS', color:'var(--purple)'});
+
+  // Perfect uptrend
+  if (v50 && v200 && price>v50 && v50>v200)
+    patterns.push({type:'UPTREND', color:'var(--accent2)'});
+
+  // Breakout near 52w high with volume
+  if (price >= high52w * 0.97 && lastVol > avgVol * 1.3)
+    patterns.push({type:'BREAKOUT', color:'var(--warn)'});
+
+  // Momentum — MACD + RSI aligned
+  if (macd.hist > 0 && macd.lm > 0 && rsi >= 50 && rsi <= 70)
+    patterns.push({type:'MOMENTUM', color:'var(--green)'});
+
+  // Oversold bounce (inflation hedge buy)
+  if (rsi && rsi < 35 && v50 && price < v50 * 0.95)
+    patterns.push({type:'OVERSOLD', color:'var(--purple)'});
+
+  return patterns;
+}
+
+// ── Load key commodity prices ──────────
+async function loadCommodityPrices() {
+  document.getElementById('cmGrid').innerHTML = '<div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 4"><span class="spin"></span> Loading commodity prices...</div>';
+
+  // Load key metric prices
+  for (const cm of CM_KEY) {
+    try {
+      const data = await fetchPrices(cm.sym, 5);
+      if (!data) continue;
+      const price = data.closes[data.closes.length-1];
+      const prev  = data.closes[data.closes.length-2];
+      const chg   = prev ? ((price-prev)/prev*100) : 0;
+      setEl(cm.id, '$'+fn(price,2));
+      setEl(cm.id+'-chg', (chg>=0?'+':'')+fn(chg,2)+'% today');
+      document.getElementById(cm.id).className='mval '+(chg>=0?'up':'down');
+    } catch(e) {}
+  }
+
+  // Load all ETF prices for grid
+  const all = Object.values(COMMODITY_UNIVERSE).flat();
+  const grid = document.getElementById('cmGrid');
+  grid.innerHTML = '';
+  for (const c of all) {
+    try {
+      const data = await fetchPrices(c.sym, 5);
+      if (!data) continue;
+      const price = data.closes[data.closes.length-1];
+      const prev  = data.closes[data.closes.length-2] || price;
+      const chg   = ((price-prev)/prev*100);
+      const bg    = chg>2?'rgba(34,197,94,.12)':chg>0?'rgba(34,197,94,.05)':chg<-2?'rgba(244,63,94,.12)':'rgba(244,63,94,.05)';
+      const col   = chg>=0?'var(--green)':'var(--red)';
+      const catCol= c.cat==='Precious Metal'?'var(--warn)':c.cat==='Energy'?'var(--red)':c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
+      grid.innerHTML += `<div style="background:${bg};border:1px solid var(--border);border-radius:7px;padding:9px;cursor:pointer" onclick="document.getElementById('iSym').value='${c.sym}';nav('ind',null);computeInd()">
+        <div style="font-size:.72rem;font-weight:800;font-family:var(--mono)">${c.sym}</div>
+        <div style="font-size:.65rem;color:var(--muted2);margin-top:2px">${c.name}</div>
+        <div style="font-size:.75rem;font-weight:700;margin-top:4px">$${fn(price,2)}</div>
+        <div style="font-size:.63rem;color:${col};margin-top:1px">${chg>=0?'+':''}${fn(chg,2)}%</div>
+        <div style="font-size:.58rem;font-family:var(--mono);color:${catCol};margin-top:3px">${c.cat}</div>
+      </div>`;
+    } catch(e) {}
+  }
+  log('Commodity prices loaded', 'ok');
+}
+
+// ── Main Commodity Scanner ─────────────
+async function runCommodityScan() {
+  const filter = document.getElementById('cm-filter')?.value || 'all';
+  let universe = filter==='all'
+    ? Object.values(COMMODITY_UNIVERSE).flat()
+    : COMMODITY_UNIVERSE[filter] || Object.values(COMMODITY_UNIVERSE).flat();
+
+  document.getElementById('cmScanBtn').textContent = '⏳ Scanning...';
+  document.getElementById('cmScanBtn').disabled = true;
+  document.getElementById('cmProgress').style.display = 'block';
+  document.getElementById('cmBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Fetching USD trend...</td></tr>`;
+
+  // Fetch USD trend first — critical for commodities
+  USD_TREND = await fetchUSDTrend();
+  const usdLabel = USD_TREND==='weak'?'🟢 WEAK (bullish for commodities)':USD_TREND==='strong'?'🔴 STRONG (bearish for commodities)':'🟡 NEUTRAL';
+  log(`USD Trend: ${usdLabel}`, 'ok');
+  document.getElementById('cmBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${universe.length} commodities... USD: ${usdLabel}</td></tr>`;
+
+  const winners = [];
+  let scanned = 0;
+  const total = universe.length;
+
+  for (const c of universe) {
+    try {
+      const data = await fetchPrices(c.sym, 260);
+      if (!data || data.closes.length < 50) { scanned++; continue; }
+
+      const scoreResult = commodityScore(data, USD_TREND, c.usdCorr);
+      const score = scoreResult.total;
+      const patterns = detectCommodityPatterns(data.closes, data.highs, data.vols);
+      const rsi = calcRSI(data.closes);
+
+      const minScore = COMMODITY_RISK.minScore;
+      if (score >= minScore && patterns.length > 0) {
+        winners.push({c, data, score, breakdown: scoreResult.breakdown, patterns, rsi});
+        winners.sort((a,b)=>b.score-a.score);
+        renderCommodityResults(winners.slice(0,20), usdLabel);
+      }
+    } catch(e) {}
+
+    scanned++;
+    const pct = Math.round(scanned/total*100);
+    document.getElementById('cmBar').style.width = pct+'%';
+    document.getElementById('cmCount').textContent = `${scanned} / ${total}`;
+    document.getElementById('cmStatus').textContent = `Scanning ${c.sym}... (${winners.length} found)`;
+    document.getElementById('cmScanned').textContent = scanned;
+    document.getElementById('cmBullish').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='UPTREND'||p.type==='MOMENTUM')).length;
+    document.getElementById('cmBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
+    document.getElementById('cmAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
+  }
+
+  winners.sort((a,b)=>b.score-a.score);
+  const top20 = winners.slice(0,20);
+  renderCommodityResults(top20, usdLabel);
+  renderCommodityReasons(top20.slice(0,4));
+  document.getElementById('cmProgress').style.display = 'none';
+  document.getElementById('cmScanBtn').textContent = '⚡ Scan Commodities';
+  document.getElementById('cmScanBtn').disabled = false;
+  log(`Commodity scan done — ${scanned} scanned, ${top20.length} picks found`, 'ok');
+}
+
+function renderCommodityResults(winners, usdLabel) {
+  if (!winners.length) return;
+  const usdBanner = `<tr><td colspan="12" style="background:${USD_TREND==='weak'?'rgba(34,197,94,.05)':USD_TREND==='strong'?'rgba(244,63,94,.05)':'rgba(245,158,11,.05)'};border-bottom:1px solid var(--border);padding:7px;font-size:.7rem;font-family:var(--mono);color:${USD_TREND==='weak'?'var(--green)':USD_TREND==='strong'?'var(--red)':'var(--warn)'};text-align:center">USD: ${usdLabel} | SL: ${(COMMODITY_RISK.stopLoss*100).toFixed(0)}% | TP: ${(COMMODITY_RISK.takeProfit*100).toFixed(0)}% | Max position: ${(COMMODITY_RISK.maxPosition*100).toFixed(0)}%</td></tr>`;
+
+  document.getElementById('cmBody').innerHTML = usdBanner + winners.map((w,i) => {
+    const price = w.data.closes[w.data.closes.length-1];
+    const prev  = w.data.closes[w.data.closes.length-2] || price;
+    const chg   = ((price-prev)/prev*100);
+    const sl    = fn(price*(1-COMMODITY_RISK.stopLoss),2);
+    const tp    = fn(price*(1+COMMODITY_RISK.takeProfit),2);
+    const catCol= w.c.cat==='Precious Metal'?'var(--warn)':w.c.cat==='Energy'?'var(--red)':w.c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
+    const usdCorrCol = w.c.usdCorr < -0.6 ? 'var(--green)' : w.c.usdCorr < -0.3 ? 'var(--warn)' : 'var(--muted)';
+    const patBadges = w.patterns.map(p=>`<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`).join('');
+    const sig = w.score>=78?'STRONG BUY':w.score>=65?'BUY':'WATCH';
+    const sigCls = w.score>=65?'bdg-buy':'bdg-hold';
+    const bd = w.breakdown||{};
+    const bdTip = `USD:${bd.usd||0} EMA:${bd.ema||0} RSI:${bd.rsi||0} Vol:${bd.volume||0} MACD:${bd.macd||0}`;
+    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
+<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
+<td style="font-weight:800;font-size:.85rem">${w.c.sym} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
+<td style="font-size:.75rem;color:var(--muted2)">${w.c.name}</td>
+<td><span style="font-size:.62rem;font-family:var(--mono);color:${catCol};padding:1px 5px;border-radius:3px;border:1px solid ${catCol}40">${w.c.cat}</span></td>
+<td style="font-family:var(--mono)">$${fn(price,2)}</td>
+<td title="${bdTip}">
+  <div style="display:flex;align-items:center;gap:5px">
+    <div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${w.score}%;background:var(--green)"></div></div>
+    <span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">${w.score}</span>
+  </div>
+</td>
+<td style="font-family:var(--mono);color:${w.rsi?w.rsi>70?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)'}">${w.rsi?fn(w.rsi,1):'—'}</td>
+<td>${patBadges}</td>
+<td style="font-family:var(--mono);font-size:.68rem;color:${w.breakdown?.ema>=20?'var(--green)':w.breakdown?.ema>=10?'var(--warn)':'var(--red)'}">${w.breakdown?.ema>=20?'UPTREND':w.breakdown?.ema>=10?'RECOVERING':'DOWNTREND'}</td>
+<td style="font-family:var(--mono);font-size:.68rem;color:${usdCorrCol}" title="USD correlation: ${w.c.usdCorr}">${w.c.usdCorr < -0.6?'HIGH -ve':w.c.usdCorr < -0.3?'MED -ve':'LOW'}</td>
+<td><span class="bdg ${sigCls}">${sig}</span></td>
+<td style="display:flex;gap:3px">
+  <button class="btn b-out b-xs" onclick="document.getElementById('iSym').value='${w.c.sym}';nav('ind',null);computeInd()" title="SL:$${sl} TP:$${tp}">Chart ↗</button>
+</td>
+</tr>`;
+  }).join('');
+}
+
+function renderCommodityReasons(winners) {
+  if (!winners.length) return;
+  document.getElementById('cmReasonCard').style.display = 'block';
+  document.getElementById('cmReasons').innerHTML = winners.map(w => {
+    const price = w.data.closes[w.data.closes.length-1];
+    const sl  = fn(price*(1-COMMODITY_RISK.stopLoss),2);
+    const tp  = fn(price*(1+COMMODITY_RISK.takeProfit),2);
+    const pts = [];
+    w.patterns.forEach(p=>{
+      if(p.type==='GOLDEN CROSS') pts.push('Golden cross confirmed — EMA50 crossed above EMA200, strong long-term signal');
+      if(p.type==='UPTREND') pts.push('Price above EMA50 and EMA200 — established uptrend');
+      if(p.type==='BREAKOUT') pts.push('Breaking near 52-week high with volume — potential continuation');
+      if(p.type==='MOMENTUM') pts.push(`RSI ${fn(w.rsi,1)} in momentum zone with positive MACD — buyers in control`);
+      if(p.type==='OVERSOLD') pts.push('Oversold on quality commodity — inflation hedge buy opportunity');
+    });
+    if (USD_TREND==='weak') pts.push(`USD weakening (${USD_TREND}) — tailwind for ${w.c.name} (corr: ${w.c.usdCorr})`);
+    const bd = w.breakdown||{};
+    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
+<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
+<span style="font-size:.9rem;font-weight:700">${w.c.sym}</span>
+<span style="font-size:.75rem;color:var(--muted2)">${w.c.name} — ${w.c.full}</span>
+<span class="bdg bdg-buy">BUY</span>
+<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${w.score}/100</strong></span>
+<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $${fn(price,2)} | SL $${sl} | TP $${tp}</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:8px">
+${[['USD Corr',bd.usd||0,25],['EMA Trend',bd.ema||0,25],['RSI Zone',bd.rsi||0,20],['Volume',bd.volume||0,15],['MACD',bd.macd||0,15]].map(([n,v,max])=>`
+<div style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center">
+<div style="font-size:.58rem;font-family:var(--mono);color:var(--muted)">${n} (${max}%)</div>
+<div style="font-size:.82rem;font-weight:700;color:${v>=max*0.7?'var(--green)':v>=max*0.4?'var(--warn)':'var(--red)'}">${v}</div>
+</div>`).join('')}
+</div>
+<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.join('. ')||'Commodity momentum signal.'}</div>
+<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${w.score}%;background:var(--green)"></div></div>
+<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">⚠ Commodity risk: SL ${(COMMODITY_RISK.stopLoss*100).toFixed(0)}% | TP ${(COMMODITY_RISK.takeProfit*100).toFixed(0)}% | Max position ${(COMMODITY_RISK.maxPosition*100).toFixed(0)}%</div>
+</div>`;
+  }).join('');
+}
 // ═══════════════════════════════════════
 
 // Broker profiles — detect by key format
@@ -2226,6 +2696,7 @@ function nav(id,el){
   if(id==='ord'){fetchOrders();}
   if(id==='logs'){renderLogs();}
   if(id==='crypto'){loadCryptoPrices();}
+  if(id==='commodity'){loadCommodityPrices();}
 }
 
 // ═══════════════════════════════════════
