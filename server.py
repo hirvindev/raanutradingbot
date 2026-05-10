@@ -33,8 +33,10 @@ from dotenv import load_dotenv
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 
-T212_API_KEY = os.getenv("T212_API_KEY", "").strip()
-T212_MODE = os.getenv("T212_MODE", "demo").strip().lower()
+T212_API_KEY    = os.getenv("T212_API_KEY", "").strip()
+T212_MODE       = os.getenv("T212_MODE", "demo").strip().lower()
+ALPACA_API_KEY  = os.getenv("ALPACA_API_KEY", "").strip()
+ALPACA_SECRET   = os.getenv("ALPACA_SECRET_KEY", "").strip()
 
 if T212_MODE not in ("demo", "live"):
     print(f"⚠️  Invalid T212_MODE='{T212_MODE}'. Must be 'demo' or 'live'. Defaulting to demo.")
@@ -45,6 +47,10 @@ BASE_URL = (
     if T212_MODE == "demo"
     else "https://live.trading212.com/api/v0"
 )
+
+# Auto-detect active broker
+ACTIVE_BROKER = "alpaca" if ALPACA_API_KEY else "t212"
+ACTIVE_API_KEY = ALPACA_API_KEY if ALPACA_API_KEY else T212_API_KEY
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,14 +146,26 @@ async def t212_post(path: str, body: dict):
 @app.get("/api/config")
 def get_config():
     """
-    Send config to dashboard so it auto-connects on load.
-    Safe — only reachable from localhost or your Cloudflare tunnel (which you control).
+    Sends all broker config to the dashboard on load.
+    Dashboard auto-connects using whichever key is configured in .env
+    Safe — only reachable from localhost or your tunnel.
     """
     return {
-        "mode":           T212_MODE,
-        "key_configured": bool(T212_API_KEY),
-        "api_key":        T212_API_KEY,
-        "base_url":       BASE_URL,
+        # Active broker (auto-detected from .env)
+        "broker":           ACTIVE_BROKER,
+        "api_key":          ACTIVE_API_KEY,
+        "mode":             T212_MODE,
+        "key_configured":   bool(ACTIVE_API_KEY),
+
+        # Trade 212
+        "t212_api_key":     T212_API_KEY,
+        "t212_mode":        T212_MODE,
+        "t212_base_url":    BASE_URL,
+
+        # Alpaca
+        "alpaca_api_key":   ALPACA_API_KEY,
+        "alpaca_secret":    ALPACA_SECRET,
+        "alpaca_mode":      T212_MODE,  # demo/live maps to paper/live in Alpaca
     }
 
 
@@ -315,6 +333,8 @@ if __name__ == "__main__":
     print(f"  Mode:        {T212_MODE.upper()}")
     print(f"  T212 URL:    {BASE_URL}")
     print(f"  API key:     {'configured ✓' if T212_API_KEY else 'NOT SET — edit .env'}")
+    print(f"  Alpaca:      {'configured ✓' if ALPACA_API_KEY else 'not set'}")
+    print(f"  Active:      {ACTIVE_BROKER.upper()}")
     print(f"  Dashboard:   http://localhost:8000")
     print(f"  AlgoDash:    http://localhost:8000/algo  {'✓' if algo_html_present else '⚠ trade212-algo-dashboard.html not found'}")
     print(f"  Tailscale:   http://<your-tailscale-ip>:8000  (auto-enabled)")

@@ -2066,35 +2066,39 @@ function getTP(){return parseInt(document.getElementById('tpR')?.value||8);}
 //  No manual configuration needed
 // ═══════════════════════════════════════
 async function loadConfigFromBackend(){
-  // Try to fetch config from local backend server
-  // Works when served via python server.py at localhost:8000
   const origins = [
-    window.location.origin,         // same origin (localhost:8000 or cloudflare URL)
-    'http://localhost:8000',         // fallback direct
-    'http://127.0.0.1:8000',         // fallback direct IP
+    window.location.origin,
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
   ];
   for(const origin of origins){
     try{
       const res = await fetch(`${origin}/api/config`, {signal: AbortSignal.timeout(3000)});
       if(res.ok){
         const cfg = await res.json();
+
+        // Load whichever broker is active
         if(cfg.api_key){
-          S.apiKey   = cfg.api_key;
-          S.mode     = cfg.mode || 'demo';
-          // Also store in localStorage as fallback
-          localStorage.setItem('t212k', S.apiKey);
-          localStorage.setItem('t212m', S.mode);
-          log(`Auto-connected from backend — Mode: ${S.mode.toUpperCase()}`,'ok');
+          S.apiKey    = cfg.api_key;
+          S.secretKey = cfg.alpaca_secret || '';
+          S.mode      = cfg.mode || 'demo';
+          S.broker    = cfg.broker || 't212';
+
+          localStorage.setItem('t212k',   S.apiKey);
+          localStorage.setItem('secretk', S.secretKey);
+          localStorage.setItem('t212m',   S.mode);
+          localStorage.setItem('broker',  S.broker);
+
+          const brokerName = BROKERS[S.broker]?.name || 'Trade 212';
+          log(`Auto-connected: ${brokerName} — Mode: ${S.mode.toUpperCase()}`, 'ok');
           return true;
         }
       }
-    }catch(e){
-      // Try next origin
-    }
+    }catch(e){}
   }
-  // Fall back to localStorage if backend unreachable
+  // Fall back to localStorage
   if(S.apiKey){
-    log(`Using cached API key — Mode: ${S.mode.toUpperCase()}`,'ok');
+    log(`Using cached key — Broker: ${BROKERS[S.broker]?.name||'T212'} — Mode: ${S.mode.toUpperCase()}`, 'ok');
     return true;
   }
   return false;
