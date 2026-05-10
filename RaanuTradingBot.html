@@ -2260,46 +2260,183 @@ async function fetchCryptoOHLC(coinId, days=30) {
   } catch(e) { return null; }
 }
 
-// ── Crypto momentum score ──
+// ═══════════════════════════════════════
+//  CRYPTO-SPECIFIC STRATEGY ENGINE
+//  Completely different from stock strategy
+//  Crypto needs wider stops, different RSI
+//  thresholds, volume dominance, BTC trend
+// ═══════════════════════════════════════
+
+// Global BTC trend — fetched once per scan
+let BTC_TREND = null; // 'bull' | 'bear' | 'neutral'
+let FEAR_GREED = 50;  // 0-100
+
+async function fetchBTCTrend() {
+  try {
+    // Get BTC 30d OHLC to determine trend
+    const closes = await fetchCryptoOHLC('bitcoin', 30);
+    if (!closes || closes.length < 20) return 'neutral';
+    const ema7  = calcEMA(closes, 7);
+    const ema21 = calcEMA(closes, 21);
+    const v7  = ema7[ema7.length-1];
+    const v21 = ema21[ema21.length-1];
+    const price = closes[closes.length-1];
+    if (v7 > v21 && price > v7) return 'bull';
+    if (v7 < v21 && price < v7) return 'bear';
+    return 'neutral';
+  } catch(e) { return 'neutral'; }
+}
+
+async function fetchFearGreed() {
+  try {
+    const res = await fetch('https://api.alternative.me/fng/?limit=1');
+    const d = await res.json();
+    return parseInt(d?.data?.[0]?.value || 50);
+  } catch(e) { return 50; }
+}
+
+// ── Crypto Risk Parameters (separate from stocks) ──
+const CRYPTO_RISK = {
+  stopLoss:     0.12,   // 12% stop loss (not 5% like stocks)
+  takeProfit:   0.35,   // 35% take profit
+  maxPosition:  0.08,   // 8% max position size
+  minScore:     60,     // min score to consider
+  rsiOverbought: 80,    // crypto can stay above 70 for weeks
+  rsiOversold:   30,
+  rsiMomentum: [45, 75], // sweet spot for crypto momentum
+};
+
+// ── Crypto Scoring (weights are different from stocks) ──
 function cryptoScore(coin, closes) {
-  let score = 0;
   const chg24 = coin.price_change_percentage_24h ?? 0;
-  const chg7d = coin.price_change_percentage_7d_in_currency ?? 0;
+  const chg7d  = coin.price_change_percentage_7d_in_currency ?? 0;
+  const volRatio = (coin.total_volume / (coin.market_cap || 1));
+  const athPct = coin.ath_change_percentage ?? -100;
+  let score = 0;
+  const breakdown = {};
 
-  // 24h momentum
-  if (chg24 > 5) score += 20;
-  else if (chg24 > 2) score += 12;
-  else if (chg24 > 0) score += 6;
-  else if (chg24 < -5) score -= 10;
+  // ── 1. VOLUME SPIKE (30% weight) ──────────────────
+  // Volume is the most important crypto signal
+  // High volume = real move, low volume = fake out
+  let volScore = 0;
+  if (volRatio > 0.5)       volScore = 30;  // extreme volume — very bullish
+  else if (volRatio > 0.3)  volScore = 25;
+  else if (volRatio > 0.15) volScore = 18;
+  else if (volRatio > 0.08) volScore = 10;
+  else if (volRatio > 0.04) volScore = 5;
+  else volScore = 0; // low volume = not reliable
+  score += volScore;
+  breakdown.volume = volScore;
 
-  // 7d trend
-  if (chg7d > 15) score += 20;
-  else if (chg7d > 5) score += 12;
-  else if (chg7d > 0) score += 6;
+  // ── 2. BTC MARKET TREND (25% weight) ──────────────
+  // Never fight Bitcoin — if BTC is dumping, altcoins dump harder
+  let btcScore = 0;
+  if (BTC_TREND === 'bull')         btcScore = 25;
+  else if (BTC_TREND === 'neutral') btcScore = 12;
+  else if (BTC_TREND === 'bear')    btcScore = 0; // strong penalty in bear market
+  score += btcScore;
+  breakdown.btcTrend = btcScore;
 
-  // Volume spike (volume vs market cap ratio)
-  const volRatio = coin.total_volume / (coin.market_cap || 1);
-  if (volRatio > 0.3) score += 20;
-  else if (volRatio > 0.15) score += 12;
-  else if (volRatio > 0.05) score += 6;
-
-  // RSI if we have OHLC
-  if (closes && closes.length >= 15) {
+  // ── 3. RSI MOMENTUM ZONE (20% weight) ─────────────
+  // Crypto RSI rules are different from stocks:
+  // 45-75 = momentum zone (not 50-70 like stocks)
+  // >80 = still ok but getting extended
+  // <35 = oversold bounce opportunity
+  let rsiScore = 0;
+  if (closes && closes.length >= 14) {
     const rsi = calcRSI(closes);
     if (rsi) {
-      if (rsi >= 55 && rsi <= 70) score += 20;
-      else if (rsi >= 50 && rsi < 55) score += 12;
-      else if (rsi > 70 && rsi < 80) score += 8;
-      else if (rsi < 35) score += 15; // oversold bounce
+      if (rsi >= 55 && rsi <= 75)      rsiScore = 20; // sweet spot
+      else if (rsi >= 45 && rsi < 55)  rsiScore = 14; // building momentum
+      else if (rsi > 75 && rsi <= 80)  rsiScore = 10; // extended but still going
+      else if (rsi > 80)               rsiScore = 4;  // overbought — caution
+      else if (rsi < 35)               rsiScore = 16; // oversold bounce setup
+      else if (rsi >= 35 && rsi < 45)  rsiScore = 8;  // recovering
+    }
+  } else {
+    rsiScore = 10; // no data = neutral
+  }
+  score += rsiScore;
+  breakdown.rsi = rsiScore;
+
+  // ── 4. PRICE MOMENTUM (15% weight) ────────────────
+  // Short-term (24h) and medium-term (7d) price action
+  // Crypto needs bigger moves to be meaningful
+  let momScore = 0;
+  // 24h momentum
+  if (chg24 > 10)       momScore += 8;   // big move
+  else if (chg24 > 5)   momScore += 6;
+  else if (chg24 > 2)   momScore += 4;
+  else if (chg24 > 0)   momScore += 2;
+  else if (chg24 < -10) momScore -= 5;   // dumping
+  else if (chg24 < -5)  momScore -= 3;
+  // 7d trend confirmation
+  if (chg7d > 20)       momScore += 7;
+  else if (chg7d > 10)  momScore += 5;
+  else if (chg7d > 5)   momScore += 3;
+  else if (chg7d > 0)   momScore += 1;
+  else if (chg7d < -15) momScore -= 4;
+  momScore = Math.max(0, Math.min(15, momScore));
+  score += momScore;
+  breakdown.momentum = momScore;
+
+  // ── 5. FEAR & GREED INDEX (10% weight) ────────────
+  // Market sentiment matters a lot in crypto
+  // Extreme fear = good buy, extreme greed = caution
+  let fgScore = 0;
+  if (FEAR_GREED >= 25 && FEAR_GREED <= 55)      fgScore = 10; // fear/neutral = buy zone
+  else if (FEAR_GREED > 55 && FEAR_GREED <= 70)  fgScore = 7;  // greed = ok
+  else if (FEAR_GREED > 70)                       fgScore = 3;  // extreme greed = caution
+  else if (FEAR_GREED < 25)                       fgScore = 8;  // extreme fear = contrarian buy
+  score += fgScore;
+  breakdown.fearGreed = fgScore;
+
+  return { total: Math.min(Math.max(score, 0), 100), breakdown };
+}
+
+// ── Crypto Pattern Detection ───────────
+function detectCryptoPatterns(coin, closes) {
+  const patterns = [];
+  const chg24 = coin.price_change_percentage_24h ?? 0;
+  const chg7d  = coin.price_change_percentage_7d_in_currency ?? 0;
+  const volRatio = coin.total_volume / (coin.market_cap || 1);
+  const athPct = coin.ath_change_percentage ?? -100;
+
+  // MOMENTUM — strong 24h move with volume
+  if (chg24 > 5 && volRatio > 0.15) {
+    patterns.push({ type:'MOMENTUM', strength:'STRONG', color:'var(--green)' });
+  } else if (chg24 > 2 && volRatio > 0.08) {
+    patterns.push({ type:'MOMENTUM', strength:'MILD', color:'var(--accent)' });
+  }
+
+  // BREAKOUT — near all-time high with volume
+  if (athPct > -5 && volRatio > 0.1) {
+    patterns.push({ type:'BREAKOUT', strength:'ATH', color:'var(--warn)' });
+  } else if (athPct > -15 && chg24 > 3) {
+    patterns.push({ type:'BREAKOUT', strength:'FORMING', color:'var(--warn)' });
+  }
+
+  // UPTREND — sustained weekly + daily positive
+  if (chg7d > 15 && chg24 > 0) {
+    patterns.push({ type:'UPTREND', strength:'CONFIRMED', color:'var(--accent2)' });
+  } else if (chg7d > 5 && chg24 > 0) {
+    patterns.push({ type:'UPTREND', strength:'BUILDING', color:'var(--accent2)' });
+  }
+
+  // OVERSOLD BOUNCE — RSI low, starting to recover
+  if (closes && closes.length >= 14) {
+    const rsi = calcRSI(closes);
+    if (rsi && rsi < 35 && chg24 > 0) {
+      patterns.push({ type:'OVERSOLD BOUNCE', strength:'SETUP', color:'var(--purple)' });
     }
   }
 
-  // Near ATH = breakout signal
-  const athPct = coin.ath_change_percentage ?? -100;
-  if (athPct > -5) score += 20;
-  else if (athPct > -15) score += 10;
+  // BTC SEASON — altcoins pumping when BTC stable
+  if (BTC_TREND === 'bull' && coin.symbol !== 'btc' && chg24 > chg7d/7) {
+    patterns.push({ type:'ALT SEASON', strength:'ACTIVE', color:'var(--purple)' });
+  }
 
-  return Math.min(Math.max(score, 0), 100);
+  return patterns;
 }
 
 // ── Load live prices into heatmap ──
@@ -2363,7 +2500,20 @@ async function runCryptoScan() {
   document.getElementById('crScanBtn').textContent = '⏳ Scanning...';
   document.getElementById('crScanBtn').disabled = true;
   document.getElementById('crProgress').style.display = 'block';
-  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching ${universe.length} crypto prices from CoinGecko...</td></tr>`;
+  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching BTC trend + Fear & Greed...</td></tr>`;
+
+  // ── Step 1: Fetch BTC trend and Fear & Greed first ──
+  // These affect ALL coin scores so we need them upfront
+  [BTC_TREND, FEAR_GREED] = await Promise.all([fetchBTCTrend(), fetchFearGreed()]);
+  log(`BTC Trend: ${BTC_TREND.toUpperCase()} | Fear & Greed: ${FEAR_GREED}`, 'ok');
+
+  // Update Fear & Greed display
+  setEl('cr-fg', FEAR_GREED);
+  const fgLabel = FEAR_GREED >= 75 ? 'Extreme Greed' : FEAR_GREED >= 55 ? 'Greed' : FEAR_GREED >= 45 ? 'Neutral' : FEAR_GREED >= 25 ? 'Fear' : 'Extreme Fear';
+  setEl('cr-fg-lbl', fgLabel);
+  document.getElementById('cr-fg').className = 'mval ' + (FEAR_GREED > 55 ? 'up' : FEAR_GREED < 45 ? 'down' : 'nu');
+
+  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching ${universe.length} crypto prices... BTC: ${BTC_TREND.toUpperCase()} | F&G: ${FEAR_GREED} (${fgLabel})</td></tr>`;
 
   // Fetch all prices at once
   const ids = universe.map(c=>c.id).join(',');
@@ -2396,21 +2546,19 @@ async function runCryptoScan() {
       await new Promise(r => setTimeout(r, 300)); // respect rate limit
     }
 
-    const score = cryptoScore(coin, closes);
+    const scoreResult = cryptoScore(coin, closes);
+    const score = scoreResult.total;
     const rsi = closes ? calcRSI(closes) : null;
+    const patterns = detectCryptoPatterns(coin, closes);
 
-    // Pattern detection
-    const patterns = [];
-    if (chg24 > 3 && (coin.total_volume / coin.market_cap) > 0.1) patterns.push('MOMENTUM');
-    if ((coin.ath_change_percentage ?? -100) > -10) patterns.push('BREAKOUT');
-    if ((coin.price_change_percentage_7d_in_currency ?? 0) > 10 && chg24 > 0) patterns.push('UPTREND');
-    if (rsi && rsi < 35) patterns.push('OVERSOLD');
+    // Only show if score meets minimum AND has at least one pattern
+    // In bear market (BTC_TREND=bear) raise the bar higher
+    const minScore = BTC_TREND === 'bear' ? 70 : CRYPTO_RISK.minScore;
 
-    if (score >= 50 && patterns.length > 0) {
-      winners.push({ coin, meta, score, rsi, patterns, closes });
-      // Show results in real time
+    if (score >= minScore && patterns.length > 0) {
+      winners.push({ coin, meta, score, scoreBreakdown: scoreResult.breakdown, rsi, patterns, closes });
       winners.sort((a,b) => b.score - a.score);
-      renderCryptoResults(winners.slice(0,20));
+      renderCryptoResults(winners.slice(0, 20));
     }
 
     scanned++;
@@ -2437,36 +2585,44 @@ async function runCryptoScan() {
 
 function renderCryptoResults(winners) {
   if (!winners.length) return;
-  document.getElementById('crBody').innerHTML = winners.map((w, i) => {
+  const btcWarning = BTC_TREND === 'bear'
+    ? `<tr><td colspan="11" style="background:rgba(244,63,94,.05);border-bottom:1px solid rgba(244,63,94,.2);padding:8px;font-size:.7rem;font-family:var(--mono);color:var(--red);text-align:center">⚠ BTC DOWNTREND — higher threshold applied. Smaller position sizes recommended. SL: ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | TP: ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}%</td></tr>`
+    : BTC_TREND === 'bull'
+    ? `<tr><td colspan="11" style="background:rgba(34,197,94,.04);border-bottom:1px solid rgba(34,197,94,.15);padding:8px;font-size:.7rem;font-family:var(--mono);color:var(--green);text-align:center">✓ BTC UPTREND — altcoin conditions favourable | SL: ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | TP: ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}% | Max position: ${(CRYPTO_RISK.maxPosition*100).toFixed(0)}%</td></tr>`
+    : '';
+  document.getElementById('crBody').innerHTML = btcWarning + winners.map((w, i) => {
     const c = w.coin;
     const chg24 = c.price_change_percentage_24h ?? 0;
-    const chg7d = c.price_change_percentage_7d_in_currency ?? 0;
     const volRatio = ((c.total_volume / c.market_cap) * 100).toFixed(1);
-    const patBadges = w.patterns.map(p => {
-      const col = p==='MOMENTUM'?'var(--green)':p==='BREAKOUT'?'var(--warn)':p==='UPTREND'?'var(--accent2)':'var(--purple)';
-      return `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${col};border:1px solid ${col}40;margin-right:2px">${p}</span>`;
-    }).join('');
+    const sl = fmtPrice(c.current_price * (1 - CRYPTO_RISK.stopLoss));
+    const tp = fmtPrice(c.current_price * (1 + CRYPTO_RISK.takeProfit));
+    const patBadges = w.patterns.map(p =>
+      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
+    ).join('');
     const sig = w.score >= 75 ? 'STRONG BUY' : w.score >= 60 ? 'BUY' : 'WATCH';
     const sigCls = w.score >= 75 ? 'bdg-buy' : w.score >= 60 ? 'bdg-buy' : 'bdg-hold';
+    const bd = w.scoreBreakdown || {};
+    const bdTip = `Vol:${bd.volume||0} BTC:${bd.btcTrend||0} RSI:${bd.rsi||0} Mom:${bd.momentum||0} F&G:${bd.fearGreed||0}`;
     return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
 <td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
 <td style="font-weight:800;font-size:.85rem">${w.meta.sym} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
 <td style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</td>
 <td style="font-family:var(--mono)">$${fmtPrice(c.current_price)}</td>
 <td class="${chg24>=0?'up':'down'}" style="font-family:var(--mono)">${chg24>=0?'+':''}${fmtN(chg24,2)}%</td>
-<td>
+<td title="${bdTip}">
   <div style="display:flex;align-items:center;gap:5px">
     <div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${w.score}%;background:var(--green)"></div></div>
     <span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">${w.score}</span>
   </div>
 </td>
-<td style="font-family:var(--mono);color:${w.rsi?w.rsi>70?'var(--warn)':w.rsi>50?'var(--green)':'var(--muted2)':'var(--muted)'}">${w.rsi?fmtN(w.rsi,1):'—'}</td>
+<td style="font-family:var(--mono);color:${w.rsi?w.rsi>75?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)'}">${w.rsi?fmtN(w.rsi,1):'—'}</td>
 <td>${patBadges}</td>
 <td style="font-family:var(--mono);font-size:.7rem;color:var(--muted2)">${volRatio}%</td>
 <td><span class="bdg ${sigCls}">${sig}</span></td>
-<td><button class="btn b-out b-xs" onclick="window.open('https://www.coingecko.com/en/coins/${w.coin.id}','_blank')">CoinGecko ↗</button></td>
+<td><button class="btn b-out b-xs" onclick="window.open('https://www.coingecko.com/en/coins/${w.coin.id}','_blank')" title="SL:$${sl} TP:$${tp}">Chart ↗</button></td>
 </tr>`;
   }).join('');
+  if (winners[0]) { document.getElementById('rNum').textContent = winners[0].score; document.getElementById('rLbl').textContent = 'CRYPTO BUY'; }
 }
 
 function renderCryptoReasons(winners) {
@@ -2475,22 +2631,36 @@ function renderCryptoReasons(winners) {
   document.getElementById('crReasons').innerHTML = winners.map(w => {
     const c = w.coin;
     const chg24 = c.price_change_percentage_24h ?? 0;
-    const pts = [];
-    if (w.patterns.includes('MOMENTUM')) pts.push(`Strong 24h momentum +${fmtN(chg24,2)}% with volume spike`);
-    if (w.patterns.includes('BREAKOUT')) pts.push(`Near all-time high — breakout territory`);
-    if (w.patterns.includes('UPTREND')) pts.push(`7-day uptrend confirmed — sustained buying pressure`);
-    if (w.patterns.includes('OVERSOLD')) pts.push(`RSI ${fmtN(w.rsi,1)} — oversold, mean reversion likely`);
     const athChg = c.ath_change_percentage ?? 0;
+    const sl = fmtPrice(c.current_price * (1 - CRYPTO_RISK.stopLoss));
+    const tp = fmtPrice(c.current_price * (1 + CRYPTO_RISK.takeProfit));
+    const pts = [];
+    w.patterns.forEach(p => {
+      if (p.type === 'MOMENTUM') pts.push(`Strong 24h momentum +${fmtN(chg24,2)}% with volume spike — real buying pressure`);
+      if (p.type === 'BREAKOUT') pts.push(`Near all-time high (${fmtN(athChg,1)}% from ATH) — breakout territory`);
+      if (p.type === 'UPTREND') pts.push(`7-day uptrend confirmed — sustained accumulation`);
+      if (p.type === 'OVERSOLD BOUNCE') pts.push(`RSI ${fmtN(w.rsi,1)} — oversold on high-quality coin, mean reversion likely`);
+      if (p.type === 'ALT SEASON') pts.push(`Alt season signal — BTC stable while altcoins outperform`);
+    });
+    const bd = w.scoreBreakdown || {};
     return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
-<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">
+<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
 <span style="font-size:.9rem;font-weight:700">${w.meta.sym}</span>
 <span style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</span>
 <span class="bdg bdg-buy">BUY</span>
 <span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${w.score}/100</strong></span>
-<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">ATH: ${fmtN(athChg,1)}% | Vol/MCap: ${fmtN((c.total_volume/c.market_cap)*100,1)}%</span>
+<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $${fmtPrice(c.current_price)} | SL $${sl} | TP $${tp}</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:8px">
+${[['Volume',bd.volume||0,30],['BTC Trend',bd.btcTrend||0,25],['RSI Zone',bd.rsi||0,20],['Momentum',bd.momentum||0,15],['Fear&Greed',bd.fearGreed||0,10]].map(([n,v,max])=>`
+  <div style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center">
+    <div style="font-size:.58rem;font-family:var(--mono);color:var(--muted)">${n} (${max}%)</div>
+    <div style="font-size:.82rem;font-weight:700;color:${v>=max*0.7?'var(--green)':v>=max*0.4?'var(--warn)':'var(--red)'}">${v}</div>
+  </div>`).join('')}
 </div>
 <div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.join('. ')||'Composite crypto momentum score.'}</div>
 <div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${w.score}%;background:var(--green)"></div></div>
+<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">⚠ Crypto risk: Stop Loss ${(CRYPTO_RISK.stopLoss*100).toFixed(0)}% | Take Profit ${(CRYPTO_RISK.takeProfit*100).toFixed(0)}% | Max position ${(CRYPTO_RISK.maxPosition*100).toFixed(0)}% of portfolio</div>
 </div>`;
   }).join('');
 }
