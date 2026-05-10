@@ -709,20 +709,37 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 <!-- ─────────── STRATEGY ─────────── -->
 <div id="s-strat" class="sec">
 
-  <!-- SUB-NAV TABS -->
-  <div style="display:flex;gap:6px;border-bottom:1px solid var(--border);padding-bottom:.75rem">
-    <button class="btn b-acc b-sm" id="stTab-stock" onclick="switchStratTab('stock')">📈 Stocks</button>
-    <button class="btn b-out b-sm" id="stTab-crypto" onclick="switchStratTab('crypto')">₿ Crypto</button>
-    <button class="btn b-out b-sm" id="stTab-commodity" onclick="switchStratTab('commodity')">⛏ Commodities</button>
-    <button class="btn b-out b-sm" id="stTab-exec" onclick="switchStratTab('exec')">⚙ Execution</button>
+  <!-- HIDDEN ENGINE CONFIG — always in DOM, never removed by tab switching -->
+  <div style="display:none">
+    <input type="checkbox" id="tAuto" checked>
+    <input type="checkbox" id="tTP" checked>
+    <input type="checkbox" id="tNews" checked>
+    <input type="checkbox" id="tFund" checked>
+    <input type="checkbox" id="tStocks" checked>
+    <input type="checkbox" id="tCrypto">
+    <input type="checkbox" id="tCommodity">
+    <select id="scanInt"><option value="900" selected>900</option></select>
+    <select id="ordType"><option value="MARKET" selected>MARKET</option></select>
+    <input type="range" id="mpR" value="6" min="1" max="20">
+    <input type="range" id="cbR" value="8" min="3" max="20">
+    <span id="mpD">6</span>
+    <span id="cbD">-8%</span>
   </div>
 
-  <!-- ── STOCKS STRATEGY ── -->
+  <!-- SUB-NAV TABS -->
+  <div style="display:flex;gap:6px;border-bottom:1px solid var(--border);padding-bottom:.75rem;flex-wrap:wrap">
+    <button class="btn b-acc b-sm" id="stTab-stock"     onclick="switchStratTab('stock')">📈 Stocks</button>
+    <button class="btn b-out b-sm" id="stTab-crypto"    onclick="switchStratTab('crypto')">₿ Crypto</button>
+    <button class="btn b-out b-sm" id="stTab-commodity" onclick="switchStratTab('commodity')">⛏ Commodities</button>
+    <button class="btn b-out b-sm" id="stTab-exec"      onclick="switchStratTab('exec')">⚙ Execution</button>
+  </div>
+
+  <!-- ══ STOCKS ══ -->
   <div id="st-stock" class="st-panel">
-    <div class="al al-info" style="margin-bottom:.75rem">📈 Stock strategy uses RSI, MACD, Bollinger Bands and EMA crossovers. Tighter stops than crypto. Fundamentals and news sentiment as filters.</div>
+    <div class="al al-info" style="margin-bottom:.75rem">📈 RSI, MACD, Bollinger Bands, EMA crossovers. Tighter stops than crypto. Fundamentals + news as quality filters.</div>
     <div class="g2">
       <div class="card">
-        <div class="card-title">Signal Weights (must total 100%)</div>
+        <div class="card-title">📊 Signal Weights (must total 100%)</div>
         <div style="display:flex;flex-direction:column;gap:11px" id="wCtrls"></div>
         <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Total: <span id="wTot" style="color:var(--green)">100%</span></span>
@@ -730,124 +747,132 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Stock Risk Controls</div>
+        <div class="card-title">🛡 Stock Risk Controls</div>
         <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="slD">5%</span></div><input type="range" min="1" max="15" value="5" id="slR" oninput="slD.textContent=this.value+'%';sbSL.textContent=this.value+'%'"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Stocks: 3-8% typical</div></div>
+          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="slD">5%</span></div><input type="range" min="1" max="15" value="5" id="slR" oninput="slD.textContent=this.value+'%';sbSL.textContent=this.value+'%'"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Typical: 3–8%</div></div>
           <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="tpD">8%</span></div><input type="range" min="2" max="30" value="8" id="tpR" oninput="tpD.textContent=this.value+'%'"></div>
-          <div class="fg"><div class="fl">Max Position Size <span style="color:var(--accent)" id="psD">20%</span></div><input type="range" min="5" max="50" value="20" id="psR" oninput="psD.textContent=this.value+'%'"></div>
-          <div class="fg"><div class="fl">Min Score to Trade <span style="color:var(--accent)" id="msD">70</span></div><input type="range" min="50" max="95" value="70" id="msR" oninput="msD.textContent=this.value"></div>
-          <div class="fg"><div class="fl">Max Positions <span style="color:var(--accent)" id="mpD">6</span></div><input type="range" min="1" max="20" value="6" id="mpR" oninput="mpD.textContent=this.value"></div>
-          <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD">-8%</span></div><input type="range" min="3" max="20" value="8" id="cbR" oninput="cbD.textContent='-'+this.value+'%'"></div>
+          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="psD">20%</span></div><input type="range" min="5" max="50" value="20" id="psR" oninput="psD.textContent=this.value+'%'"></div>
+          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="msD">70</span></div><input type="range" min="50" max="95" value="70" id="msR" oninput="msD.textContent=this.value"></div>
         </div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Stock Filters</div>
+      <div class="card-title">⚙ Stock Execution</div>
       <div class="g4">
         <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">News Filter</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Block on bad sentiment</div></div>
-          <label class="tog"><input type="checkbox" id="tNews" checked><span class="tog-s"></span></label>
+          <div><div style="font-size:.76rem;font-weight:600">📈 Auto Execute Stocks</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place stock orders automatically</div></div>
+          <label class="tog"><input type="checkbox" id="tStocksExec" checked onchange="document.getElementById('tStocks').checked=this.checked"><span class="tog-s"></span></label>
         </div>
         <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">Fundamentals</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">P/E + EPS filter</div></div>
-          <label class="tog"><input type="checkbox" id="tFund" checked><span class="tog-s"></span></label>
+          <div><div style="font-size:.76rem;font-weight:600">📰 News Filter</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Block on bad sentiment</div></div>
+          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tNews').checked=this.checked"><span class="tog-s"></span></label>
         </div>
         <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">Auto Close TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell at take-profit</div></div>
-          <label class="tog"><input type="checkbox" id="tTP" checked><span class="tog-s"></span></label>
+          <div><div style="font-size:.76rem;font-weight:600">📊 Fundamentals</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">P/E + EPS filter</div></div>
+          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tFund').checked=this.checked"><span class="tog-s"></span></label>
         </div>
         <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div><div style="font-size:.76rem;font-weight:600">Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place orders automatically</div></div>
-          <label class="tog"><input type="checkbox" id="tAuto" checked><span class="tog-s"></span></label>
+          <div><div style="font-size:.76rem;font-weight:600">🎯 Auto Close TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell when take-profit hit</div></div>
+          <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tTP').checked=this.checked"><span class="tog-s"></span></label>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ── CRYPTO STRATEGY ── -->
+  <!-- ══ CRYPTO ══ -->
   <div id="st-crypto" class="st-panel" style="display:none">
-    <div class="al al-warn" style="margin-bottom:.75rem">₿ Crypto needs wider stops, smaller positions and different RSI thresholds. BTC trend and Fear & Greed are primary filters. These apply only to the Crypto Scanner.</div>
+    <div class="al al-warn" style="margin-bottom:.75rem">₿ Wider stops, smaller positions, higher RSI threshold. BTC trend + Fear &amp; Greed are primary filters. Only applies to the Crypto Scanner tab.</div>
     <div class="g2">
       <div class="card">
-        <div class="card-title">Crypto Risk Controls</div>
+        <div class="card-title">🛡 Crypto Risk Controls</div>
         <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="crSlD">12%</span></div><input type="range" min="5" max="30" value="12" id="crSlR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto daily moves 10-30% — 5% gets stopped by noise</div></div>
-          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="crTpD">35%</span></div><input type="range" min="10" max="100" value="35" id="crTpR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto can 2-10x — aim bigger than stocks</div></div>
-          <div class="fg"><div class="fl">Max Position Size % <span style="color:var(--accent)" id="crPsD">8%</span></div><input type="range" min="1" max="25" value="8" id="crPsR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Smaller than stocks — higher volatility</div></div>
-          <div class="fg"><div class="fl">Min Score to Trade <span style="color:var(--accent)" id="crMsD">60</span></div><input type="range" min="40" max="90" value="60" id="crMsR" oninput="updateCryptoRisk()"></div>
-          <div class="fg"><div class="fl">RSI Overbought Threshold <span style="color:var(--warn)" id="crRsiD">80</span></div><input type="range" min="65" max="90" value="80" id="crRsiR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto stays overbought for weeks</div></div>
+          <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="crSlD">12%</span></div><input type="range" min="5" max="30" value="12" id="crSlR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto moves 10–30% daily</div></div>
+          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="crTpD">35%</span></div><input type="range" min="10" max="100" value="35" id="crTpR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto can 2–10×</div></div>
+          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="crPsD">8%</span></div><input type="range" min="1" max="25" value="8" id="crPsR" oninput="updateCryptoRisk()"></div>
+          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="crMsD">60</span></div><input type="range" min="40" max="90" value="60" id="crMsR" oninput="updateCryptoRisk()"></div>
+          <div class="fg"><div class="fl">RSI Overbought <span style="color:var(--warn)" id="crRsiD">80</span></div><input type="range" min="65" max="90" value="80" id="crRsiR" oninput="updateCryptoRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Crypto stays overbought for weeks</div></div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">R/R: <strong style="color:var(--accent)" id="crRR">2.9:1</strong></span>
+            <button class="btn b-acc b-sm" onclick="saveCryptoStrategy()">Save</button>
+          </div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Crypto Filters</div>
+        <div class="card-title">🔍 Crypto Filters &amp; Execution</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           <div class="fg"><div class="fl">BTC Trend Filter</div>
-            <select id="crBtcFilter"><option value="all">Trade in any BTC trend</option><option value="bull" selected>Only in BTC uptrend</option><option value="neutral">Bull + Neutral only</option></select>
-            <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Don't fight Bitcoin — altcoins follow BTC</div>
+            <select id="crBtcFilter"><option value="all">Any BTC trend</option><option value="bull" selected>Only BTC uptrend</option><option value="neutral">Bull + Neutral</option></select>
           </div>
           <div class="fg"><div class="fl">Fear &amp; Greed Entry Zone</div>
-            <select id="crFgFilter"><option value="any">Any sentiment</option><option value="fear" selected>Fear zone (0-50) — contrarian buy</option><option value="neutral">Fear + Neutral (0-65)</option><option value="greed">All including Greed</option></select>
-            <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Buy when others are fearful</div>
+            <select id="crFgFilter"><option value="any">Any sentiment</option><option value="fear" selected>Fear zone (0–50)</option><option value="neutral">Fear + Neutral (0–65)</option><option value="greed">All including Greed</option></select>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Skip BTC Bear Markets</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Pause crypto trading in BTC downtrend</div></div>
+            <div><div style="font-size:.76rem;font-weight:600">₿ Auto-Trade Crypto</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute crypto signals</div></div>
+            <label class="tog"><input type="checkbox" id="crAutoExec" onchange="document.getElementById('tCrypto').checked=this.checked"><span class="tog-s"></span></label>
+          </div>
+          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div><div style="font-size:.76rem;font-weight:600">Skip BTC Bear Markets</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Pause in BTC downtrend</div></div>
             <label class="tog"><input type="checkbox" id="crSkipBear" checked><span class="tog-s"></span></label>
           </div>
         </div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Crypto Signal Weights</div>
+      <div class="card-title">📊 Crypto Signal Weights</div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume Spike</div><div style="font-size:1rem;font-weight:800;color:var(--warn)" id="crW1">30%</div><input type="range" min="10" max="50" value="30" id="crW1R" oninput="crW1.textContent=this.value+'%'"></div>
+        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume</div><div style="font-size:1rem;font-weight:800;color:var(--warn)" id="crW1">30%</div><input type="range" min="10" max="50" value="30" id="crW1R" oninput="crW1.textContent=this.value+'%'"></div>
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">BTC Trend</div><div style="font-size:1rem;font-weight:800;color:var(--accent2)" id="crW2">25%</div><input type="range" min="10" max="40" value="25" id="crW2R" oninput="crW2.textContent=this.value+'%'"></div>
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">RSI Zone</div><div style="font-size:1rem;font-weight:800;color:var(--green)" id="crW3">20%</div><input type="range" min="5" max="35" value="20" id="crW3R" oninput="crW3.textContent=this.value+'%'"></div>
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Momentum</div><div style="font-size:1rem;font-weight:800;color:var(--accent)" id="crW4">15%</div><input type="range" min="5" max="30" value="15" id="crW4R" oninput="crW4.textContent=this.value+'%'"></div>
-        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Fear &amp; Greed</div><div style="font-size:1rem;font-weight:800;color:var(--purple)" id="crW5">10%</div><input type="range" min="0" max="20" value="10" id="crW5R" oninput="crW5.textContent=this.value+'%'"></div>
-      </div>
-      <div style="margin-top:.75rem;display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Risk/Reward: <strong style="color:var(--accent)" id="crRR">2.9:1</strong></div>
-        <button class="btn b-acc b-sm" onclick="saveCryptoStrategy()">Save Crypto Strategy</button>
+        <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Fear&amp;Greed</div><div style="font-size:1rem;font-weight:800;color:var(--purple)" id="crW5">10%</div><input type="range" min="0" max="20" value="10" id="crW5R" oninput="crW5.textContent=this.value+'%'"></div>
       </div>
     </div>
   </div>
 
-  <!-- ── COMMODITY STRATEGY ── -->
+  <!-- ══ COMMODITIES ══ -->
   <div id="st-commodity" class="st-panel" style="display:none">
-    <div class="al al-info" style="margin-bottom:.75rem">⛏ Commodities are driven by USD strength, supply/demand cycles and macro trends. EMA trend and volume confirmation are the primary signals. Medium stops — less volatile than crypto.</div>
+    <div class="al al-info" style="margin-bottom:.75rem">⛏ USD correlation, supply/demand cycles, macro trends. EMA trend + volume are primary signals. Only applies to the Commodity Scanner tab.</div>
     <div class="g2">
       <div class="card">
-        <div class="card-title">Commodity Risk Controls</div>
+        <div class="card-title">🛡 Commodity Risk Controls</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="cmSlD">7%</span></div><input type="range" min="3" max="20" value="7" id="cmSlR" oninput="updateCommodityRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Between stocks (5%) and crypto (12%)</div></div>
-          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="cmTpD">15%</span></div><input type="range" min="5" max="50" value="15" id="cmTpR" oninput="updateCommodityRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Commodities move slower — realistic targets</div></div>
-          <div class="fg"><div class="fl">Max Position Size % <span style="color:var(--accent)" id="cmPsD">15%</span></div><input type="range" min="5" max="30" value="15" id="cmPsR" oninput="updateCommodityRisk()"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Can hold larger positions — less volatile</div></div>
-          <div class="fg"><div class="fl">Min Score to Trade <span style="color:var(--accent)" id="cmMsD">65</span></div><input type="range" min="40" max="90" value="65" id="cmMsR" oninput="updateCommodityRisk()"></div>
+          <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="cmTpD">15%</span></div><input type="range" min="5" max="50" value="15" id="cmTpR" oninput="updateCommodityRisk()"></div>
+          <div class="fg"><div class="fl">Max Position % <span style="color:var(--accent)" id="cmPsD">15%</span></div><input type="range" min="5" max="30" value="15" id="cmPsR" oninput="updateCommodityRisk()"></div>
+          <div class="fg"><div class="fl">Min Score <span style="color:var(--accent)" id="cmMsD">65</span></div><input type="range" min="40" max="90" value="65" id="cmMsR" oninput="updateCommodityRisk()"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">R/R: <strong style="color:var(--accent)" id="cmRR">2.1:1</strong></span>
+            <button class="btn b-acc b-sm" onclick="saveCommodityStrategy()">Save</button>
+          </div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Commodity Filters</div>
+        <div class="card-title">🔍 Commodity Filters &amp; Execution</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           <div class="fg"><div class="fl">USD Strength Filter</div>
-            <select id="cmUsdFilter"><option value="weak" selected>Only trade when USD weak/neutral</option><option value="any">Trade regardless of USD</option><option value="strong">Only when USD strong (inverse plays)</option></select>
+            <select id="cmUsdFilter"><option value="weak" selected>Only when USD weak/neutral</option><option value="any">Any USD strength</option><option value="strong">Only when USD strong</option></select>
             <div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Weak USD = commodity tailwind</div>
           </div>
-          <div class="fg"><div class="fl">Preferred Categories</div>
-            <select id="cmCatFilter"><option value="all" selected>All categories</option><option value="metals">Precious Metals only</option><option value="energy">Energy only</option><option value="agriculture">Agriculture only</option><option value="industrial">Industrial only</option></select>
+          <div class="fg"><div class="fl">Preferred Category</div>
+            <select id="cmCatFilter"><option value="all" selected>All categories</option><option value="metals">Precious Metals</option><option value="energy">Energy</option><option value="agriculture">Agriculture</option><option value="industrial">Industrial</option></select>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Inflation Hedge Mode</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Prioritise Gold/Silver in high inflation</div></div>
+            <div><div style="font-size:.76rem;font-weight:600">⛏ Auto-Trade Commodities</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute commodity signals</div></div>
+            <label class="tog"><input type="checkbox" id="cmAutoExec" onchange="document.getElementById('tCommodity').checked=this.checked"><span class="tog-s"></span></label>
+          </div>
+          <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div><div style="font-size:.76rem;font-weight:600">Inflation Hedge Mode</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Prioritise Gold/Silver in inflation</div></div>
             <label class="tog"><input type="checkbox" id="cmInflation" checked><span class="tog-s"></span></label>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Seasonal Patterns</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Boost agri signals in growing season</div></div>
+            <div><div style="font-size:.76rem;font-weight:600">Seasonal Patterns</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Boost agri in growing season</div></div>
             <label class="tog"><input type="checkbox" id="cmSeasonal" checked><span class="tog-s"></span></label>
           </div>
         </div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Commodity Signal Weights</div>
+      <div class="card-title">📊 Commodity Signal Weights</div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">USD Corr</div><div style="font-size:1rem;font-weight:800;color:var(--accent2)" id="cmW1">25%</div><input type="range" min="10" max="40" value="25" id="cmW1R" oninput="cmW1.textContent=this.value+'%'"></div>
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">EMA Trend</div><div style="font-size:1rem;font-weight:800;color:var(--green)" id="cmW2">25%</div><input type="range" min="10" max="40" value="25" id="cmW2R" oninput="cmW2.textContent=this.value+'%'"></div>
@@ -855,63 +880,62 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">Volume</div><div style="font-size:1rem;font-weight:800;color:var(--accent)" id="cmW4">15%</div><input type="range" min="5" max="30" value="15" id="cmW4R" oninput="cmW4.textContent=this.value+'%'"></div>
         <div class="card-sm" style="text-align:center"><div style="font-size:.6rem;font-family:var(--mono);color:var(--muted)">MACD</div><div style="font-size:1rem;font-weight:800;color:var(--purple)" id="cmW5">15%</div><input type="range" min="5" max="30" value="15" id="cmW5R" oninput="cmW5.textContent=this.value+'%'"></div>
       </div>
-      <div style="margin-top:.75rem;display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Risk/Reward: <strong style="color:var(--accent)" id="cmRR">2.1:1</strong></div>
-        <button class="btn b-acc b-sm" onclick="saveCommodityStrategy()">Save Commodity Strategy</button>
-      </div>
     </div>
   </div>
 
-  <!-- ── EXECUTION SETTINGS ── -->
+  <!-- ══ EXECUTION ══ -->
   <div id="st-exec" class="st-panel" style="display:none">
     <div class="g2">
       <div class="card">
-        <div class="card-title">Order Execution</div>
+        <div class="card-title">⚙ Engine &amp; Order Settings</div>
         <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Scan Interval</div><select id="scanInt"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option></select></div>
-          <div class="fg"><div class="fl">Order Type</div><select id="ordType"><option value="MARKET" selected>Market Order</option><option value="LIMIT">Limit (0.2% below ask)</option></select></div>
+          <div class="fg"><div class="fl">Scan Interval</div>
+            <select onchange="document.getElementById('scanInt').value=this.value">
+              <option value="300">Every 5 minutes</option>
+              <option value="900" selected>Every 15 minutes</option>
+              <option value="1800">Every 30 minutes</option>
+              <option value="3600">Every hour</option>
+            </select>
+          </div>
+          <div class="fg"><div class="fl">Order Type</div>
+            <select onchange="document.getElementById('ordType').value=this.value">
+              <option value="MARKET" selected>Market (instant fill)</option>
+              <option value="LIMIT">Limit (0.2% below ask)</option>
+            </select>
+          </div>
+          <div class="fg"><div class="fl">Max Total Positions <span style="color:var(--accent)" id="mpD2">6</span></div><input type="range" min="1" max="20" value="6" oninput="mpD2.textContent=this.value;document.getElementById('mpR').value=this.value"></div>
+          <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD2">-8%</span></div><input type="range" min="3" max="20" value="8" oninput="cbD2.textContent='-'+this.value+'%';document.getElementById('cbR').value=this.value"></div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place orders automatically on signal</div></div>
-            <label class="tog"><input type="checkbox" id="tAuto" checked><span class="tog-s"></span></label>
+            <div><div style="font-size:.76rem;font-weight:600">🤖 Master Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Global on/off for all auto trading</div></div>
+            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tAuto').checked=this.checked"><span class="tog-s"></span></label>
           </div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Asset Class Toggles</div>
+        <div class="card-title">🗂 Asset Class Toggles</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">📈 Stocks Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Enable stock signal execution</div></div>
-            <label class="tog"><input type="checkbox" id="tStocks" checked><span class="tog-s"></span></label>
+            <div><div style="font-size:.76rem;font-weight:600">📈 Stocks Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute stock signals</div></div>
+            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tStocks').checked=this.checked;if(document.getElementById('tStocksExec'))document.getElementById('tStocksExec').checked=this.checked"><span class="tog-s"></span></label>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">₿ Crypto Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Enable crypto signal execution</div></div>
-            <label class="tog"><input type="checkbox" id="tCrypto"><span class="tog-s"></span></label>
+            <div><div style="font-size:.76rem;font-weight:600">₿ Crypto Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute crypto signals</div></div>
+            <label class="tog"><input type="checkbox" onchange="document.getElementById('tCrypto').checked=this.checked;if(document.getElementById('crAutoExec'))document.getElementById('crAutoExec').checked=this.checked"><span class="tog-s"></span></label>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">⛏ Commodity Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Enable commodity signal execution</div></div>
-            <label class="tog"><input type="checkbox" id="tCommodity"><span class="tog-s"></span></label>
+            <div><div style="font-size:.76rem;font-weight:600">⛏ Commodity Auto-Trade</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Execute commodity signals</div></div>
+            <label class="tog"><input type="checkbox" onchange="document.getElementById('tCommodity').checked=this.checked;if(document.getElementById('cmAutoExec'))document.getElementById('cmAutoExec').checked=this.checked"><span class="tog-s"></span></label>
           </div>
           <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><div style="font-size:.76rem;font-weight:600">Auto Close at TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell when take-profit hit</div></div>
-            <label class="tog"><input type="checkbox" id="tTP" checked><span class="tog-s"></span></label>
+            <div><div style="font-size:.76rem;font-weight:600">🎯 Auto Close at TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell all assets at take-profit</div></div>
+            <label class="tog"><input type="checkbox" checked onchange="document.getElementById('tTP').checked=this.checked"><span class="tog-s"></span></label>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Portfolio Limits (All Asset Classes)</div>
-      <div class="g2" style="gap:.7rem">
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="fg"><div class="fl">Max Total Positions <span style="color:var(--accent)" id="mpD">6</span></div><input type="range" min="1" max="20" value="6" id="mpR" oninput="mpD.textContent=this.value"></div>
-          <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD">-8%</span></div><input type="range" min="3" max="20" value="8" id="cbR" oninput="cbD.textContent='-'+this.value+'%'"></div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px;font-size:.72rem;font-family:var(--mono);color:var(--muted)">
-          <div style="padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
-            <div style="color:var(--text);font-weight:600;margin-bottom:4px">Recommended Allocation</div>
-            <div>📈 Stocks: <strong style="color:var(--accent2)">60%</strong></div>
-            <div>₿ Crypto: <strong style="color:var(--warn)">20%</strong></div>
-            <div>⛏ Commodities: <strong style="color:var(--green)">20%</strong></div>
-          </div>
+        <div style="margin-top:10px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:.7rem;font-family:var(--mono);color:var(--muted)">
+          <div style="color:var(--text);font-weight:600;margin-bottom:4px">Recommended Allocation</div>
+          <div>📈 Stocks: <strong style="color:var(--accent2)">60%</strong></div>
+          <div>₿ Crypto: <strong style="color:var(--warn)">20%</strong></div>
+          <div>⛏ Commodities: <strong style="color:var(--green)">20%</strong></div>
         </div>
       </div>
     </div>
