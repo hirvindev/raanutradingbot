@@ -224,6 +224,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('ord',this)"><span class="sb-icon">◎</span>Orders</div>
   <div class="sb-grp">Analysis</div>
   <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
+  <div class="sb-item" onclick="nav('crypto',this)"><span class="sb-icon">₿</span>Crypto Scanner</div>
   <div class="sb-item" onclick="nav('ind',this)"><span class="sb-icon">∿</span>Indicators</div>
   <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
   <div class="sb-grp">Execution</div>
@@ -470,6 +471,92 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="card-title">Top Picks — Trade Reasoning</div>
     <div id="aiReasons"></div>
   </div>
+</div>
+
+<!-- ─────────── CRYPTO SCANNER ─────────── -->
+<div id="s-crypto" class="sec">
+
+  <!-- METRIC ROW -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem">
+    <div class="mcard mc-warn">
+      <div class="mlabel">BTC Price</div>
+      <div class="mval" id="cr-btc">—</div>
+      <div class="msub nu" id="cr-btc-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-blue">
+      <div class="mlabel">ETH Price</div>
+      <div class="mval" id="cr-eth">—</div>
+      <div class="msub nu" id="cr-eth-chg">Loading...</div>
+    </div>
+    <div class="mcard mc-teal">
+      <div class="mlabel">Market Cap</div>
+      <div class="mval hi" id="cr-mcap">—</div>
+      <div class="msub nu">Total crypto market</div>
+    </div>
+    <div class="mcard mc-green">
+      <div class="mlabel">Fear &amp; Greed</div>
+      <div class="mval" id="cr-fg">—</div>
+      <div class="msub nu" id="cr-fg-lbl">Market sentiment</div>
+    </div>
+  </div>
+
+  <!-- SCANNER -->
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title" style="margin:0">Crypto Momentum Scanner</div>
+      <div style="display:flex;gap:7px;align-items:center">
+        <select id="cr-filter" style="width:auto">
+          <option value="all">All Crypto</option>
+          <option value="large">Large Cap (BTC/ETH/BNB)</option>
+          <option value="mid">Mid Cap (Altcoins)</option>
+          <option value="small">Small Cap (Gems)</option>
+          <option value="defi">DeFi</option>
+          <option value="ai">AI Tokens</option>
+        </select>
+        <button class="btn b-acc b-sm" onclick="runCryptoScan()" id="crScanBtn">⚡ Scan Crypto</button>
+        <button class="btn b-out b-sm" onclick="loadCryptoPrices()">↻ Refresh Prices</button>
+      </div>
+    </div>
+
+    <!-- PROGRESS -->
+    <div id="crProgress" style="display:none;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
+        <span id="crStatus">Scanning...</span>
+        <span id="crCount">0 / 0</span>
+      </div>
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+        <div id="crBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px" id="crStats">
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="crScanned">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="crBullish">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="crBreakouts">0</div></div>
+      <div class="card-sm" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="crAvg">0</div></div>
+    </div>
+
+    <table>
+      <thead><tr><th>#</th><th>Pair</th><th>Name</th><th>Price</th><th>24h %</th><th>Score</th><th>RSI</th><th>Pattern</th><th>Volume</th><th>Signal</th><th>Action</th></tr></thead>
+      <tbody id="crBody"><tr><td class="te" colspan="11">Click ⚡ Scan Crypto to find top momentum opportunities</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- TOP PICKS REASONING -->
+  <div class="card" id="crReasonCard" style="display:none">
+    <div class="card-title">🏆 Top Crypto Picks — Analysis</div>
+    <div id="crReasons"></div>
+  </div>
+
+  <!-- HEATMAP -->
+  <div class="card">
+    <div class="card-title">Live Crypto Prices — Top 20 by Market Cap</div>
+    <div id="crHeatmap" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+      <div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Click Refresh Prices to load live data</div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ─────────── INDICATORS ─────────── -->
@@ -2046,6 +2133,7 @@ function nav(id,el){
   if(id==='port'){fetchPositions();}
   if(id==='ord'){fetchOrders();}
   if(id==='logs'){renderLogs();}
+  if(id==='crypto'){loadCryptoPrices();}
 }
 
 // ═══════════════════════════════════════
@@ -2061,7 +2149,366 @@ function getSL(){return parseInt(document.getElementById('slR')?.value||5);}
 function getTP(){return parseInt(document.getElementById('tpR')?.value||8);}
 
 // ═══════════════════════════════════════
-//  AUTO-LOAD CONFIG FROM BACKEND
+//  CRYPTO SCANNER ENGINE
+//  Uses CoinGecko free API (no key needed)
+//  Scans 100+ coins for momentum/breakout
+// ═══════════════════════════════════════
+
+const CRYPTO_UNIVERSE = {
+  large: [
+    {id:'bitcoin',sym:'BTC',name:'Bitcoin'},
+    {id:'ethereum',sym:'ETH',name:'Ethereum'},
+    {id:'binancecoin',sym:'BNB',name:'BNB'},
+    {id:'solana',sym:'SOL',name:'Solana'},
+    {id:'ripple',sym:'XRP',name:'XRP'},
+    {id:'cardano',sym:'ADA',name:'Cardano'},
+    {id:'avalanche-2',sym:'AVAX',name:'Avalanche'},
+    {id:'dogecoin',sym:'DOGE',name:'Dogecoin'},
+    {id:'polkadot',sym:'DOT',name:'Polkadot'},
+    {id:'chainlink',sym:'LINK',name:'Chainlink'},
+    {id:'tron',sym:'TRX',name:'TRON'},
+    {id:'shiba-inu',sym:'SHIB',name:'Shiba Inu'},
+    {id:'litecoin',sym:'LTC',name:'Litecoin'},
+    {id:'uniswap',sym:'UNI',name:'Uniswap'},
+  ],
+  mid: [
+    {id:'near',sym:'NEAR',name:'NEAR Protocol'},
+    {id:'aptos',sym:'APT',name:'Aptos'},
+    {id:'sui',sym:'SUI',name:'Sui'},
+    {id:'arbitrum',sym:'ARB',name:'Arbitrum'},
+    {id:'optimism',sym:'OP',name:'Optimism'},
+    {id:'injective-protocol',sym:'INJ',name:'Injective'},
+    {id:'sei-network',sym:'SEI',name:'Sei'},
+    {id:'celestia',sym:'TIA',name:'Celestia'},
+    {id:'starknet',sym:'STRK',name:'Starknet'},
+    {id:'pyth-network',sym:'PYTH',name:'Pyth Network'},
+    {id:'jito-governance-token',sym:'JTO',name:'Jito'},
+    {id:'jupiter-exchange-solana',sym:'JUP',name:'Jupiter'},
+    {id:'wormhole',sym:'W',name:'Wormhole'},
+    {id:'eigenlayer',sym:'EIGEN',name:'EigenLayer'},
+    {id:'pendle',sym:'PENDLE',name:'Pendle'},
+  ],
+  defi: [
+    {id:'aave',sym:'AAVE',name:'Aave'},
+    {id:'maker',sym:'MKR',name:'Maker'},
+    {id:'lido-dao',sym:'LDO',name:'Lido DAO'},
+    {id:'curve-dao-token',sym:'CRV',name:'Curve'},
+    {id:'compound-governance-token',sym:'COMP',name:'Compound'},
+    {id:'synthetix-network-token',sym:'SNX',name:'Synthetix'},
+    {id:'yearn-finance',sym:'YFI',name:'Yearn Finance'},
+    {id:'1inch',sym:'1INCH',name:'1inch'},
+    {id:'pancakeswap-token',sym:'CAKE',name:'PancakeSwap'},
+    {id:'raydium',sym:'RAY',name:'Raydium'},
+    {id:'orca',sym:'ORCA',name:'Orca'},
+    {id:'dydx',sym:'DYDX',name:'dYdX'},
+    {id:'gmx',sym:'GMX',name:'GMX'},
+    {id:'gains-network',sym:'GNS',name:'Gains Network'},
+  ],
+  ai: [
+    {id:'render-token',sym:'RENDER',name:'Render'},
+    {id:'fetch-ai',sym:'FET',name:'Fetch.ai'},
+    {id:'singularitynet',sym:'AGIX',name:'SingularityNET'},
+    {id:'ocean-protocol',sym:'OCEAN',name:'Ocean Protocol'},
+    {id:'bittensor',sym:'TAO',name:'Bittensor'},
+    {id:'akash-network',sym:'AKT',name:'Akash Network'},
+    {id:'numeraire',sym:'NMR',name:'Numeraire'},
+    {id:'cortex',sym:'CTXC',name:'Cortex'},
+    {id:'matrix-ai-network',sym:'MAN',name:'Matrix AI'},
+    {id:'vectorspace-ai',sym:'VXV',name:'VectorSpace AI'},
+  ],
+  small: [
+    {id:'bonk',sym:'BONK',name:'Bonk'},
+    {id:'dogwifcoin',sym:'WIF',name:'dogwifhat'},
+    {id:'pepe',sym:'PEPE',name:'Pepe'},
+    {id:'floki',sym:'FLOKI',name:'Floki'},
+    {id:'book-of-meme',sym:'BOME',name:'Book of Meme'},
+    {id:'cat-in-a-dogs-world',sym:'MEW',name:'cat in a dogs world'},
+    {id:'notcoin',sym:'NOT',name:'Notcoin'},
+    {id:'hamster-kombat',sym:'HMSTR',name:'Hamster Kombat'},
+    {id:'dogs-huahua',sym:'DOGS',name:'DOGS'},
+    {id:'mog-coin',sym:'MOG',name:'Mog Coin'},
+    {id:'turbo',sym:'TURBO',name:'Turbo'},
+    {id:'brett',sym:'BRETT',name:'Brett'},
+  ],
+};
+
+// ── Fetch live crypto prices from CoinGecko (free, no key) ──
+async function fetchCryptoPrices() {
+  const allIds = Object.values(CRYPTO_UNIVERSE).flat().map(c=>c.id).join(',');
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${allIds}&order=market_cap_desc&per_page=250&sparkline=false&price_change_percentage=24h,7d`;
+    const res = await fetch(url, {signal: AbortSignal.timeout(10000)});
+    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+    const data = await res.json();
+    log(`CoinGecko: ${data.length} coins loaded`, 'ok');
+    return data;
+  } catch(e) {
+    log(`CoinGecko error: ${e.message}`, 'err');
+    return [];
+  }
+}
+
+// ── Fetch OHLC for RSI/MACD calculation ──
+async function fetchCryptoOHLC(coinId, days=30) {
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`;
+    const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
+    if (!res.ok) return null;
+    const data = await res.json();
+    const closes = data.map(d => d[4]).filter(v => v > 0);
+    return closes;
+  } catch(e) { return null; }
+}
+
+// ── Crypto momentum score ──
+function cryptoScore(coin, closes) {
+  let score = 0;
+  const chg24 = coin.price_change_percentage_24h ?? 0;
+  const chg7d = coin.price_change_percentage_7d_in_currency ?? 0;
+
+  // 24h momentum
+  if (chg24 > 5) score += 20;
+  else if (chg24 > 2) score += 12;
+  else if (chg24 > 0) score += 6;
+  else if (chg24 < -5) score -= 10;
+
+  // 7d trend
+  if (chg7d > 15) score += 20;
+  else if (chg7d > 5) score += 12;
+  else if (chg7d > 0) score += 6;
+
+  // Volume spike (volume vs market cap ratio)
+  const volRatio = coin.total_volume / (coin.market_cap || 1);
+  if (volRatio > 0.3) score += 20;
+  else if (volRatio > 0.15) score += 12;
+  else if (volRatio > 0.05) score += 6;
+
+  // RSI if we have OHLC
+  if (closes && closes.length >= 15) {
+    const rsi = calcRSI(closes);
+    if (rsi) {
+      if (rsi >= 55 && rsi <= 70) score += 20;
+      else if (rsi >= 50 && rsi < 55) score += 12;
+      else if (rsi > 70 && rsi < 80) score += 8;
+      else if (rsi < 35) score += 15; // oversold bounce
+    }
+  }
+
+  // Near ATH = breakout signal
+  const athPct = coin.ath_change_percentage ?? -100;
+  if (athPct > -5) score += 20;
+  else if (athPct > -15) score += 10;
+
+  return Math.min(Math.max(score, 0), 100);
+}
+
+// ── Load live prices into heatmap ──
+async function loadCryptoPrices() {
+  document.getElementById('crHeatmap').innerHTML = '<div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5"><span class="spin"></span> Loading live prices...</div>';
+  // Load BTC, ETH, market cap
+  try {
+    const global = await fetch('https://api.coingecko.com/api/v3/global').then(r=>r.json());
+    const mcap = global?.data?.total_market_cap?.usd ?? 0;
+    const fg_res = await fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json());
+    const fg = fg_res?.data?.[0];
+    setEl('cr-mcap', '$'+fmtLarge(mcap));
+    setEl('cr-fg', fg?.value ?? '—');
+    setEl('cr-fg-lbl', fg?.value_classification ?? 'Market sentiment');
+    document.getElementById('cr-fg').className = 'mval ' + (parseInt(fg?.value||50) > 60 ? 'up' : parseInt(fg?.value||50) < 40 ? 'down' : 'nu');
+  } catch(e) {}
+
+  const coins = await fetchCryptoPrices();
+  if (!coins.length) {
+    document.getElementById('crHeatmap').innerHTML = '<div style="color:var(--red);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Failed to load — CoinGecko may be rate limiting. Try again in 1 minute.</div>';
+    return;
+  }
+
+  // Update BTC and ETH metrics
+  const btc = coins.find(c=>c.symbol==='btc');
+  const eth = coins.find(c=>c.symbol==='eth');
+  if (btc) {
+    setEl('cr-btc', '$'+fmtN(btc.current_price, 0));
+    setEl('cr-btc-chg', (btc.price_change_percentage_24h>=0?'+':'')+fmtN(btc.price_change_percentage_24h,2)+'% 24h');
+    document.getElementById('cr-btc').className = 'mval '+(btc.price_change_percentage_24h>=0?'up':'down');
+  }
+  if (eth) {
+    setEl('cr-eth', '$'+fmtN(eth.current_price, 2));
+    setEl('cr-eth-chg', (eth.price_change_percentage_24h>=0?'+':'')+fmtN(eth.price_change_percentage_24h,2)+'% 24h');
+    document.getElementById('cr-eth').className = 'mval '+(eth.price_change_percentage_24h>=0?'up':'down');
+  }
+
+  // Render heatmap
+  document.getElementById('crHeatmap').innerHTML = coins.slice(0, 20).map(c => {
+    const chg = c.price_change_percentage_24h ?? 0;
+    const bg = chg > 5 ? 'rgba(34,197,94,.15)' : chg > 0 ? 'rgba(34,197,94,.07)' : chg < -5 ? 'rgba(244,63,94,.15)' : 'rgba(244,63,94,.07)';
+    const col = chg >= 0 ? 'var(--green)' : 'var(--red)';
+    return `<div style="background:${bg};border:1px solid var(--border);border-radius:7px;padding:8px;text-align:center;cursor:pointer" onclick="document.getElementById('cr-filter').value='all';runCryptoScan()">
+      <div style="font-size:.7rem;font-weight:800;font-family:var(--mono)">${c.symbol.toUpperCase()}</div>
+      <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted2);margin-top:2px">$${fmtPrice(c.current_price)}</div>
+      <div style="font-size:.65rem;font-family:var(--mono);color:${col};margin-top:2px">${chg>=0?'+':''}${fmtN(chg,2)}%</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Main Crypto Scanner ──
+async function runCryptoScan() {
+  const filter = document.getElementById('cr-filter')?.value || 'all';
+  let universe = [];
+  if (filter === 'all') {
+    Object.values(CRYPTO_UNIVERSE).flat().forEach(c => { if(!universe.find(x=>x.id===c.id)) universe.push(c); });
+  } else {
+    universe = CRYPTO_UNIVERSE[filter] || Object.values(CRYPTO_UNIVERSE).flat();
+  }
+
+  document.getElementById('crScanBtn').textContent = '⏳ Scanning...';
+  document.getElementById('crScanBtn').disabled = true;
+  document.getElementById('crProgress').style.display = 'block';
+  document.getElementById('crBody').innerHTML = `<tr><td class="te" colspan="11"><span class="spin"></span> Fetching ${universe.length} crypto prices from CoinGecko...</td></tr>`;
+
+  // Fetch all prices at once
+  const ids = universe.map(c=>c.id).join(',');
+  let coins = [];
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=250&sparkline=false&price_change_percentage=24h,7d`;
+    const res = await fetch(url, {signal: AbortSignal.timeout(15000)});
+    coins = await res.json();
+    log(`Crypto prices loaded: ${coins.length} coins`, 'ok');
+  } catch(e) {
+    log(`CoinGecko error: ${e.message}`, 'err');
+    document.getElementById('crBody').innerHTML = '<tr><td class="te" colspan="11">CoinGecko rate limit — wait 1 minute and try again</td></tr>';
+    document.getElementById('crScanBtn').textContent = '⚡ Scan Crypto';
+    document.getElementById('crScanBtn').disabled = false;
+    return;
+  }
+
+  const winners = [];
+  let scanned = 0;
+
+  for (const coin of coins) {
+    const meta = universe.find(u => u.id === coin.id);
+    if (!meta) { scanned++; continue; }
+
+    // Fetch OHLC for RSI (rate limited — only for top candidates)
+    let closes = null;
+    const chg24 = coin.price_change_percentage_24h ?? 0;
+    if (Math.abs(chg24) > 2) { // only fetch OHLC if showing movement
+      closes = await fetchCryptoOHLC(coin.id, 30);
+      await new Promise(r => setTimeout(r, 300)); // respect rate limit
+    }
+
+    const score = cryptoScore(coin, closes);
+    const rsi = closes ? calcRSI(closes) : null;
+
+    // Pattern detection
+    const patterns = [];
+    if (chg24 > 3 && (coin.total_volume / coin.market_cap) > 0.1) patterns.push('MOMENTUM');
+    if ((coin.ath_change_percentage ?? -100) > -10) patterns.push('BREAKOUT');
+    if ((coin.price_change_percentage_7d_in_currency ?? 0) > 10 && chg24 > 0) patterns.push('UPTREND');
+    if (rsi && rsi < 35) patterns.push('OVERSOLD');
+
+    if (score >= 50 && patterns.length > 0) {
+      winners.push({ coin, meta, score, rsi, patterns, closes });
+      // Show results in real time
+      winners.sort((a,b) => b.score - a.score);
+      renderCryptoResults(winners.slice(0,20));
+    }
+
+    scanned++;
+    const pct = Math.round(scanned / coins.length * 100);
+    document.getElementById('crBar').style.width = pct + '%';
+    document.getElementById('crCount').textContent = `${scanned} / ${coins.length}`;
+    document.getElementById('crStatus').textContent = `Scanning ${meta?.sym || coin.symbol.toUpperCase()}... (${winners.length} found)`;
+    document.getElementById('crScanned').textContent = scanned;
+    document.getElementById('crBullish').textContent = winners.filter(w=>w.patterns.includes('MOMENTUM')||w.patterns.includes('UPTREND')).length;
+    document.getElementById('crBreakouts').textContent = winners.filter(w=>w.patterns.includes('BREAKOUT')).length;
+    document.getElementById('crAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
+
+    if (winners.length >= 30) break;
+  }
+
+  winners.sort((a,b) => b.score - a.score);
+  renderCryptoResults(winners.slice(0, 20));
+  renderCryptoReasons(winners.slice(0, 4));
+  document.getElementById('crProgress').style.display = 'none';
+  document.getElementById('crScanBtn').textContent = '⚡ Scan Crypto';
+  document.getElementById('crScanBtn').disabled = false;
+  log(`Crypto scan done — ${scanned} scanned, ${winners.length} picks found`, 'ok');
+}
+
+function renderCryptoResults(winners) {
+  if (!winners.length) return;
+  document.getElementById('crBody').innerHTML = winners.map((w, i) => {
+    const c = w.coin;
+    const chg24 = c.price_change_percentage_24h ?? 0;
+    const chg7d = c.price_change_percentage_7d_in_currency ?? 0;
+    const volRatio = ((c.total_volume / c.market_cap) * 100).toFixed(1);
+    const patBadges = w.patterns.map(p => {
+      const col = p==='MOMENTUM'?'var(--green)':p==='BREAKOUT'?'var(--warn)':p==='UPTREND'?'var(--accent2)':'var(--purple)';
+      return `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${col};border:1px solid ${col}40;margin-right:2px">${p}</span>`;
+    }).join('');
+    const sig = w.score >= 75 ? 'STRONG BUY' : w.score >= 60 ? 'BUY' : 'WATCH';
+    const sigCls = w.score >= 75 ? 'bdg-buy' : w.score >= 60 ? 'bdg-buy' : 'bdg-hold';
+    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
+<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
+<td style="font-weight:800;font-size:.85rem">${w.meta.sym} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
+<td style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</td>
+<td style="font-family:var(--mono)">$${fmtPrice(c.current_price)}</td>
+<td class="${chg24>=0?'up':'down'}" style="font-family:var(--mono)">${chg24>=0?'+':''}${fmtN(chg24,2)}%</td>
+<td>
+  <div style="display:flex;align-items:center;gap:5px">
+    <div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${w.score}%;background:var(--green)"></div></div>
+    <span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">${w.score}</span>
+  </div>
+</td>
+<td style="font-family:var(--mono);color:${w.rsi?w.rsi>70?'var(--warn)':w.rsi>50?'var(--green)':'var(--muted2)':'var(--muted)'}">${w.rsi?fmtN(w.rsi,1):'—'}</td>
+<td>${patBadges}</td>
+<td style="font-family:var(--mono);font-size:.7rem;color:var(--muted2)">${volRatio}%</td>
+<td><span class="bdg ${sigCls}">${sig}</span></td>
+<td><button class="btn b-out b-xs" onclick="window.open('https://www.coingecko.com/en/coins/${w.coin.id}','_blank')">CoinGecko ↗</button></td>
+</tr>`;
+  }).join('');
+}
+
+function renderCryptoReasons(winners) {
+  if (!winners.length) return;
+  document.getElementById('crReasonCard').style.display = 'block';
+  document.getElementById('crReasons').innerHTML = winners.map(w => {
+    const c = w.coin;
+    const chg24 = c.price_change_percentage_24h ?? 0;
+    const pts = [];
+    if (w.patterns.includes('MOMENTUM')) pts.push(`Strong 24h momentum +${fmtN(chg24,2)}% with volume spike`);
+    if (w.patterns.includes('BREAKOUT')) pts.push(`Near all-time high — breakout territory`);
+    if (w.patterns.includes('UPTREND')) pts.push(`7-day uptrend confirmed — sustained buying pressure`);
+    if (w.patterns.includes('OVERSOLD')) pts.push(`RSI ${fmtN(w.rsi,1)} — oversold, mean reversion likely`);
+    const athChg = c.ath_change_percentage ?? 0;
+    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
+<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">
+<span style="font-size:.9rem;font-weight:700">${w.meta.sym}</span>
+<span style="font-size:.75rem;color:var(--muted2)">${w.meta.name}</span>
+<span class="bdg bdg-buy">BUY</span>
+<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${w.score}/100</strong></span>
+<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">ATH: ${fmtN(athChg,1)}% | Vol/MCap: ${fmtN((c.total_volume/c.market_cap)*100,1)}%</span>
+</div>
+<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">${pts.join('. ')||'Composite crypto momentum score.'}</div>
+<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${w.score}%;background:var(--green)"></div></div>
+</div>`;
+  }).join('');
+}
+
+function fmtPrice(p) {
+  if (!p) return '—';
+  if (p >= 1000) return p.toLocaleString('en-US', {maximumFractionDigits:0});
+  if (p >= 1) return fmtN(p, 2);
+  if (p >= 0.01) return fmtN(p, 4);
+  return p.toFixed(8).replace(/\.?0+$/, '');
+}
+
+function fmtLarge(n) {
+  if (n >= 1e12) return '$' + fmtN(n/1e12, 2) + 'T';
+  if (n >= 1e9) return '$' + fmtN(n/1e9, 2) + 'B';
+  if (n >= 1e6) return '$' + fmtN(n/1e6, 2) + 'M';
+  return '$' + fmtN(n, 0);
+}
 //  Reads API key + mode from server.py
 //  No manual configuration needed
 // ═══════════════════════════════════════
