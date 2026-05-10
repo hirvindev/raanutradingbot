@@ -652,15 +652,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <div class="fg"><div class="fl">Order Type</div><select id="ordType"><option value="MARKET" selected>Market</option><option value="LIMIT">Limit (0.2% below ask)</option></select></div>
     </div>
   </div>
-  <div class="card">
-    <div class="card-title">Watchlist</div>
-    <div style="display:flex;gap:7px;margin-bottom:8px">
-      <input type="text" id="wIn" placeholder="Add symbol, e.g. AAPL" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
-      <button class="btn b-acc b-sm" onclick="addWatch()">+ Add</button>
-    </div>
-    <div id="wTags" style="display:flex;flex-wrap:wrap;gap:5px"></div>
-  </div>
-
   <!-- CRYPTO STRATEGY -->
   <div class="card" style="border-color:rgba(245,158,11,.2)">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:.65rem">
