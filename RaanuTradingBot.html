@@ -1444,9 +1444,9 @@ async function runMarketScan() {
 
   for (const {s, cap} of universe) {
     try {
-      const data = await fetchPrices(s, 260); // 1 year of data
+      const data = await fetchPrices(s, 260);
       const c = data.closes;
-      if (c.length < 60) { scanned++; continue; } // skip if not enough data
+      if (c.length < 60) { scanned++; continue; }
 
       const price = c[c.length - 1];
       const patterns = detectPatterns(c, data.highs, data.lows, data.vols);
@@ -1454,23 +1454,23 @@ async function runMarketScan() {
       const rsiV = calcRSI(c);
       const macdV = calcMACD(c);
 
-      // ── FILTER: must have at least one pattern ──
       if (patterns.length === 0) { scanned++; continue; }
-
-      // ── FILTER: pattern type filter ──
       if (patternFilter !== 'all') {
         const hasPattern = patterns.some(p => p.type.toLowerCase().includes(patternFilter));
         if (!hasPattern) { scanned++; continue; }
       }
-
-      // ── FILTER: minimum score 72 to be a "sure-shot" ──
       if (score < 72) { scanned++; continue; }
-
-      // ── FILTER: RSI not overbought (< 80) ──
       if (rsiV && rsiV > 80) { scanned++; continue; }
 
       winners.push({ s, cap, price, patterns, score, rsiV, macdV });
-    } catch(e) { /* skip failed fetches */ }
+
+      // ── RENDER RESULTS IN REAL TIME ──
+      // Sort current winners and show top 20 immediately
+      winners.sort((a, b) => b.score - a.score);
+      const liveTop20 = winners.slice(0, 20);
+      renderScanResults(liveTop20);
+
+    } catch(e) { /* skip */ }
 
     scanned++;
 
@@ -1478,21 +1478,18 @@ async function runMarketScan() {
     const pct = Math.round(scanned / total * 100);
     document.getElementById('scanBar').style.width = pct + '%';
     document.getElementById('scanCount').textContent = `${scanned} / ${total}`;
-    document.getElementById('scanStatus').textContent = `Scanning ${s}...`;
+    document.getElementById('scanStatus').textContent = `Scanning ${s}... (${winners.length} winners found)`;
     document.getElementById('stScanned').textContent = scanned;
-    document.getElementById('stWinners').textContent = winners.length;
+    document.getElementById('stWinners').textContent = Math.min(winners.length, 20);
     document.getElementById('stBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
     document.getElementById('stAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
 
-    // Stop once we have enough candidates (speed optimisation)
     if (winners.length >= 60) break;
   }
 
-  // Sort by score, take top 20
+  // Final render
   winners.sort((a,b) => b.score - a.score);
   const top20 = winners.slice(0, 20);
-
-  // Render
   document.getElementById('scanProgress').style.display = 'none';
   document.getElementById('scanBtn').textContent = '⚡ Scan Market';
   document.getElementById('scanBtn').disabled = false;
@@ -1504,14 +1501,20 @@ async function runMarketScan() {
     return;
   }
 
+  renderScanResults(top20);
+  renderMarketReasons(top20.slice(0, 4));
+  log(`Market scan done — ${scanned} stocks scanned, ${top20.length} sure-shot winners found`, 'ok');
+}
+
+// ── Render scan results table ──────────
+function renderScanResults(top20) {
+  if (!top20.length) return;
   document.getElementById('sigBody').innerHTML = top20.map((r, i) => {
-    const mainPat = r.patterns[0];
     const patBadges = r.patterns.map(p =>
       `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
     ).join('');
     const capCol = r.cap==='Large'?'var(--accent2)':r.cap==='Mid'?'var(--warn)':'var(--purple)';
     const rsiCol = r.rsiV>70?'var(--warn)':r.rsiV>55?'var(--green)':'var(--muted2)';
-    const macdCol = r.macdV.lm>0?'var(--green)':'var(--red)';
     const hasBreakout = r.patterns.some(p=>p.type==='BREAKOUT');
     const hasUptrend  = r.patterns.some(p=>p.type==='UPTREND'||p.type==='GOLDEN CROSS');
     const hasMomentum = r.patterns.some(p=>p.type==='MOMENTUM');
@@ -1529,9 +1532,9 @@ async function runMarketScan() {
 </td>
 <td>${patBadges}</td>
 <td style="font-family:var(--mono);color:${rsiCol}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓ YES':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓ YES':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓':'—'}</span></td>
 <td style="display:flex;gap:4px">
   <button class="btn b-acc b-xs" onclick="autoTrade('${r.s}',${r.price},'${r.patterns.map(p=>p.type).join('+')}','UPTREND',${fn(r.rsiV,1)})">Execute</button>
   <button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${r.s}';computeInd()">Chart</button>
@@ -1545,9 +1548,6 @@ async function runMarketScan() {
     document.getElementById('rNum').textContent = top20[0].score;
     document.getElementById('rLbl').textContent = 'STRONG BUY';
   }
-
-  renderMarketReasons(top20.slice(0, 4));
-  log(`Market scan done — ${scanned} stocks scanned, ${top20.length} sure-shot winners found`, 'ok');
 }
 
 // Keep runScan as alias for backward compatibility
