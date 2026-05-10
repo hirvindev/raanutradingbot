@@ -1075,27 +1075,69 @@ function sLabel(s){if(s>=80)return{l:'STRONG BUY',col:'var(--green)'};if(s>=70)r
 //  PRICE DATA
 // ═══════════════════════════════════════
 async function fetchPrices(ticker, days=60){
-  const yt=ticker.replace(/_US_EQ|_EQ|_UK_EQ/g,'');
-  const to=Math.floor(Date.now()/1000),from=to-days*86400;
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`;
-  try{
-    const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
-    const d=await r.json();
-    const q=d?.chart?.result?.[0];
-    if(q){
-      const raw=q.indicators.quote[0];
-      const idx=raw.close.map((v,i)=>v!=null?i:-1).filter(i=>i>=0);
-      const closes=idx.map(i=>raw.close[i]);
-      const highs=idx.map(i=>raw.high[i]);
-      const lows=idx.map(i=>raw.low[i]);
-      const vols=idx.map(i=>raw.volume[i]??0);
-      const times=idx.map(i=>new Date(q.timestamp[i]*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
-      log(`Prices: ${yt} — ${closes.length} candles`,'info');
-      return{closes,highs,lows,vols,times};
-    }
-  }catch(e){}
-  log(`Simulated prices for ${yt}`,'warn');
-  return mockPrices(days);
+  const yt = ticker.replace(/_US_EQ|_EQ|_UK_EQ/g,'');
+  const to = Math.floor(Date.now()/1000);
+  const from = to - days * 86400;
+
+  // Try primary Yahoo Finance proxy
+  const sources = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`)}`,
+  ];
+
+  for (const src of sources) {
+    try {
+      const r = await fetch(src, {signal: AbortSignal.timeout(8000)});
+      const d = await r.json();
+      const q = d?.chart?.result?.[0];
+      if (!q) continue;
+
+      const raw = q.indicators.quote[0];
+      const timestamps = q.timestamp;
+      if (!timestamps || !raw.close) continue;
+
+      // Filter out null values
+      const idx = raw.close.map((v,i) => v != null && v > 0 ? i : -1).filter(i => i >= 0);
+      if (idx.length < 20) continue;
+
+      const closes = idx.map(i => raw.close[i]);
+      const highs  = idx.map(i => raw.high[i] ?? raw.close[i]);
+      const lows   = idx.map(i => raw.low[i] ?? raw.close[i]);
+      const vols   = idx.map(i => raw.volume[i] ?? 0);
+      const times  = idx.map(i => new Date(timestamps[i]*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
+
+      // ── VALIDATE: check last price is recent (within 5 trading days) ──
+      const lastTs = timestamps[idx[idx.length-1]];
+      const daysSinceLastPrice = (Date.now()/1000 - lastTs) / 86400;
+      if (daysSinceLastPrice > 7) {
+        log(`${yt}: stale data (${Math.round(daysSinceLastPrice)}d old) — skipping`, 'warn');
+        continue;
+      }
+
+      // ── VALIDATE: price sanity check (not zero, not absurdly high) ──
+      const lastPrice = closes[closes.length-1];
+      if (lastPrice <= 0 || lastPrice > 100000) {
+        log(`${yt}: invalid price $${lastPrice} — skipping`, 'warn');
+        continue;
+      }
+
+      // ── VALIDATE: price consistency (no sudden 50%+ jumps = bad data) ──
+      const prev = closes[closes.length-2];
+      if (prev && Math.abs(lastPrice - prev) / prev > 0.5) {
+        log(`${yt}: suspicious price jump — skipping`, 'warn');
+        continue;
+      }
+
+      log(`Prices OK: ${yt} — $${lastPrice.toFixed(2)}, ${closes.length} candles`, 'info');
+      return { closes, highs, lows, vols, times };
+
+    } catch(e) { /* try next source */ }
+  }
+
+  // All sources failed — do NOT use simulated data for scanner
+  // Simulated prices caused the fake $359 bug
+  log(`${yt}: real price unavailable — skipping`, 'warn');
+  return null; // return null so scanner skips this stock
 }
 function mockPrices(days,base=null){
   let p=base||(130+Math.random()*200);
@@ -1445,6 +1487,7 @@ async function runMarketScan() {
   for (const {s, cap} of universe) {
     try {
       const data = await fetchPrices(s, 260);
+      if (!data) { scanned++; continue; } // skip if real price unavailable
       const c = data.closes;
       if (c.length < 60) { scanned++; continue; }
 
@@ -1584,7 +1627,11 @@ let pCI=null,mCI=null;
 async function computeInd(){
   const sym=document.getElementById('iSym').value.trim().toUpperCase();if(!sym)return;
   log(`Computing: ${sym}`,'info');
-  const data=await fetchPrices(sym,200);
+  let data = await fetchPrices(sym, 200);
+  if (!data) {
+    log(`Using simulated data for ${sym} (real price unavailable)`,'warn');
+    data = mockPrices(200); // only use mock for indicator tab, not scanner
+  }
   const c=data.closes,price=c[c.length-1];
   const rsiV=calcRSI(c),macdV=calcMACD(c),bbV=calcBB(c);
   const e50=calcEMA(c,50),e200=calcEMA(c,200);
