@@ -72,24 +72,27 @@ def format_daily_alert(picks: list[dict]) -> str:
     lines.append(f"📊 *Top {len(picks)} XETRA/GETTEX picks:*\n")
     rank_emoji = ["1️⃣", "2️⃣", "3️⃣"]
 
+    dashboard_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    if dashboard_url and not dashboard_url.startswith("http"):
+        dashboard_url = "https://" + dashboard_url
+
     for i, p in enumerate(picks):
         score = p.get("score", 0)
-        heat = "🔥" if score >= 70 else "📈" if score >= 55 else "📊"
-        ticker = p["ticker"].replace(".DE", "")  # clean display name
+        heat = "🔥" if score >= 75 else "📈" if score >= 60 else "📊"
+        ticker = p["ticker"].replace(".DE", "")
         adr = p.get("us_adr")
-        exec_note = f"US ADR: *{adr}*" if adr else "_No US ADR — manual execution_"
+        buy_ticker = adr or ticker
         reasons = " | ".join(p.get("reasons", [])[:2])
 
         lines += [
             f"{rank_emoji[i]} *{ticker}* (XETRA) {heat} Score {score}/100",
             f"   💶 €{p.get('price', 0):.2f} | RSI {p.get('rsi', 0):.0f} | {reasons}",
-            f"   {exec_note}",
+            f"   🇺🇸 Buy on Alpaca as: *{buy_ticker}*",
             "",
         ]
 
     top = picks[0]
-    top_ticker = top["ticker"].replace(".DE", "")
-    top_adr = top.get("us_adr") or top_ticker
+    top_adr = top.get("us_adr") or top["ticker"].replace(".DE", "")
 
     lines += [
         "─────────────────────",
@@ -100,6 +103,8 @@ def format_daily_alert(picks: list[dict]) -> str:
         f"  *STATUS* — portfolio summary",
         f"  *PICKS* — refresh now",
     ]
+    if dashboard_url:
+        lines += ["", f"🖥 Dashboard: {dashboard_url}"]
     return "\n".join(lines)
 
 

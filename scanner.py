@@ -91,7 +91,7 @@ def find_top_picks(n: int = 3) -> list[dict]:
             if not r.get("ok"):
                 continue
             score = r.get("score", 0)
-            if score < 40:
+            if score < 60:
                 continue
             r["us_adr"] = XETRA_TO_US_ADR.get(ticker)
             r["exchange"] = "XETRA/GETTEX"
