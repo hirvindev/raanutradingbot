@@ -342,12 +342,15 @@ def health():
 async def account_cash():
     """Account balances — mapped to the shape the dashboard expects."""
     acct = await alpaca_get("/account")
+    total      = float(acct.get("portfolio_value", 0))
+    last_eq    = float(acct.get("last_equity", total))   # equity at previous market close
+    daily_ppl  = total - last_eq                          # includes realized + unrealized
     return {
-        "total":     float(acct.get("portfolio_value", 0)),
+        "total":     total,
         "free":      float(acct.get("cash", 0)),
-        "invested":  float(acct.get("portfolio_value", 0)) - float(acct.get("cash", 0)),
+        "invested":  total - float(acct.get("cash", 0)),
         "ppl":       float(acct.get("unrealized_pl", 0)),
-        "daily_ppl": float(acct.get("unrealized_intraday_pl", 0)),
+        "daily_ppl": daily_ppl,
         "blocked":   0,
         "currency":  acct.get("currency", "USD"),
         "_raw":      acct,
