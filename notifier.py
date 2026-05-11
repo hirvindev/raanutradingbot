@@ -108,6 +108,20 @@ def format_daily_alert(picks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def format_pre_trade_alert(adr: str, xetra: str, usd: float, score: int,
+                           free_cash: float, reasons: list[str]) -> str:
+    reasons_str = " | ".join(reasons[:2]) if reasons else "momentum signal"
+    return (
+        f"⚡ *RaanuBot — About to BUY*\n"
+        f"   Stock: *{adr}* (XETRA: {xetra.replace('.DE', '')})\n"
+        f"   Amount: *${usd:.2f}*\n"
+        f"   Score: {score}/100\n"
+        f"   Signal: {reasons_str}\n"
+        f"   Free cash: ${free_cash:,.2f}\n"
+        f"   _Order submitting now — check dashboard to cancel_"
+    )
+
+
 def format_trade_confirm(action: str, ticker: str, usd: float, status: str) -> str:
     emoji = "✅" if action == "BUY" else "🔴"
     verb = "Bought" if action == "BUY" else "Sold"

@@ -1,115 +1,80 @@
 """
-scanner.py — XETRA / GETTEX momentum scanner
-==============================================
-Scans German exchange stocks (DAX 40 + MDAX top picks) using
-Yahoo Finance .DE tickers, scores them with our strategy engine,
-and maps to US ADR equivalents for Alpaca execution where available.
+scanner.py — US-listed momentum scanner
+========================================
+Scans US-listed stocks (including ADRs of European giants) using
+yfinance batch downloads. All tickers are directly executable on Alpaca.
 """
 
 import logging
 from typing import Optional
-from strategy import score_ticker
+from strategy import score_from_df, batch_download
 
 log = logging.getLogger("raanu.scanner")
 
-# ── XETRA / GETTEX universe (DAX 40 + MDAX selection) ──────────────────────
-XETRA_UNIVERSE = [
-    # DAX 40
-    "SAP.DE", "SIE.DE", "ALV.DE", "MRK.DE", "DTE.DE",
-    "VOW3.DE", "BMW.DE", "BAS.DE", "BAYN.DE", "DBK.DE",
-    "MBG.DE", "ADS.DE", "DHL.DE", "RWE.DE", "EOAN.DE",
-    "IFX.DE", "FRE.DE", "HEN3.DE", "BEI.DE", "CON.DE",
-    "VNA.DE", "MTX.DE", "SHL.DE", "QIA.DE", "HEI.DE",
-    "ENR.DE", "DHER.DE", "HAG.DE", "SY1.DE", "G1A.DE",
-    "MUV2.DE", "ZAL.DE", "1COV.DE", "AIR.DE", "PUM.DE",
-    "EVT.DE", "SRT3.DE", "HFG.DE",
-    # MDAX / high momentum picks
-    "AFX.DE", "NDX1.DE", "VBK.DE", "GXI.DE", "WAF.DE",
-    "BC8.DE", "AIXA.DE", "DUE.DE", "KGX.DE",
-    # US mega-caps listed on XETRA (correct Yahoo Finance tickers)
-    "APC.DE", "MSF.DE", "AMZ.DE", "ABEC.DE", "FB2A.DE",
-    "NVD.DE", "TL0.DE", "AMD.DE", "NFC.DE", "PYPL.DE",
+# ── Full scan universe — all US-listed and executable on Alpaca ──────────────
+UNIVERSE = [
+    # US mega-caps
+    "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AMD", "NFLX", "PYPL",
+    # European blue-chips (US ADRs / NYSE-listed)
+    "SAP",    # SAP SE
+    "SIEGY",  # Siemens
+    "ALIZY",  # Allianz
+    "DTEGY",  # Deutsche Telekom
+    "BAYRY",  # Bayer
+    "DB",     # Deutsche Bank
+    "ADDYY",  # Adidas
+    "RWEOY",  # RWE
+    "EONGY",  # E.ON
+    "IFNNY",  # Infineon
+    "EADSY",  # Airbus
+    "MURGY",  # Munich Re
+    "VWAGY",  # Volkswagen
+    "BASFY",  # BASF
+    "HENKY",  # Henkel
+    "PUMSY",  # Puma
+    "CTTAY",  # Continental
+    "FSNUY",  # Fresenius
+    # US financials & tech
+    "JPM", "GS", "MS", "BAC", "V", "MA",
+    "ORCL", "CRM", "ADBE", "INTC", "QCOM",
+    # ETFs for broad signals
+    "SPY", "QQQ", "IWM",
 ]
 
-# XETRA ticker → US-listed equivalent for Alpaca execution
-# None = no liquid US ADR, alert only
-XETRA_TO_US_ADR: dict[str, Optional[str]] = {
-    "SAP.DE":  "SAP",    # SAP SE — NYSE
-    "SIE.DE":  "SIEGY",  # Siemens — OTC
-    "ALV.DE":  "ALIZY",  # Allianz — OTC
-    "MRK.DE":  "MKKGY",  # Merck KGaA — OTC
-    "DTE.DE":  "DTEGY",  # Deutsche Telekom — OTC
-    "VOW3.DE": "VWAGY",  # Volkswagen — OTC
-    "BMW.DE":  "BMWYY",  # BMW — OTC
-    "BAS.DE":  "BASFY",  # BASF — OTC
-    "BAYN.DE": "BAYRY",  # Bayer — OTC
-    "DBK.DE":  "DB",     # Deutsche Bank — NYSE
-    "MBG.DE":  "MBGYY",  # Mercedes-Benz — OTC
-    "ADS.DE":  "ADDYY",  # Adidas — OTC
-    "DHL.DE":  "DPSGY",  # DHL Group (fmr Deutsche Post) — OTC
-    "RWE.DE":  "RWEOY",  # RWE — OTC
-    "EOAN.DE": "EONGY",  # E.ON — OTC
-    "IFX.DE":  "IFNNY",  # Infineon — OTC
-    "FRE.DE":  "FSNUY",  # Fresenius — OTC
-    "HEN3.DE": "HENKY",  # Henkel — OTC
-    "CON.DE":  "CTTAY",  # Continental — OTC
-    "AIR.DE":  "EADSY",  # Airbus — OTC
-    "PUM.DE":  "PUMSY",  # Puma — OTC
-    "MUV2.DE": "MURGY",  # Munich Re — OTC
-    "QIA.DE":  "QIAGF",  # Qiagen — OTC
-    "ZAL.DE":  None,     # Zalando — no liquid ADR
-    "DHER.DE": None,     # Delivery Hero — no liquid ADR
-    "VNA.DE":  None,     # Vonovia — no liquid ADR
-    "1COV.DE": None,     # Covestro — no liquid ADR
-    "NDX1.DE": None,
-    "AIXA.DE": None,
-    # US mega-caps — trade directly on Alpaca by their US ticker
-    "APC.DE":  "AAPL",
-    "MSF.DE":  "MSFT",
-    "AMZ.DE":  "AMZN",
-    "ABEC.DE": "GOOGL",
-    "FB2A.DE": "META",
-    "NVD.DE":  "NVDA",
-    "TL0.DE":  "TSLA",
-    "AMD.DE":  "AMD",
-    "NFC.DE":  "NFLX",
-    "PYPL.DE": "PYPL",
-}
+TEST_UNIVERSE = ["AAPL", "NVDA", "MSFT", "GOOGL", "META"]
 
 
-def find_top_picks(n: int = 3) -> list[dict]:
+def find_top_picks(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
     """
-    Score the XETRA/GETTEX universe and return top N momentum picks.
-    Each result includes `us_adr` field for Alpaca execution.
+    Batch-download all US tickers in one yfinance call, score each,
+    return top N above threshold. Pass max_stocks for quick test runs.
     """
-    log.info(f"Scanning {len(XETRA_UNIVERSE)} XETRA/GETTEX candidates...")
+    universe = TEST_UNIVERSE[:max_stocks] if max_stocks else UNIVERSE
+    mode = f"TEST ({len(universe)} stocks)" if max_stocks else f"{len(universe)} stocks"
+    log.info(f"Scanning {mode} via batch download...")
+
+    data = batch_download(universe)
+    log.info(f"Download done — {len(data)}/{len(universe)} tickers returned data")
 
     results = []
-    for ticker in XETRA_UNIVERSE:
+    for ticker in universe:
         try:
-            r = score_ticker(ticker)
-            if not r.get("ok"):
+            r = score_from_df(ticker, data.get(ticker))
+            if not r.get("ok") or r.get("score", 0) < 60:
                 continue
-            score = r.get("score", 0)
-            if score < 60:
-                continue
-            r["us_adr"] = XETRA_TO_US_ADR.get(ticker)
-            r["exchange"] = "XETRA/GETTEX"
+            r["us_adr"]  = ticker   # already a US ticker
+            r["exchange"] = "US"
             results.append(r)
         except Exception as e:
-            log.debug(f"Scan error {ticker}: {e}")
+            log.debug(f"Score error {ticker}: {e}")
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    log.info(f"Scanner done — {len(results)} candidates above threshold, returning top {n}")
+    log.info(f"Scanner done — {len(results)} above threshold, returning top {n}")
     return results[:n]
 
 
 def get_universe_summary() -> dict:
-    """Quick info about the scan universe."""
-    with_adr = sum(1 for v in XETRA_TO_US_ADR.values() if v)
     return {
-        "exchange":       "XETRA / GETTEX",
-        "total_stocks":   len(XETRA_UNIVERSE),
-        "with_us_adr":    with_adr,
-        "without_us_adr": len(XETRA_UNIVERSE) - with_adr,
+        "exchange":    "US / ADR",
+        "total_stocks": len(UNIVERSE),
     }

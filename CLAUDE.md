@@ -6,29 +6,31 @@
 
 ## 📁 Project Overview
 **Name:** RaanuTradingBot  
-**Goal:** Algorithmic trading bot connected to Trade 212 paper (demo) account  
+**Goal:** Algorithmic trading bot connected to Alpaca paper trading account  
 **Target:** +4–5% monthly returns, max 5% stop loss  
-**Owner:** Archana Arjunraj (GitHub: Prakash Rajamani)  
-**GitHub:** https://github.com/raanutradingbot/raanutradingbot  
+**Owner:** Archana Arjunraj (dev: Prakash Rajamani)  
 **Local URL:** http://localhost:8000  
-**Public URL:** https://unvalued-unskilled-virtual.ngrok-free.dev (changes on restart)  
+**Platform:** macOS (python3, not python)
 
 ---
 
 ## 🗂 File Structure
 ```
-C:\Users\Archana Arjunraj\OneDrive\Desktop\Algo Trading\
-├── server.py                  ← FastAPI backend (uvicorn, port 8000)
-├── auto_trader.py             ← Auto-trading engine (scan loop, order logic)
-├── strategy.py                ← Indicator engine (RSI, MACD, BB, EMA)
-├── RaanuTradingBot.html       ← Main dashboard (served at localhost:8000)
-├── trade212-algo-dashboard.html ← Same dashboard (served at localhost:8000/algo)
-├── START.bat                  ← Double-click to start server + ngrok together
-├── SETUP_AND_START.bat        ← One-time setup script
-├── cloudflared.exe            ← Cloudflare tunnel (installed as Windows service)
-├── .env                       ← API keys (NOT in GitHub)
-├── .gitignore                 ← Excludes .env, __pycache__, *.pyc
-└── CLAUDE.md                  ← This file
+/Users/prakash.rajamani/raanutradingbot/
+├── server.py              ← FastAPI backend (uvicorn, port 8000)
+├── auto_trader.py         ← Auto-trading engine (5-gate scan loop + order logic)
+├── strategy.py            ← Indicator engine (RSI, MACD, BB, EMA) + batch_download
+├── scanner.py             ← Momentum scanner (42 US-listed tickers, batch yfinance)
+├── alpaca_data.py         ← Alpaca market data helper (skips non-US tickers)
+├── notifier.py            ← Twilio WhatsApp alerts (pre-trade + post-trade)
+├── profit_monitor.py      ← Take-profit / stop-loss monitor
+├── RaanuTradingBot.html   ← Main dashboard (single-file, served at localhost:8000)
+├── start.sh               ← Start server on Mac
+├── setup.sh               ← One-time Mac setup
+├── requirements.txt       ← Python dependencies
+├── .env                   ← API keys (NOT in GitHub)
+├── .gitignore             ← Excludes .env, __pycache__, *.pyc
+└── CLAUDE.md              ← This file
 ```
 
 ---
@@ -36,157 +38,169 @@ C:\Users\Archana Arjunraj\OneDrive\Desktop\Algo Trading\
 ## ⚙️ Tech Stack
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python, FastAPI, uvicorn |
+| Backend | Python 3, FastAPI, uvicorn |
 | Frontend | Vanilla HTML/CSS/JS, Chart.js 4.4.1 |
-| Trading API | Trade 212 REST API v0 |
-| Price Data | Yahoo Finance via allorigins CORS proxy |
+| Broker | Alpaca paper trading REST API v2 |
+| Price Data | Yahoo Finance via yfinance (batch download) |
+| Notifications | Twilio WhatsApp API |
 | Fonts | Inter + IBM Plex Mono (Google Fonts) |
 | Version Control | Git + GitHub |
-| Public Access | ngrok (free plan) |
-| Tunnel Service | Cloudflare Tunnel (installed as Windows service) |
 
 ---
 
-## 🚀 How to Start
-**Double-click `START.bat`** — starts both server and ngrok automatically.
-
-Or manually:
-
-**Window 1 — Server:**
+## 🚀 How to Start (macOS)
+```bash
+python3 server.py
 ```
-cd "C:\Users\Archana Arjunraj\OneDrive\Desktop\Algo Trading"
-python server.py
-```
+Or: `./start.sh`
 
-**Window 2 — ngrok:**
-```
-ngrok http 8000
-```
-
-Then open: **http://localhost:8000**  
-Public URL shown in ngrok window (changes each restart on free plan)
+Then open: **http://localhost:8000**
 
 ---
 
 ## 🔌 Server — server.py
 - **Framework:** FastAPI + uvicorn (NOT Flask)
 - **Port:** 8000
-- **Host:** 0.0.0.0 (accessible via ngrok/Cloudflare)
+- **Host:** 0.0.0.0
 - **Dashboard route:** `GET /` → serves `RaanuTradingBot.html`
-- **AlgoDash route:** `GET /algo` → serves `trade212-algo-dashboard.html`
 - **CORS:** Enabled for all origins
-- **Auto-loads API key:** `/api/config` endpoint sends key to frontend on load
 
 ### Key API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/config` | Returns API key + mode to frontend (auto-connect) |
 | GET | `/api/health` | Server health + mode |
-| GET | `/api/account/cash` | Cash, free funds, total |
-| GET | `/api/account/info` | Account info |
-| GET | `/api/portfolio` | Open positions + PPL |
+| GET | `/api/account/cash` | Cash + buying power |
+| GET | `/api/portfolio` | Open positions + P&L |
 | GET | `/api/orders` | Pending orders |
-| GET | `/api/history/orders?limit=20` | Order history |
-| POST | `/api/orders/buy` | Place market buy |
-| POST | `/api/orders/sell` | Place market sell |
-| DELETE | `/api/orders/{id}` | Cancel order |
+| POST | `/api/orders/buy` | Place market buy (notional) |
+| POST | `/api/orders/sell` | Close a position |
 | GET | `/api/auto/status` | Auto-trader status |
 | POST | `/api/auto/start` | Enable auto-trader |
 | POST | `/api/auto/stop` | Disable auto-trader |
-| POST | `/api/auto/scan-now` | Force immediate scan |
-| GET | `/api/auto/scan-preview` | Score watchlist (no trades) |
+| POST | `/api/auto/scan-now?force=true` | Force scan (5 stocks, bypass market hours) |
+| POST | `/api/auto/scan-now` | Normal scan + trade if enabled |
+| GET | `/api/auto/picks` | Cached last scan results |
 
 ---
 
 ## 🤖 Auto Trader — auto_trader.py
 - **Scan interval:** 1800s (30 min)
-- **Starts:** DISABLED — must click ENABLE in dashboard
-- **Weekly trade limit:** 2 trades per 7 days
-- **Per trade max:** €500
+- **Starts:** DISABLED — must POST `/api/auto/start` or click ENABLE
+- **Weekly trade limit:** 2 trades per 7 days (configurable via .env)
+- **Per trade max:** $500 USD (configurable via .env)
 - **Min signal score:** 60/100
-- **Watchlist:** AAPL, MSFT, NVDA, GOOGL, AMZN, META, AMD, TSLA
+- **Position sizing:** min($500, 5% of free cash)
+
+### 5-Gate System (all must pass before order is placed)
+1. Auto-trader is enabled
+2. Market is open (Alpaca clock endpoint) — bypassed when `force=true`
+3. Weekly trade limit not reached
+4. Free cash available (Alpaca account endpoint)
+5. Stock not already held (Alpaca positions endpoint)
+
+### WhatsApp Alerts (via notifier.py)
+- **Pre-trade alert** sent BEFORE placing order (gives time to cancel)
+- **Post-trade alert** sent AFTER order confirmed
+- Uses Twilio Sandbox WhatsApp
 
 ---
 
 ## 📊 Strategy Engine — strategy.py
-Indicators computed locally from Yahoo Finance price data:
+Indicators computed locally from Yahoo Finance daily OHLCV data.
 
-| Indicator | Params | Signal Range |
-|-----------|--------|-------------|
-| RSI | 14 periods | <25 Strong Buy → >75 Strong Sell |
-| MACD | 12, 26, 9 | Bullish/Bearish crossover + histogram |
-| Bollinger Bands | 20 periods, 2σ | At lower band (Buy) → At upper (Sell) |
-| EMA | 50 + 200 | Golden cross → Death cross |
-| ATR | 14 periods | Volatility range only |
-| Volume Ratio | vs 20d avg | Spike detection |
+| Indicator | Params | Weight |
+|-----------|--------|--------|
+| RSI | 14 periods | <30 +30pts, <40 +18pts, >70 −25pts |
+| MACD | 12/26/9 | Bullish +25pts, fresh crossover +10pts extra |
+| EMA Trend | EMA50 vs EMA200 | Above +20pts, below −15pts |
+| Bollinger | 20 periods, 2σ | At lower band +15pts, stretched −5pts |
 
-### Composite Score Weights (configurable in dashboard)
-| Indicator | Default Weight |
-|-----------|---------------|
-| RSI | 25% |
-| MACD | 25% |
-| Bollinger Bands | 20% |
-| EMA 50/200 | 15% |
-| News Sentiment | 10% |
-| Fundamentals | 5% |
+**Score range:** 0–100. Score ≥ 60 = actionable BUY signal.
 
-**Min score to execute trade:** 70/100 (dashboard) / 60/100 (auto_trader)
+### Key Functions
+- `score_ticker(ticker)` — download + score one ticker
+- `score_from_df(ticker, df)` — score from pre-fetched DataFrame (fast path)
+- `batch_download(tickers)` — one yfinance call for all tickers, returns `{ticker: df}`
+  - Uses `timeout=8` so a stalled ticker fails fast
+  - Delisted/unavailable tickers return empty DataFrames and are silently skipped
+
+---
+
+## 🔭 Scanner — scanner.py
+Scans 42 US-listed tickers (mega-caps + European ADRs) in one batch download.
+
+**Universe includes:**
+- US mega-caps: AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA, AMD, NFLX, PYPL
+- European ADRs: SAP, SIEGY, ALIZY, DTEGY, BAYRY, DB, ADDYY, RWEOY, EONGY, IFNNY, EADSY, MURGY, VWAGY, BASFY, HENKY, PUMSY, CTTAY, FSNUY
+- US financials: JPM, GS, MS, BAC, V, MA
+- US tech: ORCL, CRM, ADBE, INTC, QCOM
+- ETFs: SPY, QQQ, IWM
+
+**TEST_UNIVERSE** (used when `force=true`): AAPL, NVDA, MSFT, GOOGL, META
+
+**Performance:** ~1–3 seconds for full universe (single batch yfinance call).
+
+**Note:** All tickers are US-listed and directly executable on Alpaca. No XETRA `.DE` tickers — those caused Alpaca 401 errors and yfinance timeout issues.
 
 ---
 
 ## 🎨 Dashboard — RaanuTradingBot.html
 Single-file HTML dashboard. No build step required.
 
-### Sections
-1. **Overview** — 5 metric cards + 4 secondary cards + equity chart + composite signal ring + recent trades
-2. **Portfolio** — Account summary + monthly progress bar + open positions table
-3. **Orders** — Full order history with filter
-4. **Live Signals** — Watchlist scanner with all indicator columns + AI reasoning cards
-5. **Indicators** — Single symbol deep analysis with price+EMA chart + MACD histogram
-6. **Strategy** — Weight sliders + risk parameters + execution toggles + watchlist manager
-7. **Manual Trade** — Order form + preview + quick-close positions
-8. **Engine Logs** — Filterable log (All/Trades/Warnings/Errors/API)
+### Active Sections
+1. **Overview** — Account cards (portfolio value, P&L, win rate) + equity chart + recent trades
+2. **Portfolio** — Open positions table
+3. **Orders** — Order history with filter
+4. **Live Signals** — Batch scanner with score table + Execute button per row
+5. **Auto Trader** — Enable/disable, scan-now, status, event log
+6. **Engine Logs** — Filterable log
 
-### Metric Cards (all from T212 API — auto-loads, no manual config)
-| Card | Source | Color |
-|------|--------|-------|
-| Portfolio Value | `/api/account/cash` → totalValue | Blue |
-| Open P&L | Sum of ppl across positions | Teal |
-| Win Rate | Derived from order history pairs | Green |
-| Avg Trade P&L | Mean P&L across closed trades | Amber |
-| Stop Loss Hits | Loss-side sells this month | Red |
+### Removed Sections (intentionally)
+- Indicators tab (single-symbol deep analysis) — removed as unused
+- Manual Trade tab — removed as unused
 
 ### Design System
 - **Background:** `#0d0f12` (darkest) → `#1a1e26` (cards)
 - **Accent:** `#00c896` (teal-green)
 - **Green:** `#22c55e` | **Red:** `#f43f5e` | **Warn:** `#f59e0b`
 - **Fonts:** Inter (UI) + IBM Plex Mono (data/labels)
-- **Border:** `rgba(255,255,255,0.06)`
-
-### Auto-Connect Feature
-Dashboard calls `/api/config` on load → gets API key from backend → connects automatically.
-No manual API key entry needed ever again.
 
 ---
 
 ## 🔑 Environment Variables — .env
 ```
-T212_API_KEY=your_key_here
-T212_MODE=demo
+# Alpaca paper trading
+ALPACA_API_KEY=PK5V3WKKLEQUUPQQ6YBZHTCYMM
+ALPACA_SECRET_KEY=<secret>
+ALPACA_MODE=paper
+
+# Twilio WhatsApp alerts
+TWILIO_ACCOUNT_SID=<your-twilio-account-sid>
+TWILIO_AUTH_TOKEN=<secret>
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+USER_WHATSAPP=whatsapp:+919176911755
+
+# Trading parameters
+WEEKLY_TRADE_LIMIT=2
+PER_TRADE_MAX_USD=500
+MIN_SIGNAL_SCORE=60
+SCAN_INTERVAL_SEC=1800
+TAKE_PROFIT_PCT=5.0
+STOP_LOSS_PCT=3.0
+PROFIT_CHECK_SEC=300
 ```
-- `T212_MODE` must be `demo` or `live` (NOT `practice`)
-- `.env` is excluded from GitHub via `.gitignore`
 
 ---
 
-## 🌐 Trade 212 API
-| Mode | Base URL |
-|------|----------|
-| Demo/Paper | `https://demo.trading212.com/api/v0` |
-| Live | `https://live.trading212.com/api/v0` |
+## 🌐 Alpaca API
+| Mode | Broker Base URL |
+|------|----------------|
+| Paper | `https://paper-api.alpaca.markets/v2` |
+| Live | `https://api.alpaca.markets/v2` |
 
-**Auth:** `Authorization: <api_key>` header  
-**Get API key:** T212 app → Settings → API (Beta)
+**Auth:** `APCA-API-KEY-ID` + `APCA-API-SECRET-KEY` headers  
+**Data:** `https://data.alpaca.markets/v2` (IEX feed, US-only — foreign tickers return 401 and are skipped in alpaca_data.py)  
+**Get API key:** alpaca.markets → Paper Trading dashboard → API Keys
 
 ---
 
@@ -201,74 +215,65 @@ numpy
 pandas
 yfinance
 ta
+twilio
+python-multipart
 ```
 
 Install all:
-```
-pip install fastapi uvicorn httpx python-dotenv pydantic numpy pandas yfinance ta
+```bash
+pip3 install fastapi uvicorn httpx python-dotenv pydantic numpy pandas yfinance ta twilio python-multipart
 ```
 
 ---
 
 ## 🗃 Git Workflow
 ```bash
-# Save and push changes
 git add .
 git commit -m "describe change"
 git push
-
-# Pull latest (other machine)
-git pull
 ```
-**Branch:** main  
-**Remote:** https://github.com/raanutradingbot/raanutradingbot.git
+**Branch:** main
 
 ---
 
 ## ✅ What's Working
-- [x] FastAPI server running on port 8000
-- [x] Trade 212 demo API connected
-- [x] Dashboard served at localhost:8000
-- [x] AlgoDash served at localhost:8000/algo
-- [x] Indicator engine (RSI, MACD, BB, EMA, ATR)
-- [x] Composite signal scoring (weighted)
+- [x] FastAPI server on port 8000 (macOS, python3)
+- [x] Alpaca paper trading connected
+- [x] Dashboard at localhost:8000 (RaanuTradingBot.html)
+- [x] Indicator engine (RSI, MACD, Bollinger, EMA)
+- [x] Composite signal scoring (0–100, threshold 60)
+- [x] Batch yfinance download (42 US tickers in ~1–3 seconds)
 - [x] Auto-trader scan loop (disabled by default)
-- [x] Real T212 metrics (portfolio value, cash, positions, orders)
-- [x] Win rate + avg trade derived from order history
-- [x] Stop loss auto-set after every buy
-- [x] Watchlist scanner with signal table
-- [x] Manual trade form
-- [x] GitHub repo connected (main branch)
-- [x] Auto-load API key from backend (no manual config)
-- [x] ngrok public URL working
-- [x] Cloudflare tunnel installed as Windows service
-- [x] START.bat — double-click to launch everything
+- [x] 5-gate system before every order
+- [x] WhatsApp pre-trade + post-trade alerts via Twilio
+- [x] Avoid re-buying already-held stocks
+- [x] Position sizing (min of $500 cap and 5% of free cash)
+- [x] Market hours gate (skip trades when market closed)
+- [x] Force/test mode: `scan-now?force=true` → 5-stock scan, bypass market hours
+- [x] Delisted/stalled tickers auto-skipped (empty DataFrame + 8s timeout)
+- [x] Live Signals Execute button (calls `/api/orders/buy` with notional)
+- [x] Trade log persisted to `trades_log.json` (survives restart)
 
 ## 🔲 Pending / Next Steps
-- [ ] Claude AI integration for news sentiment scoring
-- [ ] NewsAPI integration for live headlines
+- [ ] Sell/exit logic (profit monitor currently separate in profit_monitor.py)
+- [ ] Dashboard sell button for open positions
 - [ ] Backtesting module
-- [ ] Real fundamentals data (P/E, EPS)
+- [ ] News sentiment scoring (currently no real data source)
 - [ ] Mobile responsive layout
-- [ ] Push notifications / alerts
-- [ ] Monthly P&L tracking with real account history
-- [ ] Fix T212_MODE warning (change .env from 'practice' to 'demo')
-- [ ] Permanent ngrok URL (upgrade to paid or use static domain)
+- [ ] Expand universe if market conditions keep producing 0 picks (scores < 60)
 
 ---
 
-## 🐛 Known Issues
-- `T212_MODE=practice` in .env causes warning — change to `demo`
-- ngrok URL changes on every restart (free plan limitation)
-- Yahoo Finance CORS proxy occasionally slow — falls back to simulated prices
-- News sentiment is random placeholder — needs real NewsAPI integration
-- Fundamentals score is placeholder — needs real data source
-- ngrok shows "Visit Site" warning on first open (normal for free plan)
+## 🐛 Known Issues / Gotchas
+- `MBGYY` (Mercedes-Benz ADR) was timing out yfinance — removed from universe
+- `QIAGF`, `BMWYY`, `DPSGY` delisted — removed from universe
+- Alpaca IEX feed is US-only — alpaca_data.py returns None for any ticker with `.` in name
+- When no stocks score ≥ 60, picks = 0 and no trade fires (correct behavior — don't force bad trades)
+- Twilio WhatsApp sandbox requires user to opt-in first (send "join <sandbox-name>" to the number)
+- macOS uses `python3` not `python`
 
 ---
 
 ## 💬 How to Use This File
 At the start of a new Claude chat, paste this file and say:
 > "Here is my CLAUDE.md project context. Let's continue building RaanuTradingBot."
-
-Claude will have full context of the codebase, stack, goals and progress.

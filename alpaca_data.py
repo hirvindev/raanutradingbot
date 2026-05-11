@@ -43,6 +43,11 @@ def fetch_bars(ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
     if not is_configured():
         return None
 
+    # Alpaca IEX/SIP feeds only cover US-listed symbols; skip foreign tickers
+    # (e.g. SAP.DE, SIE.DE) so strategy.py falls back to yfinance immediately.
+    if "." in ticker:
+        return None
+
     start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         resp = httpx.get(

@@ -220,10 +220,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('ord',this)"><span class="sb-icon">◎</span>Orders</div>
   <div class="sb-grp">Analysis</div>
   <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
-  <div class="sb-item" onclick="nav('ind',this)"><span class="sb-icon">&#8767;</span>Indicators</div>
   <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
   <div class="sb-grp">Execution</div>
-  <div class="sb-item" onclick="nav('man',this)"><span class="sb-icon">⊕</span>Manual Trade</div>
   <div class="sb-item" onclick="nav('logs',this)"><span class="sb-icon">≡</span>Engine Logs</div>
   <div class="sb-foot">
     <div>Mode: <strong id="sbMode">—</strong></div>
@@ -470,50 +468,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 
 <!-- ─────────── INDICATORS ─────────── -->
-<div id="s-ind" class="sec">
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">Symbol Analyser</div>
-      <div style="display:flex;gap:7px;align-items:center">
-        <input type="text" id="iSym" placeholder="e.g. AAPL" style="flex:1" value="AAPL">
-        <button class="btn b-acc b-sm" onclick="computeInd()">Compute</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Chart Legend</div>
-      <div style="display:flex;gap:14px;font-size:.68rem;font-family:var(--mono);flex-wrap:wrap">
-        <span style="color:var(--accent)">— Price</span>
-        <span style="color:var(--accent2)">-- EMA 50</span>
-        <span style="color:var(--warn)">-- EMA 200</span>
-      </div>
-      <div style="font-size:.63rem;font-family:var(--mono);color:var(--muted);margin-top:5px">Prices from Yahoo Finance via CORS proxy. Falls back to simulated if unavailable.</div>
-    </div>
-  </div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">Price + EMA</div>
-      <div class="chart-wrap" style="height:200px"><canvas id="priceC" aria-label="Price chart">Price chart.</canvas></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Indicator Readings</div>
-      <div class="ind-g" id="indVals">
-        <div class="ind"><div class="ind-n">RSI (14)</div><div class="ind-v nu">—</div><div class="ind-s nu">—</div></div>
-        <div class="ind"><div class="ind-n">MACD (12,26,9)</div><div class="ind-v nu">—</div><div class="ind-s nu">—</div></div>
-        <div class="ind"><div class="ind-n">BB Upper</div><div class="ind-v nu">—</div><div class="ind-s nu">Resistance</div></div>
-        <div class="ind"><div class="ind-n">BB Lower</div><div class="ind-v nu">—</div><div class="ind-s nu">Support</div></div>
-        <div class="ind"><div class="ind-n">EMA 50</div><div class="ind-v nu">—</div><div class="ind-s nu">—</div></div>
-        <div class="ind"><div class="ind-n">EMA 200</div><div class="ind-v nu">—</div><div class="ind-s nu">—</div></div>
-        <div class="ind"><div class="ind-n">ATR (14)</div><div class="ind-v nu">—</div><div class="ind-s nu">Daily range</div></div>
-        <div class="ind"><div class="ind-n">Volume Ratio</div><div class="ind-v nu">—</div><div class="ind-s nu">vs 20d avg</div></div>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-title">MACD Histogram</div>
-    <div class="chart-wrap" style="height:110px"><canvas id="macdC" aria-label="MACD histogram">MACD chart.</canvas></div>
-  </div>
-</div>
-
 <!-- ─────────── STRATEGY ─────────── -->
 <div id="s-strat" class="sec">
   <div class="g2">
@@ -565,39 +519,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </div>
 
 <!-- ─────────── MANUAL TRADE ─────────── -->
-<div id="s-man" class="sec">
-  <div class="al al-warn">⚠ Manual trades bypass signal scoring but still respect position size limits. Stop loss is set automatically after every buy.</div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">Place Order</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="fg"><div class="fl">Symbol (e.g. AAPL)</div><input type="text" id="mSym" placeholder="AAPL" style="text-transform:uppercase" oninput="updatePrev()"></div>
-        <div class="g2" style="gap:7px">
-          <div class="fg"><div class="fl">Direction</div><select id="mDir"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></div>
-          <div class="fg"><div class="fl">Quantity</div><input type="number" id="mQty" value="10" min="1" oninput="updatePrev()"></div>
-        </div>
-        <div class="g2" style="gap:7px">
-          <div class="fg"><div class="fl">Type</div><select id="mType"><option value="MARKET">Market</option><option value="LIMIT">Limit</option></select></div>
-          <div class="fg"><div class="fl">Limit Price</div><input type="number" id="mPrice" placeholder="0.00" step="0.01"></div>
-        </div>
-        <div class="fg"><div class="fl">Reason</div><input type="text" id="mNote" placeholder="Why are you placing this?"></div>
-        <div style="display:flex;gap:7px">
-          <button class="btn b-acc" style="flex:1" onclick="manOrder('BUY')">▲ BUY</button>
-          <button class="btn b-red" style="flex:1" onclick="manOrder('SELL')">▼ SELL</button>
-        </div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Order Preview</div>
-      <div id="oPrev" style="font-size:.74rem;font-family:var(--mono);color:var(--muted);line-height:2.1">Fill in the form to see a preview.</div>
-      <div style="margin-top:1rem">
-        <div class="card-title">Quick Close Positions</div>
-        <div id="qClose" style="font-size:.72rem;font-family:var(--mono);color:var(--muted)">No positions loaded.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ─────────── LOGS ─────────── -->
 <div id="s-logs" class="sec">
   <div class="card">
@@ -934,6 +855,21 @@ async function placeTrade(ticker, dir, qty, reason='Auto', limitPrice=null){
     return res;
   }
   return null;
+}
+
+async function autoTrade(ticker, price, signal, trend, rsiVal){
+  const notional = parseFloat(document.getElementById('perTrade')?.value || 500);
+  const msg = `Buy $${notional} of ${ticker}?\n\nPrice: $${price.toFixed(2)}\nSignal: ${signal}\nRSI: ${rsiVal}\n\nThis places a real paper order on Alpaca.`;
+  confirm2(msg, `Confirm BUY ${ticker}`, async () => {
+    log(`Placing BUY $${notional} of ${ticker}...`, 'ok');
+    const res = await api('/api/orders/buy', 'POST', { ticker, notional });
+    if(res){
+      log(`✓ BUY ${ticker} $${notional} submitted — status: ${res.status ?? 'pending'}`, 'ok');
+      addRecent({ticker, dir:'BUY', qty: notional, price, status: res.status ?? 'pending', reason: signal});
+      deriveStats();
+      await fetchAccount();
+    }
+  });
 }
 
 async function setStopLoss(ticker, qty, price){
@@ -1312,136 +1248,132 @@ function momentumScore(closes, highs, lows, vols) {
 }
 
 // ── Main Market Scanner ────────────────
-async function runMarketScan() {
-  const capFilter     = document.getElementById('capFilter')?.value || 'all';
-  const patternFilter = document.getElementById('patternFilter')?.value || 'all';
+// ── Signal badges derived from backend reasons ──────────────────────────────
+function deriveBadges(reasons) {
+  const b = [];
+  if (!reasons) return b;
+  const r = reasons.join(' ');
+  if (r.includes('fresh bullish crossover'))      b.push({type:'MACD X',    color:'#22c55e'});
+  else if (r.includes('MACD bullish'))            b.push({type:'MACD ↑',    color:'#00c896'});
+  else if (r.includes('MACD bearish'))            b.push({type:'MACD ↓',    color:'#f43f5e'});
+  if (r.includes('uptrend'))                      b.push({type:'UPTREND',   color:'#818cf8'});
+  else if (r.includes('downtrend'))               b.push({type:'DOWNTREND', color:'#f59e0b'});
+  if (r.includes('oversold'))                     b.push({type:'OVERSOLD',  color:'#06b6d4'});
+  if (r.includes('lower BB'))                     b.push({type:'BB BOUNCE', color:'#a78bfa'});
+  return b;
+}
 
-  // Build universe based on cap filter
-  let universe = [];
-  if (capFilter === 'all' || capFilter === 'large') universe.push(...LARGE_CAP.map(s=>({s,cap:'Large'})));
-  if (capFilter === 'all' || capFilter === 'mid')   universe.push(...MID_CAP.map(s=>({s,cap:'Mid'})));
-  if (capFilter === 'all' || capFilter === 'small') universe.push(...SMALL_CAP.map(s=>({s,cap:'Small'})));
-
-  // Shuffle for variety
-  universe = universe.sort(() => Math.random() - 0.5);
-
-  const total = universe.length;
-  let scanned = 0;
-  const winners = [];
-
-  // UI
-  document.getElementById('scanBtn').textContent = '⏳ Scanning...';
-  document.getElementById('scanBtn').disabled = true;
-  document.getElementById('scanProgress').style.display = 'block';
-  document.getElementById('scanStats').style.display = 'grid';
-  document.getElementById('sigBody').innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Scanning ${total} stocks for momentum, uptrend & breakout patterns...</td></tr>`;
-
-  for (const {s, cap} of universe) {
-    try {
-      const data = await fetchPrices(s, 260); // 1 year of data
-      const c = data.closes;
-      if (c.length < 60) { scanned++; continue; } // skip if not enough data
-
-      const price = c[c.length - 1];
-      const patterns = detectPatterns(c, data.highs, data.lows, data.vols);
-      const score = momentumScore(c, data.highs, data.lows, data.vols);
-      const rsiV = calcRSI(c);
-      const macdV = calcMACD(c);
-
-      // ── FILTER: must have at least one pattern ──
-      if (patterns.length === 0) { scanned++; continue; }
-
-      // ── FILTER: pattern type filter ──
-      if (patternFilter !== 'all') {
-        const hasPattern = patterns.some(p => p.type.toLowerCase().includes(patternFilter));
-        if (!hasPattern) { scanned++; continue; }
-      }
-
-      // ── FILTER: minimum score 72 to be a "sure-shot" ──
-      if (score < 72) { scanned++; continue; }
-
-      // ── FILTER: RSI not overbought (< 80) ──
-      if (rsiV && rsiV > 80) { scanned++; continue; }
-
-      winners.push({ s, cap, price, patterns, score, rsiV, macdV });
-    } catch(e) { /* skip failed fetches */ }
-
-    scanned++;
-
-    // Update progress
-    const pct = Math.round(scanned / total * 100);
-    document.getElementById('scanBar').style.width = pct + '%';
-    document.getElementById('scanCount').textContent = `${scanned} / ${total}`;
-    document.getElementById('scanStatus').textContent = `Scanning ${s}...`;
-    document.getElementById('stScanned').textContent = scanned;
-    document.getElementById('stWinners').textContent = winners.length;
-    document.getElementById('stBreakouts').textContent = winners.filter(w=>w.patterns.some(p=>p.type==='BREAKOUT')).length;
-    document.getElementById('stAvg').textContent = winners.length ? Math.round(winners.reduce((a,b)=>a+b.score,0)/winners.length) : 0;
-
-    // Stop once we have enough candidates (speed optimisation)
-    if (winners.length >= 60) break;
-  }
-
-  // Sort by score, take top 20
-  winners.sort((a,b) => b.score - a.score);
-  const top20 = winners.slice(0, 20);
-
-  // Render
-  document.getElementById('scanProgress').style.display = 'none';
-  document.getElementById('scanBtn').textContent = '⚡ Scan Market';
-  document.getElementById('scanBtn').disabled = false;
-  document.getElementById('stScanned').textContent = scanned;
-  document.getElementById('stWinners').textContent = top20.length;
-
-  if (!top20.length) {
-    document.getElementById('sigBody').innerHTML = '<tr><td class="te" colspan="12">No sure-shot winners found — try changing cap or pattern filter</td></tr>';
-    return;
-  }
-
-  document.getElementById('sigBody').innerHTML = top20.map((r, i) => {
-    const mainPat = r.patterns[0];
-    const patBadges = r.patterns.map(p =>
-      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
-    ).join('');
-    const capCol = r.cap==='Large'?'var(--accent2)':r.cap==='Mid'?'var(--warn)':'var(--purple)';
-    const rsiCol = r.rsiV>70?'var(--warn)':r.rsiV>55?'var(--green)':'var(--muted2)';
-    const macdCol = r.macdV.lm>0?'var(--green)':'var(--red)';
-    const hasBreakout = r.patterns.some(p=>p.type==='BREAKOUT');
-    const hasUptrend  = r.patterns.some(p=>p.type==='UPTREND'||p.type==='GOLDEN CROSS');
-    const hasMomentum = r.patterns.some(p=>p.type==='MOMENTUM');
-    return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
+function _scanRow(r, i) {
+  const badges   = deriveBadges(r.reasons || []);
+  const badgeHtml = badges.map(p =>
+    `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
+  ).join('');
+  const scoreColor = r.score >= 60 ? 'var(--green)' : r.score >= 40 ? 'var(--warn)' : 'var(--muted2)';
+  const rsiColor   = r.rsi > 70 ? 'var(--warn)' : r.rsi < 35 ? 'var(--green)' : 'var(--muted2)';
+  const hasUp   = (r.reasons||[]).some(x=>x.includes('uptrend'));
+  const hasMomt = (r.reasons||[]).some(x=>x.includes('MACD bullish'));
+  const hasBB   = (r.reasons||[]).some(x=>x.includes('lower BB'));
+  const medal   = i===0?'🏆':i===1?'🥈':i===2?'🥉':'';
+  return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
 <td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem">${r.s} ${i===0?'🏆':i===1?'🥈':i===2?'🥉':''}</td>
-<td style="font-size:.75rem;color:var(--muted2);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${getStockName(r.s)}</td>
-<td><span style="font-size:.62rem;font-family:var(--mono);color:${capCol};padding:1px 5px;border-radius:3px;border:1px solid ${capCol}40">${r.cap}</span></td>
+<td style="font-weight:800;font-size:.85rem">${r.ticker} ${medal}</td>
+<td style="font-size:.75rem;color:var(--muted2);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${getStockName(r.ticker)}</td>
+<td><span style="font-size:.62rem;font-family:var(--mono);color:var(--accent2);padding:1px 5px;border-radius:3px;border:1px solid var(--accent2)40">US</span></td>
 <td style="font-family:var(--mono)">$${fn(r.price)}</td>
 <td>
   <div style="display:flex;align-items:center;gap:5px">
-    <div style="width:42px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.score}%;background:var(--green)"></div></div>
-    <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:var(--green)">${r.score}</span>
+    <div style="width:42px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.score}%;background:${scoreColor}"></div></div>
+    <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:${scoreColor}">${r.score}</span>
   </div>
 </td>
-<td>${patBadges}</td>
-<td style="font-family:var(--mono);color:${rsiCol}">${r.rsiV!=null?fn(r.rsiV,1):'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasMomentum?'var(--green)':'var(--muted)'}">${hasMomentum?'✓ YES':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasBreakout?'var(--warn)':'var(--muted)'}">${hasBreakout?'✓ YES':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasUptrend?'var(--accent2)':'var(--muted)'}">${hasUptrend?'✓ YES':'—'}</span></td>
+<td>${badgeHtml}</td>
+<td style="font-family:var(--mono);color:${rsiColor}">${r.rsi!=null?fn(r.rsi,1):'—'}</td>
+<td style="font-size:.68rem"><span style="color:${hasMomt?'var(--green)':'var(--muted)'}">${hasMomt?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasBB?'var(--warn)':'var(--muted)'}">${hasBB?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasUp?'var(--accent2)':'var(--muted)'}">${hasUp?'✓ YES':'—'}</span></td>
 <td style="display:flex;gap:4px">
-  <button class="btn b-acc b-xs" onclick="autoTrade('${r.s}',${r.price},'${r.patterns.map(p=>p.type).join('+')}','UPTREND',${fn(r.rsiV,1)})">Execute</button>
-  <button class="btn b-out b-xs" onclick="nav('ind',null);document.getElementById('iSym').value='${r.s}';computeInd()">Chart</button>
+  <button class="btn b-acc b-xs" onclick="autoTrade('${r.ticker}',${r.price},'score${r.score}','UPTREND',${fn(r.rsi,1)})">Execute</button>
 </td>
 </tr>`;
-  }).join('');
+}
 
-  // Update composite score ring with best pick
-  if (top20[0]) {
-    setEl('m-score', top20[0].score);
-    document.getElementById('rNum').textContent = top20[0].score;
-    document.getElementById('rLbl').textContent = 'STRONG BUY';
-  }
+// ── Batch-streamed market scan (SSE from backend) ────────────────────────────
+async function runMarketScan() {
+  const btn    = document.getElementById('scanBtn');
+  const tbody  = document.getElementById('sigBody');
+  const prog   = document.getElementById('scanProgress');
+  const stats  = document.getElementById('scanStats');
 
-  renderMarketReasons(top20.slice(0, 4));
-  log(`Market scan done — ${scanned} stocks scanned, ${top20.length} sure-shot winners found`, 'ok');
+  btn.textContent = '⏳ Scanning...';
+  btn.disabled    = true;
+  prog.style.display  = 'block';
+  stats.style.display = 'grid';
+  tbody.innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Batch-downloading 42 tickers — first results in ~1 s...</td></tr>`;
+
+  const allResults = [];
+  let scanned = 0, total = 42, firstResult = true;
+
+  await new Promise(resolve => {
+    const es = new EventSource('/api/scan/stream');
+
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+
+      if (d.done) {
+        es.close();
+        allResults.sort((a, b) => b.score - a.score);
+        tbody.innerHTML = allResults.length
+          ? allResults.map((r, i) => _scanRow(r, i)).join('')
+          : '<tr><td class="te" colspan="12">No stocks above threshold — market may be in a mixed state</td></tr>';
+        prog.style.display = 'none';
+        btn.textContent = '⚡ Scan Market';
+        btn.disabled    = false;
+        if (allResults[0]) {
+          setEl('m-score', allResults[0].score);
+          document.getElementById('rNum').textContent = allResults[0].score;
+          document.getElementById('rLbl').textContent = 'STRONGEST SIGNAL';
+        }
+        log(`Scan done — ${d.scanned}/${d.total} stocks scored, ${allResults.length} with score ≥ 40`, 'ok');
+        resolve();
+        return;
+      }
+
+      if (d.status === 'downloading') { total = d.total || total; return; }
+      if (!d.ticker) return;
+
+      scanned++;
+      total = d.total || total;
+      const pct = Math.round(scanned / total * 100);
+      document.getElementById('scanBar').style.width    = pct + '%';
+      document.getElementById('scanCount').textContent  = `${scanned} / ${total}`;
+      document.getElementById('scanStatus').textContent = `Scored ${d.ticker} — ${d.score}/100`;
+      document.getElementById('stScanned').textContent  = scanned;
+
+      if (d.ok && d.score >= 40) {
+        allResults.push(d);
+        allResults.sort((a, b) => b.score - a.score);
+        document.getElementById('stWinners').textContent = allResults.filter(x=>x.score>=60).length;
+        document.getElementById('stAvg').textContent     = allResults.length ? Math.round(allResults.reduce((s,x)=>s+x.score,0)/allResults.length) : 0;
+        // Show results as they arrive (partial render)
+        if (firstResult) {
+          tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
+          firstResult = false;
+        } else {
+          tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
+        }
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      btn.textContent = '⚡ Scan Market';
+      btn.disabled    = false;
+      prog.style.display = 'none';
+      if (!allResults.length)
+        tbody.innerHTML = '<tr><td class="te" colspan="12">Scan error — check server logs</td></tr>';
+      resolve();
+    };
+  });
 }
 
 // Keep runScan as alias for backward compatibility
@@ -1679,6 +1611,7 @@ function nav(id,el){
   document.querySelectorAll('.sec').forEach(s=>s.classList.remove('on'));
   document.getElementById('s-'+id)?.classList.add('on');
   if(el){document.querySelectorAll('.sb-item').forEach(n=>n.classList.remove('on'));el.classList.add('on');}
+  if(id==='ov'){fetchAccount();fetchPositions();}
   if(id==='port'){fetchPositions();}
   if(id==='ord'){fetchOrders();}
   if(id==='logs'){renderLogs();}

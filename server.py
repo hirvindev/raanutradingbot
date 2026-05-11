@@ -18,12 +18,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 BERLIN = ZoneInfo("Europe/Berlin")
+IST    = ZoneInfo("Asia/Kolkata")
 
 # ---------- CONFIG ----------
 HERE = Path(__file__).parent
@@ -82,17 +83,13 @@ def _load_picks() -> Optional[dict]:
 # ---------- BACKGROUND SCAN ----------
 
 async def _run_scan_and_cache() -> list:
-    """
-    Run the XETRA scanner, cache results, and hand picks to the trader.
-    This is the single place scanning happens — no duplicate yfinance calls.
-    """
+    """Run the scanner, cache results, pass picks to the ad-hoc trader."""
     from scanner import find_top_picks
-    log.info("Running scheduled XETRA/GETTEX scan...")
+    log.info("Running momentum scan...")
     picks = find_top_picks(3)
     _save_picks(picks)
-    log.info(f"Scan done — {len(picks)} picks cached to {PICKS_CACHE.name}")
+    log.info(f"Scan done — {len(picks)} picks cached")
 
-    # Pass picks to trader so it doesn't re-scan; it only trades if enabled.
     try:
         await trader.run_one_cycle(picks=picks)
     except Exception as e:
@@ -102,72 +99,151 @@ async def _run_scan_and_cache() -> list:
     return picks
 
 
-async def _scheduled_scan_loop():
-    """
-    Scans run twice daily regardless of the auto-execute toggle:
-      07:00 Berlin — pre-market refresh (WhatsApp alert follows at 07:30)
-      18:00 Berlin — after XETRA close (full-day signal data)
-    """
-    FIRE_TIMES = [(7, 0), (18, 0)]
-    log.info("Scheduled scan loop started — fires at 07:00 and 18:00 Berlin time")
+def _is_trade_day() -> bool:
+    """Alternates every calendar day in Berlin time — True today means skip tomorrow."""
+    return datetime.now(BERLIN).toordinal() % 2 == 0
 
-    # Kick off an immediate scan on startup so the dashboard has data right away.
-    asyncio.create_task(_run_scan_and_cache())
+
+async def _execute_scheduled_trades(n_orders: int, label: str):
+    """
+    Scan and place up to n_orders market buys for a scheduled slot.
+    Respects score threshold, position sizing, and already-held check.
+    Sends WhatsApp alerts before and after each order.
+    """
+    from scanner import find_top_picks
+    from auto_trader import (
+        get_free_cash, get_held_symbols, alpaca_buy_notional,
+        MIN_SIGNAL_SCORE, PER_TRADE_MAX_USD,
+    )
+    from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm
+
+    log.info(f"[{label}] Scheduled run — targeting {n_orders} order(s)")
+
+    picks = find_top_picks(n=n_orders + 3)
+    _save_picks(picks)
+
+    actionable = [
+        p for p in picks
+        if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("us_adr")
+    ]
+
+    if not actionable:
+        msg = (
+            f"📊 *RaanuBot — {label}*\n"
+            f"No stocks above score {MIN_SIGNAL_SCORE} today.\n"
+            f"_No trades placed._"
+        )
+        send_whatsapp(msg)
+        log.info(f"[{label}] 0 actionable picks — skipping")
+        return
+
+    held      = await get_held_symbols()
+    free_cash = await get_free_cash()
+
+    if free_cash is None:
+        log.error(f"[{label}] Could not fetch account balance — aborting")
+        return
+
+    placed = 0
+    for pick in actionable:
+        if placed >= n_orders:
+            break
+        ticker = pick["us_adr"].upper()
+        if ticker in held:
+            log.info(f"[{label}] {ticker} already held — skipping")
+            continue
+
+        notional = min(float(PER_TRADE_MAX_USD), round(free_cash * 0.05, 2))
+        if notional < 1.0:
+            log.info(f"[{label}] Insufficient cash (${free_cash:.2f}) — stopping")
+            break
+
+        try:
+            send_whatsapp(format_pre_trade_alert(
+                ticker, pick.get("ticker", ticker), notional,
+                pick["score"], free_cash, pick.get("reasons", []),
+            ))
+            await asyncio.sleep(2)
+
+            result = await alpaca_buy_notional(ticker, notional)
+            trader.tradelog.record({
+                "action":       "BUY",
+                "us_adr":       ticker,
+                "notional_usd": notional,
+                "score":        pick["score"],
+                "reasons":      pick.get("reasons", []),
+                "scheduled":    label,
+                "alpaca_response": result,
+            })
+            trader.event("buy", f"[{label}] BUY ${notional} of {ticker} score {pick['score']}")
+            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted")))
+
+            held.add(ticker)
+            free_cash -= notional
+            placed += 1
+        except Exception as e:
+            log.error(f"[{label}] Order failed for {ticker}: {e}")
+            trader.event("error", f"[{label}] {ticker} failed: {e}")
+
+    if placed == 0:
+        send_whatsapp(
+            f"📊 *RaanuBot — {label}*\n"
+            f"Top picks already held. No new positions opened."
+        )
+    log.info(f"[{label}] Done — placed {placed}/{n_orders} order(s)")
+
+
+# Berlin schedule:
+#   07:00 Berlin — scan + execute top 2 orders  (alternating days)
+#   14:30 Berlin — scan + execute top 1 order   (alternating days)
+_BERLIN_SLOTS = [
+    (7,  0,  2, "Morning-7am"),
+    (14, 30, 1, "Afternoon-2:30pm"),
+]
+
+
+async def _scheduled_trade_loop():
+    """
+    Fires at 07:00 and 14:30 Berlin time on alternating calendar days.
+    Non-trade days: scans and caches picks but places no orders.
+    """
+    log.info("Scheduled trade loop started — 7:00 AM and 2:30 PM Berlin on alternating days")
+    asyncio.create_task(_run_scan_and_cache())  # immediate startup scan
 
     while True:
         now     = datetime.now(BERLIN)
         targets = []
-        for h, m in FIRE_TIMES:
+        for h, m, n_orders, label in _BERLIN_SLOTS:
             t = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if now >= t:
                 t += timedelta(days=1)
-            targets.append(t)
-        next_fire = min(targets)
-        sleep_sec = (next_fire - now).total_seconds()
-        log.info(f"Next scheduled scan at {next_fire.strftime('%Y-%m-%d %H:%M %Z')} (in {sleep_sec/3600:.1f}h)")
+            targets.append((t, n_orders, label))
+
+        targets.sort(key=lambda x: x[0])
+        next_t, next_n, next_label = targets[0]
+        sleep_sec = (next_t - now).total_seconds()
+        log.info(
+            f"Next slot: {next_label} at {next_t.strftime('%Y-%m-%d %H:%M %Z')} "
+            f"(in {sleep_sec/3600:.1f}h)"
+        )
         await asyncio.sleep(sleep_sec)
 
         try:
-            await _run_scan_and_cache()
+            if _is_trade_day():
+                log.info(f"[{next_label}] Trade day ✓ — executing")
+                await _execute_scheduled_trades(next_n, next_label)
+            else:
+                log.info(f"[{next_label}] Rest day — scanning only, no orders")
+                await _run_scan_and_cache()
         except Exception as e:
-            log.exception(f"Scheduled scan error: {e}")
-
-
-async def _daily_alert_loop():
-    """Fires WhatsApp morning alert every day at 07:30 Berlin — reads from cache."""
-    from notifier import send_whatsapp, format_daily_alert
-
-    log.info("Daily alert loop started — fires at 07:30 Berlin time")
-    while True:
-        now    = datetime.now(BERLIN)
-        target = now.replace(hour=7, minute=30, second=0, microsecond=0)
-        if now >= target:
-            target += timedelta(days=1)
-        sleep_sec = (target - now).total_seconds()
-        log.info(f"Next morning alert in {sleep_sec/3600:.1f}h at {target.strftime('%Y-%m-%d %H:%M %Z')}")
-        await asyncio.sleep(sleep_sec)
-
-        try:
-            # 07:00 scan already ran; use that cache.  Fall back to live scan if needed.
-            cached = _load_picks()
-            picks  = cached["picks"] if cached else []
-            if not picks:
-                from scanner import find_top_picks
-                picks = find_top_picks(3)
-                _save_picks(picks)
-            msg = format_daily_alert(picks)
-            ok  = send_whatsapp(msg)
-            log.info(f"Morning alert {'sent' if ok else 'failed (Twilio not configured?)'} — {len(picks)} picks")
-        except Exception as e:
-            log.exception(f"Daily alert error: {e}")
+            log.exception(f"Scheduled slot error [{next_label}]: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from profit_monitor import monitor_loop
     tasks = [
-        asyncio.create_task(_scheduled_scan_loop()),
-        asyncio.create_task(_daily_alert_loop()),
+        asyncio.create_task(_scheduled_trade_loop()),
         asyncio.create_task(monitor_loop()),
     ]
     yield
@@ -378,10 +454,18 @@ def auto_stop():
 
 
 @app.post("/api/auto/scan-now")
-async def auto_scan_now():
-    """Force an immediate scan + cache refresh (regardless of auto-execute state)."""
-    picks = await _run_scan_and_cache()
-    return {"picks": len(picks), **trader.status()}
+async def auto_scan_now(force: bool = False):
+    """Force an immediate scan + cache refresh.
+    ?force=true  — bypass market-hours gate and limit to 5 stocks (test mode)."""
+    from scanner import find_top_picks
+    if force:
+        log.info("TEST MODE — scanning 5 stocks only, market hours bypassed")
+        picks = find_top_picks(n=3, max_stocks=5)
+        _save_picks(picks)
+    else:
+        picks = await _run_scan_and_cache()
+    await trader.run_one_cycle(picks=picks, force_market_open=force)
+    return {"picks": len(picks), "forced": force, **trader.status()}
 
 
 @app.get("/api/auto/scan-preview")
@@ -573,6 +657,42 @@ async def stocks_market_movers(top: int = 10):
     return {"gainers": data.get("gainers", []), "losers": data.get("losers", []), "source": "alpaca"}
 
 
+# ---------- STREAMING SCAN ----------
+@app.get("/api/scan/stream")
+async def scan_stream():
+    """
+    SSE endpoint — one yfinance batch download (~1-2 s), then streams each
+    scored ticker to the browser immediately. The table populates in real time.
+    """
+    from scanner import UNIVERSE
+    from strategy import score_from_df, batch_download
+
+    async def generator():
+        import json
+        total = len(UNIVERSE)
+        yield f"data: {json.dumps({'status': 'downloading', 'total': total})}\n\n"
+
+        # Run blocking download in thread so the event loop stays free
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, batch_download, UNIVERSE)
+
+        scanned = 0
+        for ticker in UNIVERSE:
+            df     = data.get(ticker)
+            result = score_from_df(ticker, df)
+            result["total"] = total
+            yield f"data: {json.dumps(result)}\n\n"
+            scanned += 1
+
+        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'total': total})}\n\n"
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ---------- STATIC ----------
 @app.get("/")
 def root():
@@ -594,8 +714,8 @@ if __name__ == "__main__":
     print(f"  Broker URL:    {BROKER_BASE}")
     print(f"  API key:       {'configured ✓' if ALPACA_API_KEY else 'NOT SET — edit .env'}")
     print(f"  Dashboard:     http://localhost:8000")
-    print(f"  Scans at:      07:00 and 18:00 Berlin time (always-on)")
-    print(f"  Morning alert: 07:30 Berlin via WhatsApp")
+    print(f"  Schedule:      07:00 Berlin — top 2 orders | 14:30 Berlin — top 1 order")
+    print(f"                 Alternating days (trade / rest / trade / rest...)")
     print(f"  Weekly limit:  {WEEKLY_TRADE_LIMIT} trades / ${PER_TRADE_MAX_USD} max each")
     print(f"  Min score:     {MIN_SIGNAL_SCORE}/100")
     print("=" * 60)

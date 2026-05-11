@@ -94,7 +94,7 @@ class TradeLog:
         self.save()
 
 
-# ---------- ALPACA ORDER PLACER ----------
+# ---------- ALPACA HELPERS ----------
 def _alpaca_headers() -> dict:
     return {
         "APCA-API-KEY-ID":     os.getenv("ALPACA_API_KEY", "").strip(),
@@ -110,6 +110,46 @@ def _broker_base() -> str:
         if mode != "live"
         else "https://api.alpaca.markets/v2"
     )
+
+
+async def market_is_open() -> tuple[bool, str]:
+    """Return (is_open, reason). Uses Alpaca clock endpoint."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_broker_base()}/clock", headers=_alpaca_headers())
+        if r.status_code != 200:
+            return False, f"Clock endpoint error {r.status_code}"
+        data = r.json()
+        if data.get("is_open"):
+            return True, "Market open"
+        next_open = data.get("next_open", "unknown")
+        return False, f"Market closed — next open {next_open}"
+    except Exception as e:
+        return False, f"Clock check failed: {e}"
+
+
+async def get_free_cash() -> Optional[float]:
+    """Return available buying power, or None on error."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_broker_base()}/account", headers=_alpaca_headers())
+        if r.status_code != 200:
+            return None
+        return float(r.json().get("cash", 0))
+    except Exception:
+        return None
+
+
+async def get_held_symbols() -> set[str]:
+    """Return set of ticker symbols currently held as open positions."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_broker_base()}/positions", headers=_alpaca_headers())
+        if r.status_code != 200:
+            return set()
+        return {p["symbol"].upper() for p in r.json()}
+    except Exception:
+        return set()
 
 
 async def alpaca_buy_notional(symbol: str, notional: float) -> dict:
@@ -169,7 +209,7 @@ class AutoTrader:
             "recent_events":   self.events[-30:],
         }
 
-    async def run_one_cycle(self, picks: Optional[list] = None):
+    async def run_one_cycle(self, picks: Optional[list] = None, force_market_open: bool = False):
         """
         Check signals and maybe place a trade.
         Pass pre-computed picks to avoid a redundant scan (scheduled scan
@@ -191,36 +231,83 @@ class AutoTrader:
             self.last_decision = {"action": "idle", "reason": "Auto-execute is off — picks cached, no order placed"}
             return
 
-        # Limit gate
+        # ── Gate 1: market hours ──────────────────────────────────────────
+        if force_market_open:
+            self.event("scan", "Market hours check bypassed (force mode)")
+        else:
+            is_open, clock_msg = await market_is_open()
+            if not is_open:
+                self.event("hold", f"Skipping — {clock_msg}")
+                self.last_decision = {"action": "hold", "reason": clock_msg}
+                return
+
+        # ── Gate 2: weekly trade limit ────────────────────────────────────
         ok, why = self.tradelog.can_trade_now()
         if not ok:
             self.event("limit", why)
             self.last_decision = {"action": "skip", "reason": why}
             return
 
-        # Best pick above threshold that has a US ADR for Alpaca execution
+        # ── Gate 3: fetch live account state ─────────────────────────────
+        free_cash   = await get_free_cash()
+        held        = await get_held_symbols()
+
+        if free_cash is None:
+            msg = "Could not fetch account balance — skipping"
+            self.event("error", msg)
+            self.last_decision = {"action": "error", "reason": msg}
+            return
+
+        # ── Gate 4: best signal that is executable and not already held ───
         best = next(
             (p for p in picks
-             if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("us_adr")),
+             if p.get("score", 0) >= MIN_SIGNAL_SCORE
+             and p.get("us_adr")
+             and p["us_adr"].upper() not in held),
             None,
         )
 
         if not best:
+            held_str = ", ".join(sorted(held)) if held else "none"
             top = picks[0] if picks else {"ticker": "?", "score": 0}
-            msg = f"No executable signal (best: {top.get('ticker')} score {top.get('score',0)}, need >={MIN_SIGNAL_SCORE} with US ADR)"
+            msg = (
+                f"No new executable signal — best: {top.get('ticker')} "
+                f"score {top.get('score', 0)} (need >={MIN_SIGNAL_SCORE}). "
+                f"Already held: {held_str}"
+            )
             self.event("hold", msg)
             self.last_decision = {"action": "hold", "reason": msg}
             return
 
-        adr      = best["us_adr"]   # US-listed ADR to execute via Alpaca
-        notional = float(PER_TRADE_MAX_USD)
+        adr = best["us_adr"]
+
+        # ── Gate 5: position sizing (min of cap and 5% of free cash) ─────
+        max_by_cash = round(free_cash * 0.05, 2)   # never risk >5% of cash
+        notional    = min(float(PER_TRADE_MAX_USD), max_by_cash)
+
+        if notional < 1.0:
+            msg = f"Insufficient free cash (${free_cash:.2f}) to open a position"
+            self.event("hold", msg)
+            self.last_decision = {"action": "hold", "reason": msg}
+            return
 
         self.event(
             "buy",
             f"BUY ${notional} of {adr} (XETRA: {best['ticker']}) "
-            f"score {best['score']} — {' | '.join(best['reasons'][:2])}",
+            f"score {best['score']} — cash ${free_cash:.0f}, 5% cap ${max_by_cash:.0f} — "
+            f"{' | '.join(best['reasons'][:2])}",
             {"score": best["score"], "xetra": best["ticker"], "adr": adr, "usd": notional},
         )
+
+        # ── Notify BEFORE placing the order ──────────────────────────────
+        try:
+            from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm
+            send_whatsapp(format_pre_trade_alert(
+                adr, best["ticker"], notional, best["score"],
+                free_cash, best.get("reasons", []),
+            ))
+        except Exception:
+            pass
 
         try:
             result = await alpaca_buy_notional(adr, notional)
@@ -239,9 +326,8 @@ class AutoTrader:
             "alpaca_response": result,
         })
 
-        # Notify via WhatsApp
+        # Notify AFTER order confirmed
         try:
-            from notifier import send_whatsapp, format_trade_confirm
             send_whatsapp(format_trade_confirm("BUY", adr, notional, result.get("status", "submitted")))
         except Exception:
             pass
