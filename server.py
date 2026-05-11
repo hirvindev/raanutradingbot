@@ -518,6 +518,17 @@ async def scan_top3():
     }
 
 
+@app.post("/api/auth/pin")
+async def verify_pin(request: Request):
+    """Verify trade PIN. Format: 2 letters + 6 digits (e.g. AB123456)."""
+    body     = await request.json()
+    entered  = body.get("pin", "").strip().upper()
+    expected = os.getenv("TRADE_PIN", "").strip().upper()
+    if not expected:
+        return {"ok": True, "reason": "no_pin_configured"}
+    return {"ok": entered == expected}
+
+
 @app.get("/api/test/twilio")
 async def test_twilio():
     """Debug endpoint — shows what Twilio credentials Railway sees and tests them."""

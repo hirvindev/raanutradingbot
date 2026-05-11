@@ -567,6 +567,24 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   </div>
 </div>
 
+<!-- ══ PIN AUTH MODAL ══ -->
+<div class="modal-bg" id="pinM">
+  <div class="modal" style="width:320px;text-align:center">
+    <div class="modal-ttl" style="color:var(--accent)">🔐 Trade PIN Required</div>
+    <div style="font-size:.75rem;color:var(--muted);margin-bottom:1.2rem">Enter your 2-letter + 6-digit PIN to authorise this trade.</div>
+    <div style="position:relative;margin-bottom:.5rem">
+      <input id="pinInput" type="password" maxlength="8" autocomplete="off" placeholder="AB123456"
+        style="width:100%;box-sizing:border-box;background:#0d0f12;border:1px solid var(--border);border-radius:7px;padding:12px 16px;font-size:1.3rem;font-family:var(--mono);color:var(--fg);text-align:center;letter-spacing:.18em;outline:none"
+        oninput="pinOnInput(this)" onkeydown="if(event.key==='Enter')pinSubmit()">
+    </div>
+    <div id="pinHint" style="font-size:.68rem;color:var(--muted);margin-bottom:1rem;min-height:1rem"></div>
+    <div style="display:flex;gap:7px;justify-content:center">
+      <button class="btn b-out" onclick="pinCancel()">Cancel</button>
+      <button class="btn b-acc" id="pinBtn" onclick="pinSubmit()" disabled>Unlock</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ CONFIRM MODAL ══ -->
 <div class="modal-bg" id="confM">
   <div class="modal" style="width:360px">
@@ -860,7 +878,7 @@ async function placeTrade(ticker, dir, qty, reason='Auto', limitPrice=null){
 async function autoTrade(ticker, price, signal, trend, rsiVal){
   const notional = parseFloat(document.getElementById('perTrade')?.value || 500);
   const msg = `Buy $${notional} of ${ticker}?\n\nPrice: $${price.toFixed(2)}\nSignal: ${signal}\nRSI: ${rsiVal}\n\nThis places a real paper order on Alpaca.`;
-  confirm2(msg, `Confirm BUY ${ticker}`, async () => {
+  requirePin(()=>confirm2(msg, `Confirm BUY ${ticker}`, async () => {
     log(`Placing BUY $${notional} of ${ticker}...`, 'ok');
     const res = await api('/api/orders/buy', 'POST', { ticker, notional });
     if(res){
@@ -869,7 +887,7 @@ async function autoTrade(ticker, price, signal, trend, rsiVal){
       deriveStats();
       await fetchAccount();
     }
-  });
+  }));
 }
 
 async function setStopLoss(ticker, qty, price){
@@ -877,14 +895,14 @@ async function setStopLoss(ticker, qty, price){
   // For now log a reminder — full bracket order support coming
   log(`Reminder: set a stop loss manually for ${ticker} at ${fmtCur(price)}`,'warn');
 }
-async function closePos(ticker,qty){ confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close')); }
+async function closePos(ticker,qty){ requirePin(()=>confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close'))); }
 function manOrder(dir){
   const sym=document.getElementById('mSym').value.trim().toUpperCase();
   const qty=parseFloat(document.getElementById('mQty').value);
   const price=parseFloat(document.getElementById('mPrice').value)||null;
   const note=document.getElementById('mNote').value||'Manual trade';
   if(!sym||!qty){ log('Fill symbol and quantity','warn'); return; }
-  confirm2(`${dir} ${qty} × ${sym}${price?` @ ${fmtCur(price)}`:' at market'}\n\nStop Loss: −${getSL()}%\nTake Profit: +${getTP()}%\nReason: ${note}`,`Confirm ${dir}`,()=>placeTrade(sym,dir,qty,note,price));
+  requirePin(()=>confirm2(`${dir} ${qty} × ${sym}${price?` @ ${fmtCur(price)}`:' at market'}\n\nStop Loss: −${getSL()}%\nTake Profit: +${getTP()}%\nReason: ${note}`,`Confirm ${dir}`,()=>placeTrade(sym,dir,qty,note,price)));
 }
 function updatePrev(){
   const sym=document.getElementById('mSym').value.toUpperCase();
@@ -1592,6 +1610,66 @@ function renderLogs(){
   const el=document.getElementById('logBox');if(!el)return;
   const logs=f==='all'?S.logs:S.logs.filter(l=>l.type===f);
   el.innerHTML=logs.slice(0,120).map(l=>`<div class="log-row"><span class="log-t">${l.t}</span><span class="c-${l.type}">${l.msg}</span></div>`).join('')||`<div style="color:var(--muted);font-size:.7rem;font-family:var(--mono);padding:.75rem 0">No entries.</div>`;
+}
+
+// ═══════════════════════════════════════
+//  PIN AUTH
+// ═══════════════════════════════════════
+let _pinUnlocked = false;   // cleared on page reload
+let _pinCallback = null;
+
+function requirePin(cb){
+  if(_pinUnlocked){ cb(); return; }
+  _pinCallback = cb;
+  document.getElementById('pinInput').value='';
+  document.getElementById('pinHint').textContent='';
+  document.getElementById('pinBtn').disabled=true;
+  openM('pinM');
+  setTimeout(()=>document.getElementById('pinInput').focus(),120);
+}
+
+function pinOnInput(el){
+  const v = el.value.toUpperCase();
+  el.value = v;
+  // Validate: first 2 chars letters, next 6 digits
+  const ok = /^[A-Z]{2}[0-9]{6}$/.test(v);
+  document.getElementById('pinBtn').disabled = !ok;
+  if(v.length===0) document.getElementById('pinHint').textContent='';
+  else if(v.length<2) document.getElementById('pinHint').textContent='Enter 2 letters first';
+  else if(v.length<8) document.getElementById('pinHint').textContent=`${8-v.length} more digit(s)`;
+  else if(ok) document.getElementById('pinHint').textContent='';
+  else document.getElementById('pinHint').textContent='Format: 2 letters + 6 digits';
+}
+
+async function pinSubmit(){
+  const pin = document.getElementById('pinInput').value.trim().toUpperCase();
+  if(!/^[A-Z]{2}[0-9]{6}$/.test(pin)) return;
+  document.getElementById('pinBtn').disabled=true;
+  document.getElementById('pinHint').textContent='Verifying...';
+  try{
+    const res = await api('/api/auth/pin','POST',{pin});
+    if(res && res.ok){
+      _pinUnlocked=true;
+      closeM('pinM');
+      if(_pinCallback){ const cb=_pinCallback; _pinCallback=null; cb(); }
+    } else {
+      document.getElementById('pinHint').style.color='var(--red)';
+      document.getElementById('pinHint').textContent='Wrong PIN — try again';
+      document.getElementById('pinInput').value='';
+      document.getElementById('pinBtn').disabled=true;
+      setTimeout(()=>{
+        document.getElementById('pinHint').style.color='var(--muted)';
+        document.getElementById('pinHint').textContent='';
+      },2000);
+    }
+  } catch(e){
+    document.getElementById('pinHint').textContent='Error verifying PIN';
+  }
+}
+
+function pinCancel(){
+  _pinCallback=null;
+  closeM('pinM');
 }
 
 // ═══════════════════════════════════════
