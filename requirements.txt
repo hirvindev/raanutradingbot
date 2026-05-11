@@ -7,3 +7,4 @@ yfinance>=0.2.50
 pandas>=2.2
 numpy>=1.26
 tzdata>=2024.1
+python-multipart>=0.0.9
