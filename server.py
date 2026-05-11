@@ -530,6 +530,95 @@ async def scan_alert_now():
 
 
 # ---------- WHATSAPP WEBHOOK (Twilio) ----------
+
+async def _handle_whatsapp_command(cmd: str):
+    """
+    Runs in a background task — called after TwiML is already returned to Twilio.
+    This avoids Twilio's 15-second webhook timeout killing long-running commands.
+    """
+    from notifier import send_whatsapp, format_trade_confirm, format_portfolio_status, format_daily_alert
+
+    try:
+        if cmd == "STATUS":
+            try:
+                from profit_monitor import get_positions_for_status
+                positions, account = await get_positions_for_status()
+                reply = format_portfolio_status(positions, account)
+            except Exception as e:
+                reply = f"❌ Could not fetch portfolio: {e}"
+            send_whatsapp(reply)
+
+        elif cmd in ("PICKS", "SCAN"):
+            send_whatsapp("🔍 Fetching latest picks...")
+            # Use cached results first (instant); fall back to fresh scan if no cache
+            cached = _load_picks()
+            if cached and cached.get("picks"):
+                picks = cached["picks"]
+            else:
+                from scanner import find_top_picks
+                loop = asyncio.get_event_loop()
+                picks = await loop.run_in_executor(None, lambda: find_top_picks(3))
+                _save_picks(picks)
+            send_whatsapp(format_daily_alert(picks))
+
+        elif cmd.startswith("BUY "):
+            parts  = cmd.split()
+            ticker = parts[1] if len(parts) > 1 else ""
+            usd    = float(parts[2]) if len(parts) > 2 else float(os.getenv("PER_TRADE_MAX_USD", "500"))
+            if not ticker:
+                send_whatsapp("❌ Usage: BUY TICKER or BUY TICKER 200")
+            else:
+                try:
+                    body = {"symbol": ticker.upper(), "notional": str(usd), "side": "buy", "type": "market", "time_in_force": "day"}
+                    async with httpx.AsyncClient(timeout=20) as c:
+                        r = await c.post(f"{BROKER_BASE}/orders", headers=alpaca_headers(), json=body)
+                    if r.status_code >= 400:
+                        send_whatsapp(f"❌ Order rejected: {r.text[:200]}")
+                    else:
+                        send_whatsapp(format_trade_confirm("BUY", ticker, usd, r.json().get("status", "submitted")))
+                except Exception as e:
+                    send_whatsapp(f"❌ Buy failed: {e}")
+
+        elif cmd.startswith("SELL "):
+            parts  = cmd.split()
+            ticker = parts[1] if len(parts) > 1 else ""
+            if not ticker:
+                send_whatsapp("❌ Usage: SELL TICKER")
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=20) as c:
+                        r = await c.delete(f"{BROKER_BASE}/positions/{ticker.upper()}", headers=alpaca_headers())
+                    if r.status_code == 404:
+                        send_whatsapp(f"⚠️ No open position in {ticker}")
+                    elif r.status_code >= 400:
+                        send_whatsapp(f"❌ Sell failed: {r.text[:200]}")
+                    else:
+                        result = r.json()
+                        qty    = float(result.get("qty", 0))
+                        price  = float(result.get("avg_entry_price", 0))
+                        send_whatsapp(format_trade_confirm("SELL", ticker, qty * price, result.get("status", "submitted")))
+                except Exception as e:
+                    send_whatsapp(f"❌ Sell failed: {e}")
+
+        else:
+            send_whatsapp(
+                "🤖 *RaanuTradingBot commands:*\n"
+                "  *PICKS* — today's top 3 picks\n"
+                "  *BUY AAPL* — buy $500 of AAPL\n"
+                "  *BUY AAPL 200* — buy $200 of AAPL\n"
+                "  *SELL AAPL* — close position\n"
+                "  *STATUS* — portfolio summary"
+            )
+
+    except Exception as e:
+        log.error(f"WhatsApp command handler error for '{cmd}': {e}")
+        try:
+            from notifier import send_whatsapp
+            send_whatsapp(f"❌ Internal error: {e}")
+        except Exception:
+            pass
+
+
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
     request: Request,
@@ -538,15 +627,9 @@ async def whatsapp_webhook(
 ):
     """
     Twilio sends incoming WhatsApp messages here.
-    Configure this URL in Twilio console → WhatsApp Sandbox → 'When a message comes in'.
-    URL: https://your-ngrok-url.ngrok.io/webhook/whatsapp
+    Returns TwiML immediately so we stay well within Twilio's 15s timeout.
+    Command handling runs in a background task.
     """
-    from notifier import (
-        send_whatsapp, format_trade_confirm, format_portfolio_status, format_daily_alert
-    )
-    from profit_monitor import get_positions_for_status
-    from scanner import find_top_picks
-
     expected_from = os.getenv("USER_WHATSAPP", "whatsapp:+919176911755").strip()
     if From and From != expected_from:
         log.warning(f"WhatsApp message from unknown number: {From}")
@@ -555,78 +638,9 @@ async def whatsapp_webhook(
     cmd = Body.strip().upper()
     log.info(f"WhatsApp command: '{cmd}' from {From}")
 
-    reply = ""
+    # Fire-and-forget — respond to Twilio immediately to avoid timeout
+    asyncio.create_task(_handle_whatsapp_command(cmd))
 
-    if cmd == "STATUS":
-        try:
-            positions, account = await get_positions_for_status()
-            reply = format_portfolio_status(positions, account)
-        except Exception as e:
-            reply = f"❌ Could not fetch portfolio: {e}"
-
-    elif cmd == "PICKS" or cmd == "SCAN":
-        reply = "🔍 Scanning XETRA/GETTEX... this takes ~30s, sending results shortly."
-        send_whatsapp(reply)
-        try:
-            picks = find_top_picks(3)
-            reply = format_daily_alert(picks)
-        except Exception as e:
-            reply = f"❌ Scan failed: {e}"
-
-    elif cmd.startswith("BUY "):
-        parts = cmd.split()
-        ticker = parts[1] if len(parts) > 1 else ""
-        usd    = float(parts[2]) if len(parts) > 2 else float(os.getenv("PER_TRADE_MAX_USD", "500"))
-        if not ticker:
-            reply = "❌ Usage: BUY TICKER or BUY TICKER 200"
-        else:
-            try:
-                body  = {"symbol": ticker.upper(), "notional": str(usd), "side": "buy", "type": "market", "time_in_force": "day"}
-                async with httpx.AsyncClient(timeout=20) as c:
-                    r = await c.post(f"{BROKER_BASE}/orders", headers=alpaca_headers(), json=body)
-                if r.status_code >= 400:
-                    reply = f"❌ Order rejected: {r.text[:200]}"
-                else:
-                    result = r.json()
-                    reply  = format_trade_confirm("BUY", ticker, usd, result.get("status", "submitted"))
-            except Exception as e:
-                reply = f"❌ Buy failed: {e}"
-
-    elif cmd.startswith("SELL "):
-        parts  = cmd.split()
-        ticker = parts[1] if len(parts) > 1 else ""
-        if not ticker:
-            reply = "❌ Usage: SELL TICKER"
-        else:
-            try:
-                async with httpx.AsyncClient(timeout=20) as c:
-                    r = await c.delete(f"{BROKER_BASE}/positions/{ticker.upper()}", headers=alpaca_headers())
-                if r.status_code == 404:
-                    reply = f"⚠️ No open position in {ticker}"
-                elif r.status_code >= 400:
-                    reply = f"❌ Sell failed: {r.text[:200]}"
-                else:
-                    result = r.json()
-                    qty    = float(result.get("qty", 0))
-                    price  = float(result.get("avg_entry_price", 0))
-                    reply  = format_trade_confirm("SELL", ticker, qty * price, result.get("status", "submitted"))
-            except Exception as e:
-                reply = f"❌ Sell failed: {e}"
-
-    else:
-        reply = (
-            "🤖 *RaanuTradingBot commands:*\n"
-            "  *PICKS* — today's top 3 picks\n"
-            "  *BUY AAPL* — buy $500 of AAPL\n"
-            "  *BUY AAPL 200* — buy $200 of AAPL\n"
-            "  *SELL AAPL* — close position\n"
-            "  *STATUS* — portfolio summary"
-        )
-
-    if reply:
-        send_whatsapp(reply)
-
-    # Return empty TwiML so Twilio doesn't also send a raw reply
     return PlainTextResponse("<?xml version='1.0'?><Response/>", media_type="text/xml")
 
 
