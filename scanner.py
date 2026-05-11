@@ -17,7 +17,7 @@ XETRA_UNIVERSE = [
     # DAX 40
     "SAP.DE", "SIE.DE", "ALV.DE", "MRK.DE", "DTE.DE",
     "VOW3.DE", "BMW.DE", "BAS.DE", "BAYN.DE", "DBK.DE",
-    "MBG.DE", "ADS.DE", "DPW.DE", "RWE.DE", "EON.DE",
+    "MBG.DE", "ADS.DE", "DHL.DE", "RWE.DE", "EOAN.DE",
     "IFX.DE", "FRE.DE", "HEN3.DE", "BEI.DE", "CON.DE",
     "VNA.DE", "MTX.DE", "SHL.DE", "QIA.DE", "HEI.DE",
     "ENR.DE", "DHER.DE", "HAG.DE", "SY1.DE", "G1A.DE",
@@ -43,9 +43,9 @@ XETRA_TO_US_ADR: dict[str, Optional[str]] = {
     "DBK.DE":  "DB",     # Deutsche Bank — NYSE
     "MBG.DE":  "MBGYY",  # Mercedes-Benz — OTC
     "ADS.DE":  "ADDYY",  # Adidas — OTC
-    "DPW.DE":  "DPSGY",  # Deutsche Post — OTC
+    "DHL.DE":  "DPSGY",  # DHL Group (fmr Deutsche Post) — OTC
     "RWE.DE":  "RWEOY",  # RWE — OTC
-    "EON.DE":  "EONGY",  # E.ON — OTC
+    "EOAN.DE": "EONGY",  # E.ON — OTC
     "IFX.DE":  "IFNNY",  # Infineon — OTC
     "FRE.DE":  "FSNUY",  # Fresenius — OTC
     "HEN3.DE": "HENKY",  # Henkel — OTC
