@@ -343,13 +343,14 @@ async def account_cash():
     """Account balances — mapped to the shape the dashboard expects."""
     acct = await alpaca_get("/account")
     return {
-        "total":    float(acct.get("portfolio_value", 0)),
-        "free":     float(acct.get("cash", 0)),
-        "invested": float(acct.get("portfolio_value", 0)) - float(acct.get("cash", 0)),
-        "ppl":      float(acct.get("unrealized_pl", 0)),
-        "blocked":  0,
-        "currency": acct.get("currency", "USD"),
-        "_raw":     acct,
+        "total":     float(acct.get("portfolio_value", 0)),
+        "free":      float(acct.get("cash", 0)),
+        "invested":  float(acct.get("portfolio_value", 0)) - float(acct.get("cash", 0)),
+        "ppl":       float(acct.get("unrealized_pl", 0)),
+        "daily_ppl": float(acct.get("unrealized_intraday_pl", 0)),
+        "blocked":   0,
+        "currency":  acct.get("currency", "USD"),
+        "_raw":      acct,
     }
 
 

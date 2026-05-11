@@ -630,12 +630,12 @@ async function fetchAccount(){
   if(!d) return;
   S.account = d;
 
-  // Alpaca account (mapped by backend): { total, free, invested, ppl, currency }
-  const totalValue  = d.total    ?? 0;
-  const freeCash    = d.free     ?? 0;
-  const invested    = d.invested ?? 0;
-  const openPnl     = d.ppl      ?? 0;
-  const dailyPnl    = openPnl;
+  // Alpaca account (mapped by backend): { total, free, invested, ppl, daily_ppl, currency }
+  const totalValue  = d.total     ?? 0;
+  const freeCash    = d.free      ?? 0;
+  const invested    = d.invested  ?? 0;
+  const openPnl     = d.ppl       ?? 0;
+  const dailyPnl    = d.daily_ppl ?? 0;   // intraday move since yesterday's close
   const dailyPct    = totalValue ? (dailyPnl/totalValue*100) : 0;
 
   // ── Portfolio Value ──
