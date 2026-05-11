@@ -342,9 +342,23 @@ def health():
 async def account_cash():
     """Account balances — mapped to the shape the dashboard expects."""
     acct = await alpaca_get("/account")
-    total      = float(acct.get("portfolio_value", 0))
-    last_eq    = float(acct.get("last_equity", total))   # equity at previous market close
-    daily_ppl  = total - last_eq                          # includes realized + unrealized
+    total = float(acct.get("portfolio_value", 0))
+
+    # Use portfolio history for daily P&L — includes realized gains from sells today.
+    # last_equity comparison is unreliable on paper accounts (often returns 0).
+    daily_ppl = 0.0
+    try:
+        hist = await alpaca_get(
+            "/account/portfolio/history",
+            params={"period": "1D", "timeframe": "15Min", "extended_hours": "true"},
+        )
+        pl_arr = hist.get("profit_loss", [])
+        if pl_arr:
+            daily_ppl = float(pl_arr[-1] or 0)
+    except Exception:
+        last_eq   = float(acct.get("last_equity", total))
+        daily_ppl = total - last_eq
+
     return {
         "total":     total,
         "free":      float(acct.get("cash", 0)),
