@@ -514,6 +514,37 @@ async def scan_top3():
     }
 
 
+@app.get("/api/test/twilio")
+async def test_twilio():
+    """Debug endpoint — shows what Twilio credentials Railway sees and tests them."""
+    import httpx
+    sid   = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+    token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+    frm   = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886").strip()
+    to    = os.getenv("USER_WHATSAPP", "whatsapp:+919176911755").strip()
+
+    if not sid or not token:
+        return {"error": "missing_creds", "sid_set": bool(sid), "token_set": bool(token)}
+
+    try:
+        resp = httpx.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+            auth=(sid, token),
+            data={"From": frm, "To": to, "Body": "RaanuBot test message ✅"},
+            timeout=15,
+        )
+        return {
+            "status_code": resp.status_code,
+            "sid_prefix":  sid[:8] + "...",
+            "token_prefix": token[:6] + "...",
+            "from": frm,
+            "to":   to,
+            "twilio_response": resp.json(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/api/scan/alert-now")
 async def scan_alert_now():
     """Trigger the morning WhatsApp alert immediately (for testing)."""
