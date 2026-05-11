@@ -177,9 +177,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .up{color:var(--green);}.down{color:var(--red);}.nu{color:var(--muted2);}.hi{color:var(--accent);}
 
 /* ── WATCH TAG ── */
-.wtag{display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:3px 9px;font-family:var(--mono);font-size:.7rem;}
-.wtag-x{cursor:pointer;color:var(--muted);font-size:.75rem;}
-.wtag-x:hover{color:var(--red);}
 
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:3px;height:3px;}
@@ -564,14 +561,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <div class="fg"><div class="fl">Scan Interval</div><select id="scanInt"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option></select></div>
       <div class="fg"><div class="fl">Order Type</div><select id="ordType"><option value="MARKET" selected>Market</option><option value="LIMIT">Limit (0.2% below ask)</option></select></div>
     </div>
-  </div>
-  <div class="card">
-    <div class="card-title">Watchlist</div>
-    <div style="display:flex;gap:7px;margin-bottom:8px">
-      <input type="text" id="wIn" placeholder="Add symbol, e.g. AAPL" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
-      <button class="btn b-acc b-sm" onclick="addWatch()">+ Add</button>
-    </div>
-    <div id="wTags" style="display:flex;flex-wrap:wrap;gap:5px"></div>
   </div>
 </div>
 
@@ -1621,13 +1610,7 @@ function updateConnBadge(ok){
 //  WATCHLIST + WEIGHTS
 // ═══════════════════════════════════════
 function renderWTags(){
-  document.getElementById('wTags').innerHTML=S.watchlist.map(s=>`<span class="wtag">${s}<span class="wtag-x" onclick="removeWatch('${s}')">✕</span></span>`).join('');
 }
-function addWatch(){
-  const s=document.getElementById('wIn').value.toUpperCase().trim();
-  if(s&&!S.watchlist.includes(s)){S.watchlist.push(s);localStorage.setItem('wl',JSON.stringify(S.watchlist));renderWTags();document.getElementById('wIn').value='';log(`Added ${s}`,'ok');}
-}
-function removeWatch(s){S.watchlist=S.watchlist.filter(x=>x!==s);localStorage.setItem('wl',JSON.stringify(S.watchlist));renderWTags();}
 
 function renderWCtrls(){
   const keys=['rsi','macd','bb','ema','news','fund'];
