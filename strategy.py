@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+import alpaca_data
+
 log = logging.getLogger("raanu.strategy")
 
 
@@ -48,7 +50,15 @@ def bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0):
 
 # ---------- DATA ----------
 def fetch_ohlc(ticker: str, period: str = "120d") -> Optional[pd.DataFrame]:
-    """Daily candles from Yahoo. Returns None on failure."""
+    """Daily candles — Alpaca first, yfinance fallback."""
+    # Try Alpaca (preferred — more reliable, no CORS proxy needed)
+    df = alpaca_data.fetch_bars(ticker, days=120)
+    if df is not None and not df.empty:
+        log.debug(f"Alpaca bars OK for {ticker} ({len(df)} rows)")
+        return df
+
+    # Fall back to yfinance
+    log.debug(f"Alpaca unavailable for {ticker}, trying yfinance")
     try:
         df = yf.download(
             ticker,
@@ -63,7 +73,6 @@ def fetch_ohlc(ticker: str, period: str = "120d") -> Optional[pd.DataFrame]:
         return None
     if df is None or df.empty:
         return None
-    # yfinance occasionally returns multi-index columns. Flatten.
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df

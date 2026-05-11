@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RaanuTradingBot — Trade 212</title>
+<title>RaanuTradingBot — Alpaca</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -204,13 +204,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
     <div class="pill">
       <div class="dot dm" id="engDot"></div>
-      <span id="engLbl" style="color:var(--muted)">ENGINE OFF</span>
+      <span id="engLbl" style="color:var(--accent)">SCANNING (no auto-trade)</span>
     </div>
     <div class="pill" id="modePill" style="display:none">
       <span id="modeLbl">PAPER</span>
     </div>
-    <button class="btn b-out b-sm" onclick="openM('cfgM')">⚙ Configure</button>
-    <button class="btn b-eng b-sm" id="engBtn" onclick="toggleEngine()">▶ Start Engine</button>
+    <button class="btn b-eng b-sm" id="engBtn" onclick="toggleEngine()">&#9654; Enable Auto-Trade</button>
   </div>
 </nav>
 
@@ -224,8 +223,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('ord',this)"><span class="sb-icon">◎</span>Orders</div>
   <div class="sb-grp">Analysis</div>
   <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
-  <div class="sb-item" onclick="nav('crypto',this)"><span class="sb-icon">&#8383;</span>Crypto Scanner</div>
-  <div class="sb-item" onclick="nav('commodity',this)"><span class="sb-icon">&#9935;</span>Commodity Scanner</div>
   <div class="sb-item" onclick="nav('ind',this)"><span class="sb-icon">&#8767;</span>Indicators</div>
   <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
   <div class="sb-grp">Execution</div>
@@ -233,8 +230,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('logs',this)"><span class="sb-icon">≡</span>Engine Logs</div>
   <div class="sb-foot">
     <div>Mode: <strong id="sbMode">—</strong></div>
-    <div>Engine: <strong id="sbEng" style="color:var(--muted)">STOPPED</strong></div>
-    <div>Next scan: <strong id="sbNext" style="color:var(--accent)">—</strong></div>
+    <div>Scan: <strong id="sbEng" style="color:var(--accent)">07:00 &amp; 18:00</strong></div>
+    <div>Auto-trade: <strong id="sbNext" style="color:var(--muted)">OFF</strong></div>
     <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
       Stop Loss: <strong style="color:var(--red)" id="sbSL">5%</strong><br>
       Target: <strong style="color:var(--green)">+4–5% /mo</strong><br>
@@ -338,7 +335,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
     <table>
       <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>Status</th><th>P&amp;L</th><th>Signal / Note</th></tr></thead>
-      <tbody id="recTrades"><tr><td class="te" colspan="8">Connect API → Start Engine to see live trades</td></tr></tbody>
+      <tbody id="recTrades"><tr><td class="te" colspan="8">Picks load automatically — enable Auto-Trade to execute orders</td></tr></tbody>
     </table>
   </div>
 
@@ -475,76 +472,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </div>
 
 
-<!-- CRYPTO SCANNER -->
-<div id="s-crypto" class="sec">
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:.85rem">
-    <div class="mc mc-warn"><div class="ml">BTC Price</div><div class="mv" id="cr-btc">--</div><div class="ms nu" id="cr-btc-chg">--</div></div>
-    <div class="mc mc-blue"><div class="ml">ETH Price</div><div class="mv" id="cr-eth">--</div><div class="ms nu" id="cr-eth-chg">--</div></div>
-    <div class="mc mc-teal"><div class="ml">Market Cap</div><div class="mv hi" id="cr-mcap">--</div><div class="ms nu">Total crypto</div></div>
-    <div class="mc mc-green"><div class="ml">Fear &amp; Greed</div><div class="mv" id="cr-fg">--</div><div class="ms nu" id="cr-fg-lbl">Sentiment</div></div>
-  </div>
-  <div class="card">
-    <div class="ch">
-      <div class="ct" style="margin:0">Crypto Momentum Scanner</div>
-      <div style="display:flex;gap:7px">
-        <select id="cr-filter" style="width:auto"><option value="all">All Crypto</option><option value="large">Large Cap</option><option value="mid">Mid Cap</option><option value="defi">DeFi</option><option value="ai">AI Tokens</option><option value="small">Small/Meme</option></select>
-        <button class="btn b-acc b-sm" onclick="runCryptoScan()" id="crScanBtn">&#9889; Scan Crypto</button>
-        <button class="btn b-out b-sm" onclick="loadCryptoPrices()">&#8635; Prices</button>
-      </div>
-    </div>
-    <div id="crProgress" style="display:none;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px"><span id="crStatus">Scanning...</span><span id="crCount">0/0</span></div>
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div id="crBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="crScanned">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="crBullish">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="crBreakouts">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="crAvg">0</div></div>
-    </div>
-    <table><thead><tr><th>#</th><th>Pair</th><th>Name</th><th>Price</th><th>24h%</th><th>Score</th><th>RSI</th><th>Pattern</th><th>Vol%</th><th>Signal</th><th>Action</th></tr></thead>
-    <tbody id="crBody"><tr><td class="te" colspan="11">Click Scan Crypto to find top momentum opportunities</td></tr></tbody></table>
-  </div>
-  <div class="card" id="crReasonCard" style="display:none"><div class="ct">Top Crypto Picks Analysis</div><div id="crReasons"></div></div>
-  <div class="card"><div class="ct">Live Crypto Prices</div><div id="crHeatmap" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px"><div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5">Click Refresh Prices to load</div></div></div>
-</div>
-
-<!-- COMMODITY SCANNER -->
-<div id="s-commodity" class="sec">
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem;margin-bottom:.85rem">
-    <div class="mc mc-warn"><div class="ml">Gold (GLD)</div><div class="mv" id="cm-gold">--</div><div class="ms nu" id="cm-gold-chg">--</div></div>
-    <div class="mc mc-blue"><div class="ml">Silver (SLV)</div><div class="mv" id="cm-silver">--</div><div class="ms nu" id="cm-silver-chg">--</div></div>
-    <div class="mc mc-red"><div class="ml">Crude Oil (USO)</div><div class="mv" id="cm-oil">--</div><div class="ms nu" id="cm-oil-chg">--</div></div>
-    <div class="mc mc-teal"><div class="ml">Nat Gas (UNG)</div><div class="mv" id="cm-gas">--</div><div class="ms nu" id="cm-gas-chg">--</div></div>
-    <div class="mc mc-green"><div class="ml">Copper (CPER)</div><div class="mv" id="cm-copper">--</div><div class="ms nu" id="cm-copper-chg">--</div></div>
-  </div>
-  <div class="al al-info" style="margin-bottom:.85rem">ETF proxies traded on US exchanges (GLD, SLV, USO, UNG, CPER). Strategy: USD correlation + EMA trend + volume. Wider stops than stocks, slower moves than crypto.</div>
-  <div class="card">
-    <div class="ch">
-      <div class="ct" style="margin:0">Commodity Momentum Scanner</div>
-      <div style="display:flex;gap:7px">
-        <select id="cm-filter" style="width:auto"><option value="all">All Commodities</option><option value="metals">Precious Metals</option><option value="energy">Energy</option><option value="agriculture">Agriculture</option><option value="industrial">Industrial</option></select>
-        <button class="btn b-acc b-sm" onclick="runCommodityScan()" id="cmScanBtn">&#9889; Scan Commodities</button>
-        <button class="btn b-out b-sm" onclick="loadCommodityPrices()">&#8635; Refresh</button>
-      </div>
-    </div>
-    <div id="cmProgress" style="display:none;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px"><span id="cmStatus">Scanning...</span><span id="cmCount">0/0</span></div>
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div id="cmBar" style="height:100%;width:0%;background:var(--warn);border-radius:2px;transition:width .3s"></div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="cmScanned">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Bullish</div><div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="cmBullish">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div><div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="cmBreakouts">0</div></div>
-      <div class="card3" style="text-align:center"><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div><div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="cmAvg">0</div></div>
-    </div>
-    <table><thead><tr><th>#</th><th>ETF</th><th>Commodity</th><th>Category</th><th>Price</th><th>Score</th><th>RSI</th><th>Pattern</th><th>EMA</th><th>USD</th><th>Signal</th><th>Action</th></tr></thead>
-    <tbody id="cmBody"><tr><td class="te" colspan="12">Click Scan Commodities to find top opportunities</td></tr></tbody></table>
-  </div>
-  <div class="card" id="cmReasonCard" style="display:none"><div class="ct">Top Commodity Picks Analysis</div><div id="cmReasons"></div></div>
-  <div class="card"><div class="ct">Commodity ETF Live Prices</div><div id="cmGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px"><div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 4">Click Refresh to load prices</div></div></div>
-</div>
-
 <!-- ─────────── INDICATORS ─────────── -->
 <div id="s-ind" class="sec">
   <div class="g2">
@@ -655,7 +582,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="card">
       <div class="card-title">Place Order</div>
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="fg"><div class="fl">T212 Ticker (e.g. AAPL_US_EQ)</div><input type="text" id="mSym" placeholder="AAPL_US_EQ" style="text-transform:uppercase" oninput="updatePrev()"></div>
+        <div class="fg"><div class="fl">Symbol (e.g. AAPL)</div><input type="text" id="mSym" placeholder="AAPL" style="text-transform:uppercase" oninput="updatePrev()"></div>
         <div class="g2" style="gap:7px">
           <div class="fg"><div class="fl">Direction</div><select id="mDir"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></div>
           <div class="fg"><div class="fl">Quantity</div><input type="number" id="mQty" value="10" min="1" oninput="updatePrev()"></div>
@@ -704,27 +631,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 <!-- ══ CONFIG MODAL ══ -->
 <div class="modal-bg" id="cfgM">
   <div class="modal">
-    <div class="modal-ttl">API Configuration</div>
-    <div class="modal-sub">Connect your Trade 212 paper account to pull real data.</div>
+    <div class="modal-ttl">Settings</div>
+    <div class="modal-sub">Alpaca API keys are configured in <code>.env</code> on the server — never entered here.</div>
     <div style="display:flex;flex-direction:column;gap:11px">
       <div class="fg">
-        <div class="fl">Backend Server URL (for Vercel deployment)</div>
-        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or ngrok URL">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Only needed when using Vercel. Leave blank if running locally. Enter your PC's local IP or ngrok URL.</div>
+        <div class="fl">Backend Server URL (for remote / ngrok access)</div>
+        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or https://xxx.ngrok.io">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Leave blank when opening from the same machine as the server.</div>
       </div>
-      <div class="fg">
-        <div class="fl">Trade 212 API Key</div>
-        <input type="password" id="c-t212" placeholder="Paste from T212 → Settings → API (Beta)">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Enables account data, positions and order placement.</div>
-      </div>
-      <div class="fg">
-        <div class="fl">Trading Mode</div>
-        <select id="c-mode">
-          <option value="demo">Demo / Paper Trading (demo.trading212.com) — Safe</option>
-          <option value="live">Live Trading — REAL MONEY</option>
-        </select>
-      </div>
-      <div class="al al-warn">⚠ Use Demo mode first. Live mode places real orders with real money. The stop loss fires in both modes.</div>
       <div class="fg">
         <div class="fl">Claude API Key (optional — AI reasoning)</div>
         <input type="password" id="c-claude" placeholder="sk-ant-...">
@@ -762,10 +676,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 //  STATE
 // ═══════════════════════════════════════
 const S = {
-  apiKey:   localStorage.getItem('t212k') || '',
+  connected: false,
   claudeKey:localStorage.getItem('claudek') || '',
   newsKey:  localStorage.getItem('newsk') || '',
-  mode:     localStorage.getItem('t212m') || 'demo',
+  mode:     'paper',
   engineOn: false, engTimer:null, cdTimer:null,
   logs:[], orders:[], positions:[],
   account:null, eqHistory:[],
@@ -777,81 +691,41 @@ const S = {
 };
 
 // ═══════════════════════════════════════
-//  T212 API LAYER
-//  Routes through local backend when available
-//  Falls back to direct API when on Vercel
+//  API LAYER — routes through local backend (Alpaca)
 // ═══════════════════════════════════════
-const BASE = {
-  demo: 'https://demo.trading212.com/api/v0',
-  live: 'https://live.trading212.com/api/v0',
-};
-
-// Backend URL — auto-detected or manually set
-// When on Vercel, user sets this to their ngrok/local IP
 function getBackendUrl(){
   const saved = localStorage.getItem('backendUrl');
   if(saved) return saved.replace(/\/$/, '');
-  // If running locally, use same origin
   const origin = window.location.origin;
   if(origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
-  return null; // on Vercel with no backend configured
+  return origin; // use same origin when deployed
 }
 
-async function t212(path, method='GET', body=null){
+async function api(path, method='GET', body=null){
   log(`${method} ${path}`,'info');
-
-  const backendMap = {
-    'GET /equity/account/summary': '/api/account/cash',
-    'GET /equity/account/info':    '/api/account/info',
-    'GET /equity/portfolio':       '/api/portfolio',
-    'GET /equity/orders':          '/api/orders',
-    'POST /equity/orders/market':  '/api/orders/buy',
-    'POST /equity/orders/stop':    null,
-  };
-  const mapKey = `${method} ${path}`;
-  const backendPath = backendMap[mapKey];
   const backendUrl = getBackendUrl();
-
-  // Route through backend if available
-  if(backendUrl && backendPath !== undefined){
-    try{
-      const opts = { method: backendPath?method:'GET', headers:{'Content-Type':'application/json'} };
-      if(body && method==='POST') opts.body = JSON.stringify(body);
-      if(!backendPath){ log(`Stop order skipped`,'warn'); return {}; }
-      const res = await fetch(`${backendUrl}${backendPath}`, opts);
-      const txt = await res.text();
-      if(!res.ok){ log(`Backend ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
-      return txt ? JSON.parse(txt) : {};
-    }catch(e){
-      log(`Backend unreachable: ${e.message} — trying direct API`,'warn');
-    }
-  }
-
-  // Direct T212 API (needs API key set in Configure)
-  if(!S.apiKey){ log('No API key — click ⚙ Configure','err'); return null; }
   try{
-    const opts = { method, headers:{ Authorization:S.apiKey, 'Content-Type':'application/json' } };
-    if(body) opts.body = JSON.stringify(body);
-    const res = await fetch(BASE[S.mode]+path, opts);
+    const opts = { method, headers:{'Content-Type':'application/json'} };
+    if(body && method!=='GET') opts.body = JSON.stringify(body);
+    const res = await fetch(`${backendUrl}${path}`, opts);
     const txt = await res.text();
-    if(!res.ok){ log(`T212 ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
+    if(!res.ok){ log(`API ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
     return txt ? JSON.parse(txt) : {};
   }catch(e){ log(`API error: ${e.message}`,'err'); return null; }
 }
 
 // ── FETCH ACCOUNT & DERIVE ALL METRICS ──────────────────
 async function fetchAccount(){
-  const d = await t212('/equity/account/summary');
+  const d = await api('/api/account/cash');
   if(!d) return;
   S.account = d;
 
-  // T212 response shape (may vary slightly):
-  // { totalValue, cash:{ freeForStocks, invested, total }, result:{ total, dailyLossPnl } }
-  const totalValue  = d.totalValue   ?? d.cash?.total ?? 0;
-  const freeCash    = d.cash?.freeForStocks ?? d.cash?.free ?? 0;
-  const invested    = d.cash?.invested ?? (totalValue - freeCash);
-  const openPnl     = d.result?.total ?? 0;           // unrealised
-  const dailyPnl    = d.result?.dailyLossPnl ?? 0;
+  // Alpaca account (mapped by backend): { total, free, invested, ppl, currency }
+  const totalValue  = d.total    ?? 0;
+  const freeCash    = d.free     ?? 0;
+  const invested    = d.invested ?? 0;
+  const openPnl     = d.ppl      ?? 0;
+  const dailyPnl    = openPnl;
   const dailyPct    = totalValue ? (dailyPnl/totalValue*100) : 0;
 
   // ── Portfolio Value ──
@@ -879,7 +753,7 @@ async function fetchAccount(){
     ['Open P&L',    (openPnl>=0?'+':'')+fmtCur(openPnl)],
     ['Daily P&L',   (dailyPnl>=0?'+':'')+fmtCur(dailyPnl)],
     ['Mode',        S.mode.toUpperCase()],
-    ['Currency',    d.currencyCode ?? 'EUR'],
+    ['Currency',    d.currency ?? 'USD'],
     ['Positions',   S.positions.length+' open'],
   ].map(([l,v])=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 9px"><div style="font-size:.6rem;color:var(--muted);margin-bottom:2px">${l}</div><div style="font-size:.85rem;font-weight:700">${v}</div></div>`).join('');
 
@@ -893,7 +767,7 @@ async function fetchAccount(){
 
 // ── FETCH POSITIONS ──────────────────────
 async function fetchPositions(){
-  const d = await t212('/equity/portfolio');
+  const d = await api('/api/portfolio');
   if(!d) return;
   S.positions = Array.isArray(d) ? d : (d.positions || []);
   renderPositions();
@@ -939,7 +813,7 @@ function renderPositions(){
 
 // ── FETCH ORDERS & DERIVE WIN RATE ──────────────────────
 async function fetchOrders(){
-  const d = await t212('/equity/orders');
+  const d = await api('/api/history/orders');
   if(!d) return;
   S.orders = Array.isArray(d) ? d : (d.data || []);
   deriveStats();
@@ -948,18 +822,19 @@ async function fetchOrders(){
 }
 
 function deriveStats(){
-  // Pair buys and sells to compute closed trade P&L
-  const filled = S.orders.filter(o=>o.status==='FILLED');
-  const buys  = filled.filter(o=>o.type?.includes('BUY'));
-  const sells = filled.filter(o=>o.type?.includes('SELL'));
+  // Pair buys and sells to compute closed trade P&L (Alpaca order format)
+  const filled = S.orders.filter(o=>o.status==='filled');
+  const buys   = filled.filter(o=>o.side==='buy');
+  const sells  = filled.filter(o=>o.side==='sell');
 
-  // Simple pairing by ticker
   const tradeResults = [];
   sells.forEach(sell=>{
-    const matchBuy = buys.find(b=>b.ticker===sell.ticker && new Date(b.dateCreated)<new Date(sell.dateCreated));
+    const matchBuy = buys.find(b=>b.symbol===sell.symbol && new Date(b.created_at)<new Date(sell.created_at));
     if(matchBuy){
-      const pnl = (sell.filledPrice - matchBuy.filledPrice) * Math.min(sell.quantity, matchBuy.quantity);
-      tradeResults.push(pnl);
+      const sellPrice = parseFloat(sell.filled_avg_price||0);
+      const buyPrice  = parseFloat(matchBuy.filled_avg_price||0);
+      const qty = Math.min(parseFloat(sell.filled_qty||sell.qty||0), parseFloat(matchBuy.filled_qty||matchBuy.qty||0));
+      tradeResults.push((sellPrice - buyPrice) * qty);
     }
   });
 
@@ -1010,9 +885,9 @@ function deriveStats(){
 
   // Monthly progress bar (rough estimate: daily P&L vs account start)
   if(S.account){
-    const totalVal = S.account.totalValue ?? 0;
-    const dailyPnl = S.account.result?.dailyLossPnl ?? 0;
-    const monthlyEst = dailyPnl; // only have daily; would need historical for true MTD
+    const totalVal = S.account.total ?? 0;
+    const openPnl = S.account.ppl ?? 0;
+    const monthlyEst = openPnl;
     const pct = totalVal ? (monthlyEst/totalVal*100) : 0;
     setEl('mtdR', (pct>=0?'+':'')+fn(pct,2)+'% MTD (est.)');
     document.getElementById('mtdBar').style.width = Math.min(Math.max(pct/10*100,0),100)+'%';
@@ -1028,15 +903,17 @@ function renderOrders(){
   const tbody = document.getElementById('ordBody');
   if(!orders.length){ tbody.innerHTML='<tr><td class="te" colspan="8">No orders</td></tr>'; return; }
   tbody.innerHTML = orders.map(o=>{
-    const sc = {FILLED:'bdg-ok',REJECTED:'bdg-err',PENDING:'bdg-pend'}[o.status]||'bdg-hold';
-    const tc = o.type?.includes('BUY')?'bdg-buy':'bdg-sell';
-    const total = (o.filledPrice??0)*(o.quantity??0);
+    const sc = {filled:'bdg-ok',canceled:'bdg-err',pending_new:'bdg-pend'}[o.status]||'bdg-hold';
+    const tc = o.side==='buy'?'bdg-buy':'bdg-sell';
+    const qty = parseFloat(o.filled_qty||o.qty||0);
+    const price = parseFloat(o.filled_avg_price||o.limit_price||0);
+    const total = price * qty;
     return `<tr>
-      <td style="color:var(--muted);font-size:.66rem">${o.dateCreated?new Date(o.dateCreated).toLocaleString():'—'}</td>
-      <td style="font-weight:700">${o.ticker??'—'}</td>
-      <td><span class="bdg ${tc}">${o.type??'—'}</span></td>
-      <td>${fn(o.quantity??0,0)}</td>
-      <td>${fmtCur(o.filledPrice??o.limitPrice??0)}</td>
+      <td style="color:var(--muted);font-size:.66rem">${o.created_at?new Date(o.created_at).toLocaleString():'—'}</td>
+      <td style="font-weight:700">${o.symbol??'—'}</td>
+      <td><span class="bdg ${tc}">${o.side?.toUpperCase()??'—'}</span></td>
+      <td>${fn(qty,2)}</td>
+      <td>${fmtCur(price)}</td>
       <td>${total?fmtCur(total):'—'}</td>
       <td><span class="bdg ${sc}">${o.status??'—'}</span></td>
       <td style="font-size:.65rem;color:var(--muted)">${o._reason??'—'}</td>
@@ -1046,37 +923,34 @@ function renderOrders(){
 
 // ── PLACE ORDER ──────────────────────────
 async function placeTrade(ticker, dir, qty, reason='Auto', limitPrice=null){
-  if(!S.apiKey){ log('No API key','err'); return null; }
-  const ep = dir==='BUY'
-    ? (limitPrice ? '/equity/orders/limit' : '/equity/orders/market')
-    : '/equity/orders/market';
-  const body = { ticker, quantity:qty, timeValidity:'DAY' };
-  if(limitPrice) body.limitPrice = limitPrice;
+  const ep = dir==='BUY' ? '/api/orders/buy' : '/api/orders/sell';
+  const body = { ticker, quantity: qty };
   log(`Placing ${dir} ${ticker} ×${qty} [${S.mode.toUpperCase()}]`,'ok');
-  const res = await t212(ep,'POST',body);
+  const res = await api(ep,'POST',body);
   if(res){
     S.todayTrades++;
+    // Add optimistic local entry (Alpaca format)
     const order = {
-      ticker, type:`MARKET_${dir}`, quantity:qty,
-      filledPrice: res.filledPrice ?? limitPrice ?? 0,
-      status: res.status ?? 'FILLED',
-      dateCreated: new Date().toISOString(),
+      symbol: ticker, side: dir.toLowerCase(), qty: String(qty),
+      filled_avg_price: String(res.filled_avg_price ?? 0),
+      status: res.status ?? 'pending_new',
+      created_at: new Date().toISOString(),
       _reason: reason,
     };
     S.orders.unshift(order);
     renderOrders();
     log(`${dir} ${ticker} ×${qty} — ${res.status??'submitted'}`,'ok');
-    if(dir==='BUY' && res.filledPrice) setStopLoss(ticker, qty, res.filledPrice*(1-getSL()/100));
-    addRecent({ticker,dir,qty,price:res.filledPrice??0,status:res.status??'FILLED',reason});
+    addRecent({ticker,dir,qty,price:parseFloat(res.filled_avg_price??0),status:res.status??'pending',reason});
     deriveStats();
     return res;
   }
   return null;
 }
 
-async function setStopLoss(ticker,qty,price){
-  const res = await t212('/equity/orders/stop','POST',{ticker,quantity:qty,stopPrice:+price.toFixed(2),timeValidity:'GTC'});
-  if(res) log(`Stop loss set: ${ticker} @ ${fmtCur(price)}`,'ok');
+async function setStopLoss(ticker, qty, price){
+  // Alpaca stop orders can be placed via /api/orders/buy with type=stop
+  // For now log a reminder — full bracket order support coming
+  log(`Reminder: set a stop loss manually for ${ticker} at ${fmtCur(price)}`,'warn');
 }
 async function closePos(ticker,qty){ confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close')); }
 function manOrder(dir){
@@ -1091,7 +965,7 @@ function updatePrev(){
   const sym=document.getElementById('mSym').value.toUpperCase();
   const qty=document.getElementById('mQty').value;
   document.getElementById('oPrev').innerHTML = sym
-    ? `<div>Symbol: <strong style="color:var(--accent)">${sym}</strong></div><div>Qty: <strong>${qty}</strong></div><div>Stop Loss: <strong style="color:var(--red)">−${getSL()}%</strong></div><div>Take Profit: <strong style="color:var(--green)">+${getTP()}%</strong></div><div style="margin-top:6px;color:var(--warn);font-size:.65rem">Trade 212 mode: ${S.mode.toUpperCase()}</div>`
+    ? `<div>Symbol: <strong style="color:var(--accent)">${sym}</strong></div><div>Qty: <strong>${qty}</strong></div><div>Stop Loss: <strong style="color:var(--red)">−${getSL()}%</strong></div><div>Take Profit: <strong style="color:var(--green)">+${getTP()}%</strong></div><div style="margin-top:6px;color:var(--warn);font-size:.65rem">Alpaca ${S.mode.toUpperCase()} mode</div>`
     : 'Fill in the form to see preview.';
 }
 function renderQClose(){
@@ -1668,19 +1542,19 @@ function toggleEngine(){
   S.engineOn=!S.engineOn;
   const btn=document.getElementById('engBtn'),dot=document.getElementById('engDot'),lbl=document.getElementById('engLbl');
   if(S.engineOn){
-    if(!S.apiKey){log('Configure API key first','err');S.engineOn=false;return;}
+    if(!S.connected){log('Backend not connected — ensure server.py is running','err');S.engineOn=false;return;}
     btn.textContent='■ Stop Engine';btn.className='btn b-red b-sm';
     dot.className='dot dg';lbl.textContent='ENGINE LIVE';lbl.style.color='var(--green)';
-    setEl('sbEng','RUNNING');document.getElementById('sbEng').style.color='var(--green)';
-    log('Engine started','ok');
+    setEl('sbNext','ON');document.getElementById('sbNext').style.color='var(--green)';
+    log('Auto-execute enabled — trades will be placed on qualifying signals','ok');
     refreshAll();
     startTimer();
   }else{
     clearInterval(S.engTimer);clearInterval(S.cdTimer);
-    btn.textContent='▶ Start Engine';btn.className='btn b-eng b-sm';
-    dot.className='dot dm';lbl.textContent='ENGINE OFF';lbl.style.color='var(--muted)';
-    setEl('sbEng','STOPPED');document.getElementById('sbEng').style.color='var(--muted)';
-    setEl('sbNext','—');log('Engine stopped','warn');
+    btn.textContent='▶ Enable Auto-Trade';btn.className='btn b-eng b-sm';
+    dot.className='dot dm';lbl.textContent='SCANNING (no auto-trade)';lbl.style.color='var(--accent)';
+    setEl('sbNext','OFF');document.getElementById('sbNext').style.color='var(--muted)';
+    log('Auto-execute off — scans still run, no orders placed','warn');
   }
 }
 
@@ -1705,52 +1579,39 @@ function startTimer(){
 function openM(id){document.getElementById(id).classList.add('open');loadCfg();}
 function closeM(id){document.getElementById(id).classList.remove('open');}
 function loadCfg(){
-  document.getElementById('c-t212').value=S.apiKey;
   document.getElementById('c-claude').value=S.claudeKey;
   document.getElementById('c-news').value=S.newsKey;
-  document.getElementById('c-mode').value=S.mode;
   document.getElementById('c-backend').value=localStorage.getItem('backendUrl')||'';
 }
 function saveConfig(){
-  S.apiKey=document.getElementById('c-t212').value.trim();
   S.claudeKey=document.getElementById('c-claude').value.trim();
   S.newsKey=document.getElementById('c-news').value.trim();
-  S.mode=document.getElementById('c-mode').value;
   const backend=document.getElementById('c-backend').value.trim();
-  localStorage.setItem('t212k',S.apiKey);
   localStorage.setItem('claudek',S.claudeKey);
   localStorage.setItem('newsk',S.newsKey);
-  localStorage.setItem('t212m',S.mode);
   if(backend) localStorage.setItem('backendUrl',backend);
   else localStorage.removeItem('backendUrl');
-  setEl('sbMode',S.mode.toUpperCase());
-  updateConnBadge(!!S.apiKey);
   closeM('cfgM');
-  log(`Config saved — Mode: ${S.mode.toUpperCase()}, Backend: ${backend||'auto-detect'}`,S.apiKey?'ok':'err');
-  if(S.apiKey||backend) fetchAccount();
+  log(`Settings saved — Backend: ${backend||'auto-detect'}`,'ok');
+  if(backend) fetchAccount();
 }
 async function testConn(){
-  const key=document.getElementById('c-t212').value.trim();
-  const mode=document.getElementById('c-mode').value;
-  if(!key){showCT('err','Enter API key first');return;}
-  showCT('info','Testing connection...');
+  showCT('info','Testing backend...');
   try{
-    const r=await fetch(BASE[mode]+'/equity/account/info',{headers:{Authorization:key}});
-    if(r.ok){const d=await r.json();showCT('ok',`✓ Connected! Account: ${d.email||'OK'} — ${d.currencyCode||'EUR'} — ${mode.toUpperCase()} mode`);}
-    else showCT('err',`✗ HTTP ${r.status} — Check API key and mode selection`);
-  }catch(e){showCT('warn','Network error — CORS may block browser → direct API calls. Save and use the Engine instead.');}
+    const r=await fetch(`${getBackendUrl()}/api/health`);
+    if(r.ok){const d=await r.json();showCT('ok',`✓ Connected — Alpaca ${d.mode?.toUpperCase()} — keys ${d.key_configured?'✓ loaded':'✗ NOT SET in .env'}`);}
+    else showCT('err',`✗ Backend HTTP ${r.status}`);
+  }catch(e){showCT('err',`Cannot reach backend: ${e.message} — Is server.py running?`);}
 }
 function showCT(t,msg){const el=document.getElementById('connTest');el.style.display='block';el.className=`al al-${t==='ok'?'ok':t==='info'?'info':'err'}`;el.textContent=msg;}
 function updateConnBadge(ok){
-  const dot=document.getElementById('connDot'),lbl=document.getElementById('connLbl'),pill=document.getElementById('connPill');
+  const dot=document.getElementById('connDot'),lbl=document.getElementById('connLbl');
   if(ok){
     dot.className='dot '+(S.mode==='live'?'dg':'dy');
-    lbl.textContent=S.mode==='live'?'LIVE':'DEMO';
+    lbl.textContent=S.mode==='live'?'LIVE':'PAPER';
     lbl.style.color=S.mode==='live'?'var(--green)':'var(--warn)';
     const mp=document.getElementById('modePill');
-    mp.style.display='flex';
-    document.getElementById('modeLbl').textContent=S.mode.toUpperCase();
-    document.getElementById('modeLbl').className=S.mode==='live'?'bdg bdg-live':'bdg bdg-paper';
+    if(mp){mp.style.display='flex';document.getElementById('modeLbl').textContent=S.mode.toUpperCase();}
   }else{
     dot.className='dot dr';lbl.textContent='DISCONNECTED';lbl.style.color='var(--red)';
   }
@@ -1838,8 +1699,6 @@ function nav(id,el){
   if(id==='port'){fetchPositions();}
   if(id==='ord'){fetchOrders();}
   if(id==='logs'){renderLogs();}
-  if(id==='crypto'){loadCryptoPrices();}
-  if(id==='commodity'){loadCommodityPrices();}
 }
 
 // ═══════════════════════════════════════
@@ -1872,24 +1731,16 @@ async function loadConfigFromBackend(){
       const res = await fetch(`${origin}/api/config`, {signal: AbortSignal.timeout(3000)});
       if(res.ok){
         const cfg = await res.json();
-        if(cfg.api_key){
-          S.apiKey   = cfg.api_key;
-          S.mode     = cfg.mode || 'demo';
-          // Also store in localStorage as fallback
-          localStorage.setItem('t212k', S.apiKey);
-          localStorage.setItem('t212m', S.mode);
-          log(`Auto-connected from backend — Mode: ${S.mode.toUpperCase()}`,'ok');
+        if(cfg.key_configured){
+          S.connected = true;
+          S.mode      = cfg.mode || 'paper';
+          log(`Auto-connected — Alpaca ${S.mode.toUpperCase()}`,'ok');
           return true;
         }
       }
     }catch(e){
       // Try next origin
     }
-  }
-  // Fall back to localStorage if backend unreachable
-  if(S.apiKey){
-    log(`Using cached API key — Mode: ${S.mode.toUpperCase()}`,'ok');
-    return true;
   }
   return false;
 }
@@ -1908,17 +1759,16 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   // Try to load API key from backend automatically
   const connected = await loadConfigFromBackend();
 
-  setEl('sbMode', S.mode.toUpperCase());
+  if(document.getElementById('sbMode')) setEl('sbMode', S.mode.toUpperCase());
 
-  if(connected && S.apiKey){
+  if(connected){
     updateConnBadge(true);
-    // Auto-start data load — no manual config needed
     await fetchAccount();
     await fetchPositions();
     await fetchOrders();
     log('All data loaded successfully','ok');
   }else{
-    log('Backend not reachable — click ⚙ Configure to enter API key manually','warn');
+    log('Backend not reachable — ensure server.py is running and .env has Alpaca keys','warn');
     ['m-wr','m-avg','m-sl'].forEach(id=>{
       setEl(id,'—');
       document.getElementById(id).className='mval nu';
@@ -1935,560 +1785,6 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   );
 });
 
-// ═══════════════════════════════════════
-//  CRYPTO SCANNER ENGINE
-// ═══════════════════════════════════════
-var BTC_TREND = 'neutral';
-var FEAR_GREED = 50;
-var CRYPTO_RISK = {stopLoss:0.12, takeProfit:0.35, maxPosition:0.08, minScore:60, rsiOverbought:80};
-
-var CRYPTO_UNIVERSE = {
-  large:[
-    {id:'bitcoin',sym:'BTC',name:'Bitcoin'},{id:'ethereum',sym:'ETH',name:'Ethereum'},
-    {id:'binancecoin',sym:'BNB',name:'BNB'},{id:'solana',sym:'SOL',name:'Solana'},
-    {id:'ripple',sym:'XRP',name:'XRP'},{id:'cardano',sym:'ADA',name:'Cardano'},
-    {id:'avalanche-2',sym:'AVAX',name:'Avalanche'},{id:'dogecoin',sym:'DOGE',name:'Dogecoin'},
-    {id:'chainlink',sym:'LINK',name:'Chainlink'},{id:'polkadot',sym:'DOT',name:'Polkadot'},
-    {id:'shiba-inu',sym:'SHIB',name:'Shiba Inu'},{id:'litecoin',sym:'LTC',name:'Litecoin'},
-    {id:'tron',sym:'TRX',name:'TRON'},{id:'uniswap',sym:'UNI',name:'Uniswap'}
-  ],
-  mid:[
-    {id:'near',sym:'NEAR',name:'NEAR Protocol'},{id:'aptos',sym:'APT',name:'Aptos'},
-    {id:'sui',sym:'SUI',name:'Sui'},{id:'arbitrum',sym:'ARB',name:'Arbitrum'},
-    {id:'optimism',sym:'OP',name:'Optimism'},{id:'injective-protocol',sym:'INJ',name:'Injective'},
-    {id:'celestia',sym:'TIA',name:'Celestia'},{id:'pendle',sym:'PENDLE',name:'Pendle'},
-    {id:'jupiter-exchange-solana',sym:'JUP',name:'Jupiter'},{id:'bittensor',sym:'TAO',name:'Bittensor'}
-  ],
-  defi:[
-    {id:'aave',sym:'AAVE',name:'Aave'},{id:'maker',sym:'MKR',name:'Maker'},
-    {id:'lido-dao',sym:'LDO',name:'Lido'},{id:'curve-dao-token',sym:'CRV',name:'Curve'},
-    {id:'uniswap',sym:'UNI',name:'Uniswap'},{id:'raydium',sym:'RAY',name:'Raydium'},
-    {id:'gmx',sym:'GMX',name:'GMX'},{id:'dydx',sym:'DYDX',name:'dYdX'}
-  ],
-  ai:[
-    {id:'render-token',sym:'RENDER',name:'Render'},{id:'fetch-ai',sym:'FET',name:'Fetch.ai'},
-    {id:'singularitynet',sym:'AGIX',name:'SingularityNET'},{id:'bittensor',sym:'TAO',name:'Bittensor'},
-    {id:'akash-network',sym:'AKT',name:'Akash'},{id:'ocean-protocol',sym:'OCEAN',name:'Ocean'}
-  ],
-  small:[
-    {id:'bonk',sym:'BONK',name:'Bonk'},{id:'dogwifcoin',sym:'WIF',name:'dogwifhat'},
-    {id:'pepe',sym:'PEPE',name:'Pepe'},{id:'floki',sym:'FLOKI',name:'Floki'},
-    {id:'notcoin',sym:'NOT',name:'Notcoin'},{id:'book-of-meme',sym:'BOME',name:'BOME'}
-  ]
-};
-
-async function fetchBTCTrend(){
-  try{
-    var url='https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30&interval=daily';
-    var r=await fetch(url,{signal:AbortSignal.timeout(8000)});
-    var d=await r.json();
-    var prices=d.prices.map(function(p){return p[1];});
-    var ema7=calcEMA(prices,7);
-    var ema21=calcEMA(prices,21);
-    var v7=ema7[ema7.length-1],v21=ema21[ema21.length-1];
-    var price=prices[prices.length-1];
-    if(v7>v21&&price>v7) return 'bull';
-    if(v7<v21&&price<v7) return 'bear';
-    return 'neutral';
-  }catch(e){return 'neutral';}
-}
-
-async function fetchFearGreed(){
-  try{
-    var r=await fetch('https://api.alternative.me/fng/?limit=1');
-    var d=await r.json();
-    return parseInt(d.data[0].value||50);
-  }catch(e){return 50;}
-}
-
-function cryptoScore(coin,closes){
-  var chg24=coin.price_change_percentage_24h||0;
-  var chg7d=coin.price_change_percentage_7d_in_currency||0;
-  var volRatio=(coin.total_volume||0)/(coin.market_cap||1);
-  var athPct=coin.ath_change_percentage||-100;
-  var score=0;
-  // Volume (30%)
-  if(volRatio>0.5)score+=30;else if(volRatio>0.3)score+=25;else if(volRatio>0.15)score+=18;else if(volRatio>0.08)score+=10;else score+=5;
-  // BTC trend (25%)
-  if(BTC_TREND==='bull')score+=25;else if(BTC_TREND==='neutral')score+=12;else score+=0;
-  // RSI (20%)
-  if(closes&&closes.length>=14){var rsi=calcRSI(closes);if(rsi){if(rsi>=55&&rsi<=75)score+=20;else if(rsi>=45&&rsi<55)score+=14;else if(rsi>75&&rsi<=80)score+=10;else if(rsi>80)score+=4;else if(rsi<35)score+=16;else score+=8;}}else score+=10;
-  // Momentum (15%)
-  var mom=0;
-  if(chg24>10)mom+=8;else if(chg24>5)mom+=6;else if(chg24>2)mom+=4;else if(chg24>0)mom+=2;
-  if(chg7d>20)mom+=7;else if(chg7d>10)mom+=5;else if(chg7d>5)mom+=3;else if(chg7d>0)mom+=1;
-  score+=Math.min(15,Math.max(0,mom));
-  // Fear&Greed (10%)
-  if(FEAR_GREED>=25&&FEAR_GREED<=55)score+=10;else if(FEAR_GREED>55&&FEAR_GREED<=70)score+=7;else if(FEAR_GREED>70)score+=3;else score+=8;
-  return Math.min(100,Math.max(0,score));
-}
-
-function detectCryptoPatterns(coin,closes){
-  var pats=[];
-  var chg24=coin.price_change_percentage_24h||0;
-  var chg7d=coin.price_change_percentage_7d_in_currency||0;
-  var volR=(coin.total_volume||0)/(coin.market_cap||1);
-  var athPct=coin.ath_change_percentage||-100;
-  if(chg24>5&&volR>0.15)pats.push({type:'MOMENTUM',color:'var(--green)'});
-  else if(chg24>2&&volR>0.08)pats.push({type:'MOMENTUM',color:'var(--accent)'});
-  if(athPct>-5&&volR>0.1)pats.push({type:'BREAKOUT',color:'var(--warn)'});
-  if(chg7d>15&&chg24>0)pats.push({type:'UPTREND',color:'var(--accent2)'});
-  if(closes&&closes.length>=14){var rsi=calcRSI(closes);if(rsi&&rsi<35&&chg24>0)pats.push({type:'OVERSOLD',color:'var(--purple)'}); }
-  return pats;
-}
-
-async function fetchCryptoOHLC(coinId,days){
-  try{
-    var url='https://api.coingecko.com/api/v3/coins/'+coinId+'/ohlc?vs_currency=usd&days='+(days||30);
-    var r=await fetch(url,{signal:AbortSignal.timeout(8000)});
-    var d=await r.json();
-    return d.map(function(x){return x[4];}).filter(function(v){return v>0;});
-  }catch(e){return null;}
-}
-
-async function loadCryptoPrices(){
-  document.getElementById('crHeatmap').innerHTML='<div style="color:var(--muted);font-size:.72rem;font-family:var(--mono);grid-column:span 5"><span class="spin"></span> Loading...</div>';
-  try{
-    var fgR=await fetch('https://api.alternative.me/fng/?limit=1');
-    var fgD=await fgR.json();
-    var fg=fgD.data[0];
-    setEl('cr-fg',fg.value);
-    setEl('cr-fg-lbl',fg.value_classification);
-  }catch(e){}
-  var ids=Object.values(CRYPTO_UNIVERSE).flat().map(function(c){return c.id;}).join(',');
-  try{
-    var url='https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids='+ids+'&order=market_cap_desc&per_page=250&price_change_percentage=24h,7d';
-    var r=await fetch(url,{signal:AbortSignal.timeout(15000)});
-    var coins=await r.json();
-    var btc=coins.find(function(c){return c.symbol==='btc';});
-    var eth=coins.find(function(c){return c.symbol==='eth';});
-    if(btc){setEl('cr-btc','$'+fn(btc.current_price,0));setEl('cr-btc-chg',(btc.price_change_percentage_24h>=0?'+':'')+fn(btc.price_change_percentage_24h,2)+'% 24h');document.getElementById('cr-btc').className='mv '+(btc.price_change_percentage_24h>=0?'up':'down');}
-    if(eth){setEl('cr-eth','$'+fn(eth.current_price,2));setEl('cr-eth-chg',(eth.price_change_percentage_24h>=0?'+':'')+fn(eth.price_change_percentage_24h,2)+'% 24h');document.getElementById('cr-eth').className='mv '+(eth.price_change_percentage_24h>=0?'up':'down');}
-    document.getElementById('crHeatmap').innerHTML=coins.slice(0,20).map(function(c){
-      var chg=c.price_change_percentage_24h||0;
-      var bg=chg>5?'rgba(34,197,94,.15)':chg>0?'rgba(34,197,94,.07)':chg<-5?'rgba(244,63,94,.15)':'rgba(244,63,94,.07)';
-      var col=chg>=0?'var(--green)':'var(--red)';
-      return '<div style="background:'+bg+';border:1px solid var(--border);border-radius:7px;padding:8px;text-align:center"><div style="font-size:.7rem;font-weight:800;font-family:var(--mono)">'+c.symbol.toUpperCase()+'</div><div style="font-size:.68rem;color:var(--muted2);margin-top:2px">$'+fmtPrice(c.current_price)+'</div><div style="font-size:.65rem;color:'+col+';margin-top:2px">'+(chg>=0?'+':'')+fn(chg,2)+'%</div></div>';
-    }).join('');
-    log('Crypto prices loaded','ok');
-  }catch(e){document.getElementById('crHeatmap').innerHTML='<div style="color:var(--red);font-size:.72rem;grid-column:span 5">CoinGecko rate limit -- wait 1 min and retry</div>';}
-}
-
-async function runCryptoScan(){
-  var filter=document.getElementById('cr-filter')?document.getElementById('cr-filter').value:'all';
-  var universe=filter==='all'?Object.values(CRYPTO_UNIVERSE).flat():CRYPTO_UNIVERSE[filter]||[];
-  document.getElementById('crScanBtn').textContent='Scanning...';
-  document.getElementById('crScanBtn').disabled=true;
-  document.getElementById('crProgress').style.display='block';
-  document.getElementById('crBody').innerHTML='<tr><td class="te" colspan="11"><span class="spin"></span> Fetching BTC trend...</td></tr>';
-  var results=await Promise.all([fetchBTCTrend(),fetchFearGreed()]);
-  BTC_TREND=results[0];FEAR_GREED=results[1];
-  log('BTC: '+BTC_TREND+' | F&G: '+FEAR_GREED,'ok');
-  setEl('cr-fg',FEAR_GREED);
-  var ids=universe.map(function(c){return c.id;}).join(',');
-  var coins=[];
-  try{
-    var url='https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids='+ids+'&order=market_cap_desc&per_page=250&price_change_percentage=24h,7d';
-    var r=await fetch(url,{signal:AbortSignal.timeout(15000)});
-    coins=await r.json();
-  }catch(e){
-    document.getElementById('crScanBtn').textContent='Scan Crypto';
-    document.getElementById('crScanBtn').disabled=false;
-    log('CoinGecko error -- rate limited','err');
-    return;
-  }
-  var winners=[];
-  var scanned=0;
-  for(var ci=0;ci<coins.length;ci++){
-    var coin=coins[ci];
-    var meta=universe.find(function(u){return u.id===coin.id;});
-    if(!meta){scanned++;continue;}
-    var closes=null;
-    if(Math.abs(coin.price_change_percentage_24h||0)>2){
-      closes=await fetchCryptoOHLC(coin.id,30);
-      await new Promise(function(r){setTimeout(r,300);});
-    }
-    var score=cryptoScore(coin,closes);
-    var rsi=closes?calcRSI(closes):null;
-    var pats=detectCryptoPatterns(coin,closes);
-    var minScore=BTC_TREND==='bear'?70:CRYPTO_RISK.minScore;
-    if(score>=minScore&&pats.length>0){
-      winners.push({coin:coin,meta:meta,score:score,rsi:rsi,patterns:pats});
-      winners.sort(function(a,b){return b.score-a.score;});
-      renderCryptoResults(winners.slice(0,20));
-    }
-    scanned++;
-    var pct=Math.round(scanned/coins.length*100);
-    document.getElementById('crBar').style.width=pct+'%';
-    document.getElementById('crCount').textContent=scanned+'/'+coins.length;
-    document.getElementById('crStatus').textContent='Scanning '+meta.sym+'... ('+winners.length+' found)';
-    document.getElementById('crScanned').textContent=scanned;
-    document.getElementById('crBullish').textContent=winners.filter(function(w){return w.patterns.some(function(p){return p.type==='MOMENTUM'||p.type==='UPTREND';});}).length;
-    document.getElementById('crBreakouts').textContent=winners.filter(function(w){return w.patterns.some(function(p){return p.type==='BREAKOUT';});}).length;
-    document.getElementById('crAvg').textContent=winners.length?Math.round(winners.reduce(function(a,b){return a+b.score;},0)/winners.length):0;
-    if(winners.length>=30)break;
-  }
-  winners.sort(function(a,b){return b.score-a.score;});
-  renderCryptoResults(winners.slice(0,20));
-  renderCryptoReasons(winners.slice(0,3));
-  document.getElementById('crProgress').style.display='none';
-  document.getElementById('crScanBtn').textContent='Scan Crypto';
-  document.getElementById('crScanBtn').disabled=false;
-  log('Crypto scan done -- '+scanned+' scanned, '+winners.length+' picks','ok');
-}
-
-function renderCryptoResults(winners){
-  if(!winners.length)return;
-  var btcBanner=BTC_TREND==='bear'?'<tr><td colspan="11" style="background:rgba(244,63,94,.05);padding:7px;font-size:.7rem;font-family:var(--mono);color:var(--red);text-align:center">BTC DOWNTREND -- higher threshold, smaller positions | SL:'+Math.round(CRYPTO_RISK.stopLoss*100)+'% TP:'+Math.round(CRYPTO_RISK.takeProfit*100)+'%</td></tr>':'';
-  var rows='';
-  for(var i=0;i<winners.length;i++){
-    var w=winners[i];
-    var c=w.coin;
-    var chg24=c.price_change_percentage_24h||0;
-    var volR=((c.total_volume||0)/(c.market_cap||1)*100).toFixed(1);
-    var pats=w.patterns.map(function(p){return '<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:'+p.color+';border:1px solid '+p.color+'40;margin-right:2px">'+p.type+'</span>';}).join('');
-    var sig=w.score>=75?'STRONG BUY':w.score>=60?'BUY':'WATCH';
-    var sigCls=w.score>=60?'bdg-buy':'bdg-hold';
-    var medal=i===0?'[1]':i===1?'[2]':i===2?'[3]':'';
-    var rsiCol=w.rsi?w.rsi>75?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)';
-    rows+='<tr style="'+(i<3?'background:rgba(0,200,150,.03)':'')+'">'
-      +'<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">'+(i+1)+'</td>'
-      +'<td style="font-weight:800">'+w.meta.sym+' '+medal+'</td>'
-      +'<td style="font-size:.75rem;color:var(--muted2)">'+w.meta.name+'</td>'
-      +'<td style="font-family:var(--mono)">$'+fmtPrice(c.current_price)+'</td>'
-      +'<td class="'+(chg24>=0?'up':'down')+'" style="font-family:var(--mono)">'+(chg24>=0?'+':'')+fn(chg24,2)+'%</td>'
-      +'<td><div style="display:flex;align-items:center;gap:5px"><div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+w.score+'%;background:var(--green)"></div></div><span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">'+w.score+'</span></div></td>'
-      +'<td style="font-family:var(--mono);color:'+rsiCol+'">'+(w.rsi?fn(w.rsi,1):'--')+'</td>'
-      +'<td>'+pats+'</td>'
-      +'<td style="font-family:var(--mono);font-size:.7rem;color:var(--muted2)">'+volR+'%</td>'
-      +'<td><span class="bdg '+sigCls+'">'+sig+'</span></td>'
-      +'<td><button class="btn b-out b-xs" onclick="openCG(this)" data-id="'+c.id+'">CoinGecko</button></td>'
-      +'</tr>';
-  }
-  document.getElementById('crBody').innerHTML=btcBanner+rows;
-}
-
-function renderCryptoReasons(winners){
-  if(!winners.length)return;
-  document.getElementById('crReasonCard').style.display='block';
-  document.getElementById('crReasons').innerHTML=winners.map(function(w,i){
-    var c=w.coin;
-    var chg24=c.price_change_percentage_24h||0;
-    var athChg=c.ath_change_percentage||0;
-    var sl=fmtPrice(c.current_price*(1-CRYPTO_RISK.stopLoss));
-    var tp=fmtPrice(c.current_price*(1+CRYPTO_RISK.takeProfit));
-    var pts=[];
-    w.patterns.forEach(function(p){
-      if(p.type==='MOMENTUM')pts.push('Strong 24h momentum +'+fn(chg24,2)+'% with volume spike');
-      if(p.type==='BREAKOUT')pts.push('Near ATH ('+fn(athChg,1)+'%) -- breakout territory');
-      if(p.type==='UPTREND')pts.push('7-day uptrend confirmed -- sustained buying');
-      if(p.type==='OVERSOLD')pts.push('RSI '+fn(w.rsi,1)+' -- oversold, mean reversion likely');
-    });
-    if(BTC_TREND==='weak')pts.push('USD weakening -- tailwind for '+w.meta.name);
-    return '<div style="background:var(--bg3);border:1px solid '+(i===0?'rgba(0,200,150,.3)':'var(--border)')+';border-radius:8px;padding:.85rem;margin-bottom:7px">'
-      +'<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">'
-      +'<span style="font-size:.9rem;font-weight:700">'+w.meta.sym+'</span>'
-      +'<span style="font-size:.75rem;color:var(--muted2)">'+w.meta.name+'</span>'
-      +'<span class="bdg bdg-buy">'+(i===0?'#1 PICK':i===1?'#2 PICK':'#3 PICK')+'</span>'
-      +'<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">'+w.score+'/100</strong></span>'
-      +'<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $'+fmtPrice(c.current_price)+' | SL $'+sl+' | TP $'+tp+'</span>'
-      +'</div>'
-      +'<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">'+(pts.join('. ')||'Composite crypto score.')+'</div>'
-      +'<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:'+w.score+'%;background:var(--green)"></div></div>'
-      +'<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">SL '+Math.round(CRYPTO_RISK.stopLoss*100)+'% | TP '+Math.round(CRYPTO_RISK.takeProfit*100)+'% | Max pos '+Math.round(CRYPTO_RISK.maxPosition*100)+'%</div>'
-      +'</div>';
-  }).join('');
-}
-
-function fmtPrice(p){
-  if(!p)return '--';
-  if(p>=1000)return p.toLocaleString('en-US',{maximumFractionDigits:0});
-  if(p>=1)return fn(p,2);
-  if(p>=0.01)return fn(p,4);
-  return p.toFixed(8).replace(/\.?0+$/,'');
-}
-
-// ═══════════════════════════════════════
-//  COMMODITY SCANNER ENGINE
-// ═══════════════════════════════════════
-var USD_TREND = 'neutral';
-var COMMODITY_RISK = {stopLoss:0.07, takeProfit:0.15, maxPosition:0.15, minScore:65};
-
-var COMMODITY_UNIVERSE = {
-  metals:[
-    {sym:'GLD',name:'Gold',full:'SPDR Gold Shares',cat:'Precious Metal',usdCorr:-0.8},
-    {sym:'SLV',name:'Silver',full:'iShares Silver Trust',cat:'Precious Metal',usdCorr:-0.75},
-    {sym:'GDX',name:'Gold Miners',full:'VanEck Gold Miners ETF',cat:'Miners',usdCorr:-0.7},
-    {sym:'GDXJ',name:'Jr Gold Miners',full:'VanEck Junior Gold Miners',cat:'Miners',usdCorr:-0.65},
-    {sym:'PPLT',name:'Platinum',full:'Aberdeen Platinum ETF',cat:'Precious Metal',usdCorr:-0.6}
-  ],
-  energy:[
-    {sym:'USO',name:'Crude Oil',full:'US Oil Fund',cat:'Energy',usdCorr:-0.5},
-    {sym:'BNO',name:'Brent Oil',full:'US Brent Oil Fund',cat:'Energy',usdCorr:-0.5},
-    {sym:'UNG',name:'Natural Gas',full:'US Natural Gas Fund',cat:'Energy',usdCorr:-0.3},
-    {sym:'XLE',name:'Energy Sector',full:'Energy Select SPDR',cat:'Energy',usdCorr:-0.4},
-    {sym:'OIH',name:'Oil Services',full:'VanEck Oil Services ETF',cat:'Energy',usdCorr:-0.35}
-  ],
-  agriculture:[
-    {sym:'WEAT',name:'Wheat',full:'Teucrium Wheat Fund',cat:'Agriculture',usdCorr:-0.4},
-    {sym:'CORN',name:'Corn',full:'Teucrium Corn Fund',cat:'Agriculture',usdCorr:-0.35},
-    {sym:'SOYB',name:'Soybeans',full:'Teucrium Soybean Fund',cat:'Agriculture',usdCorr:-0.35},
-    {sym:'JO',name:'Coffee',full:'iPath Coffee ETN',cat:'Agriculture',usdCorr:-0.25},
-    {sym:'MOO',name:'Agribusiness',full:'VanEck Agribusiness ETF',cat:'Agriculture',usdCorr:-0.2}
-  ],
-  industrial:[
-    {sym:'CPER',name:'Copper',full:'US Copper Index Fund',cat:'Industrial',usdCorr:-0.6},
-    {sym:'DBB',name:'Base Metals',full:'Invesco DB Base Metals',cat:'Industrial',usdCorr:-0.55},
-    {sym:'LIT',name:'Lithium',full:'Global X Lithium ETF',cat:'Industrial',usdCorr:-0.25},
-    {sym:'SLX',name:'Steel',full:'VanEck Steel ETF',cat:'Industrial',usdCorr:-0.4},
-    {sym:'REMX',name:'Rare Earth',full:'VanEck Rare Earth ETF',cat:'Industrial',usdCorr:-0.3}
-  ]
-};
-
-async function fetchUSDTrend(){
-  try{
-    var data=await fetchPrices('UUP',30);
-    if(!data)return 'neutral';
-    var c=data.closes;
-    var e20=calcEMA(c,20);
-    var price=c[c.length-1];
-    var v20=e20[e20.length-1];
-    var chg=((price-c[0])/c[0])*100;
-    if(price>v20&&chg>1)return 'strong';
-    if(price<v20&&chg<-1)return 'weak';
-    return 'neutral';
-  }catch(e){return 'neutral';}
-}
-
-function commodityScore(data,usdTrend,usdCorr){
-  var closes=data.closes;
-  var price=closes[closes.length-1];
-  var e50=calcEMA(closes,50);
-  var e200=calcEMA(closes,200);
-  var rsi=calcRSI(closes);
-  var macd=calcMACD(closes);
-  var avgVol=data.vols.slice(-20).reduce(function(a,b){return a+b;},0)/20;
-  var lastVol=data.vols[data.vols.length-1];
-  var v50=e50[e50.length-1];
-  var v200=e200[e200.length-1];
-  var score=0;
-  // USD correlation (25%)
-  if(usdTrend==='weak')score+=usdCorr<-0.5?25:18;
-  else if(usdTrend==='neutral')score+=12;
-  else score+=usdCorr<-0.7?2:6;
-  // EMA trend (25%)
-  if(v50&&v200){
-    if(price>v50&&v50>v200)score+=25;
-    else if(price>v50&&v50<v200)score+=15;
-    else if(price<v50&&v50>v200)score+=10;
-    else score+=3;
-  }
-  // RSI (20%)
-  if(rsi){
-    if(rsi>=45&&rsi<=65)score+=20;
-    else if(rsi>=35&&rsi<45)score+=14;
-    else if(rsi>65&&rsi<=75)score+=10;
-    else if(rsi>75)score+=3;
-    else score+=12;
-  }
-  // Volume (15%)
-  var vR=lastVol/(avgVol||1);
-  if(vR>2)score+=15;else if(vR>1.5)score+=10;else if(vR>1.2)score+=7;else score+=4;
-  // MACD (15%)
-  if(macd.lm>0&&macd.hist>0)score+=15;else if(macd.hist>0)score+=9;else score+=3;
-  return Math.min(100,Math.max(0,score));
-}
-
-function detectCommodityPatterns(closes,highs,vols){
-  var pats=[];
-  var price=closes[closes.length-1];
-  var e50=calcEMA(closes,50);
-  var e200=calcEMA(closes,200);
-  var v50=e50[e50.length-1],v200=e200[e200.length-1];
-  var pv50=e50[e50.length-2],pv200=e200[e200.length-2];
-  var avgVol=vols.slice(-20).reduce(function(a,b){return a+b;},0)/20;
-  var lastVol=vols[vols.length-1];
-  var high52=Math.max.apply(null,highs.slice(-252)||highs);
-  var rsi=calcRSI(closes);
-  var macd=calcMACD(closes);
-  if(v50&&v200&&pv50&&pv200&&v50>v200&&pv50<=pv200)pats.push({type:'GOLDEN CROSS',color:'var(--purple)'});
-  if(v50&&v200&&price>v50&&v50>v200)pats.push({type:'UPTREND',color:'var(--accent2)'});
-  if(price>=high52*0.97&&lastVol>avgVol*1.3)pats.push({type:'BREAKOUT',color:'var(--warn)'});
-  if(macd.hist>0&&macd.lm>0&&rsi>=50&&rsi<=70)pats.push({type:'MOMENTUM',color:'var(--green)'});
-  if(rsi&&rsi<35&&v50&&price<v50*0.95)pats.push({type:'OVERSOLD',color:'var(--purple)'});
-  return pats;
-}
-
-async function loadCommodityPrices(){
-  document.getElementById('cmGrid').innerHTML='<div style="color:var(--muted);font-size:.72rem;grid-column:span 4"><span class="spin"></span> Loading...</div>';
-  var keys=[{sym:'GLD',id:'cm-gold'},{sym:'SLV',id:'cm-silver'},{sym:'USO',id:'cm-oil'},{sym:'UNG',id:'cm-gas'},{sym:'CPER',id:'cm-copper'}];
-  for(var k=0;k<keys.length;k++){
-    try{
-      var data=await fetchPrices(keys[k].sym,5);
-      if(!data)continue;
-      var price=data.closes[data.closes.length-1];
-      var prev=data.closes[data.closes.length-2]||price;
-      var chg=((price-prev)/prev*100);
-      setEl(keys[k].id,'$'+fn(price,2));
-      setEl(keys[k].id+'-chg',(chg>=0?'+':'')+fn(chg,2)+'% today');
-      document.getElementById(keys[k].id).className='mv '+(chg>=0?'up':'down');
-    }catch(e){}
-  }
-  var all=Object.values(COMMODITY_UNIVERSE).flat();
-  var grid=document.getElementById('cmGrid');
-  grid.innerHTML='';
-  for(var ci=0;ci<all.length;ci++){
-    var c=all[ci];
-    try{
-      var data=await fetchPrices(c.sym,5);
-      if(!data)continue;
-      var price=data.closes[data.closes.length-1];
-      var prev=data.closes[data.closes.length-2]||price;
-      var chg=((price-prev)/prev*100);
-      var bg=chg>2?'rgba(34,197,94,.12)':chg>0?'rgba(34,197,94,.05)':chg<-2?'rgba(244,63,94,.12)':'rgba(244,63,94,.05)';
-      var col=chg>=0?'var(--green)':'var(--red)';
-      var catCol=c.cat==='Precious Metal'?'var(--warn)':c.cat==='Energy'?'var(--red)':c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
-      grid.innerHTML+='<div style="background:'+bg+';border:1px solid var(--border);border-radius:7px;padding:9px;cursor:pointer" data-sym="'+c.sym+'" onclick="cmChart(this)">'
-        +'<div style="font-size:.72rem;font-weight:800;font-family:var(--mono)">'+c.sym+'</div>'
-        +'<div style="font-size:.65rem;color:var(--muted2);margin-top:2px">'+c.name+'</div>'
-        +'<div style="font-size:.75rem;font-weight:700;margin-top:4px">$'+fn(price,2)+'</div>'
-        +'<div style="font-size:.63rem;color:'+col+';margin-top:1px">'+(chg>=0?'+':'')+fn(chg,2)+'%</div>'
-        +'<div style="font-size:.58rem;color:'+catCol+';margin-top:3px">'+c.cat+'</div>'
-        +'</div>';
-    }catch(e){}
-  }
-  log('Commodity prices loaded','ok');
-}
-
-async function runCommodityScan(){
-  var filter=document.getElementById('cm-filter')?document.getElementById('cm-filter').value:'all';
-  var universe=filter==='all'?Object.values(COMMODITY_UNIVERSE).flat():COMMODITY_UNIVERSE[filter]||[];
-  document.getElementById('cmScanBtn').textContent='Scanning...';
-  document.getElementById('cmScanBtn').disabled=true;
-  document.getElementById('cmProgress').style.display='block';
-  document.getElementById('cmBody').innerHTML='<tr><td class="te" colspan="12"><span class="spin"></span> Fetching USD trend...</td></tr>';
-  USD_TREND=await fetchUSDTrend();
-  var usdLabel=USD_TREND==='weak'?'WEAK (bullish)':USD_TREND==='strong'?'STRONG (bearish)':'NEUTRAL';
-  log('USD Trend: '+usdLabel,'ok');
-  var winners=[];
-  var scanned=0;
-  for(var ci=0;ci<universe.length;ci++){
-    var c=universe[ci];
-    try{
-      var data=await fetchPrices(c.sym,260);
-      if(!data||data.closes.length<50){scanned++;continue;}
-      var score=commodityScore(data,USD_TREND,c.usdCorr);
-      var pats=detectCommodityPatterns(data.closes,data.highs,data.vols);
-      var rsi=calcRSI(data.closes);
-      if(score>=COMMODITY_RISK.minScore&&pats.length>0){
-        winners.push({c:c,data:data,score:score,patterns:pats,rsi:rsi});
-        winners.sort(function(a,b){return b.score-a.score;});
-        renderCommodityResults(winners.slice(0,20),usdLabel);
-      }
-    }catch(e){}
-    scanned++;
-    var pct=Math.round(scanned/universe.length*100);
-    document.getElementById('cmBar').style.width=pct+'%';
-    document.getElementById('cmCount').textContent=scanned+'/'+universe.length;
-    document.getElementById('cmStatus').textContent='Scanning '+c.sym+'... ('+winners.length+' found)';
-    document.getElementById('cmScanned').textContent=scanned;
-    document.getElementById('cmBullish').textContent=winners.filter(function(w){return w.patterns.some(function(p){return p.type==='UPTREND'||p.type==='MOMENTUM';});}).length;
-    document.getElementById('cmBreakouts').textContent=winners.filter(function(w){return w.patterns.some(function(p){return p.type==='BREAKOUT';});}).length;
-    document.getElementById('cmAvg').textContent=winners.length?Math.round(winners.reduce(function(a,b){return a+b.score;},0)/winners.length):0;
-  }
-  winners.sort(function(a,b){return b.score-a.score;});
-  renderCommodityResults(winners.slice(0,20),usdLabel);
-  renderCommodityReasons(winners.slice(0,3));
-  document.getElementById('cmProgress').style.display='none';
-  document.getElementById('cmScanBtn').textContent='Scan Commodities';
-  document.getElementById('cmScanBtn').disabled=false;
-  log('Commodity scan done -- '+scanned+' scanned, '+winners.length+' picks','ok');
-}
-
-function renderCommodityResults(winners,usdLabel){
-  if(!winners.length)return;
-  var usdBanner='<tr><td colspan="12" style="background:rgba(245,158,11,.05);padding:7px;font-size:.7rem;font-family:var(--mono);color:var(--warn);text-align:center">USD: '+usdLabel+' | SL:'+Math.round(COMMODITY_RISK.stopLoss*100)+'% TP:'+Math.round(COMMODITY_RISK.takeProfit*100)+'% MaxPos:'+Math.round(COMMODITY_RISK.maxPosition*100)+'%</td></tr>';
-  var rows='';
-  for(var i=0;i<winners.length;i++){
-    var w=winners[i];
-    var price=w.data.closes[w.data.closes.length-1];
-    var prev=w.data.closes[w.data.closes.length-2]||price;
-    var chg=((price-prev)/prev*100);
-    var catCol=w.c.cat==='Precious Metal'?'var(--warn)':w.c.cat==='Energy'?'var(--red)':w.c.cat==='Agriculture'?'var(--green)':'var(--accent2)';
-    var pats=w.patterns.map(function(p){return '<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:'+p.color+';border:1px solid '+p.color+'40;margin-right:2px">'+p.type+'</span>';}).join('');
-    var sig=w.score>=78?'STRONG BUY':w.score>=65?'BUY':'WATCH';
-    var sigCls=w.score>=65?'bdg-buy':'bdg-hold';
-    var emaTrend=w.score>=75?'UPTREND':w.score>=60?'RECOVERING':'DOWNTREND';
-    var usdCorrCol=w.c.usdCorr<-0.6?'var(--green)':w.c.usdCorr<-0.3?'var(--warn)':'var(--muted)';
-    var rsiCol=w.rsi?w.rsi>70?'var(--warn)':w.rsi>45?'var(--green)':'var(--purple)':'var(--muted)';
-    rows+='<tr style="'+(i<3?'background:rgba(0,200,150,.03)':'')+'">'
-      +'<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">'+(i+1)+'</td>'
-      +'<td style="font-weight:800">'+w.c.sym+(i<3?' '+(i===0?'[1]':i===1?'[2]':'[3]'):'')+'</td>'
-      +'<td style="font-size:.75rem;color:var(--muted2)">'+w.c.name+'</td>'
-      +'<td><span style="font-size:.62rem;font-family:var(--mono);color:'+catCol+';padding:1px 5px;border-radius:3px;border:1px solid '+catCol+'40">'+w.c.cat+'</span></td>'
-      +'<td style="font-family:var(--mono)">$'+fn(price,2)+'</td>'
-      +'<td><div style="display:flex;align-items:center;gap:5px"><div style="width:40px;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+w.score+'%;background:var(--green)"></div></div><span style="font-family:var(--mono);font-size:.74rem;font-weight:700;color:var(--green)">'+w.score+'</span></div></td>'
-      +'<td style="font-family:var(--mono);color:'+rsiCol+'">'+(w.rsi?fn(w.rsi,1):'--')+'</td>'
-      +'<td>'+pats+'</td>'
-      +'<td style="font-family:var(--mono);font-size:.68rem;color:var(--accent2)">'+emaTrend+'</td>'
-      +'<td style="font-family:var(--mono);font-size:.68rem;color:'+usdCorrCol+'">'+( w.c.usdCorr<-0.6?'HIGH':'MED')+'</td>'
-      +'<td><span class="bdg '+sigCls+'">'+sig+'</span></td>'
-      +'<td><button class="btn b-out b-xs" data-sym="'+w.c.sym+'" onclick="cmChart(this)">Chart</button></td>'
-      +'</tr>';
-  }
-  document.getElementById('cmBody').innerHTML=usdBanner+rows;
-}
-
-function renderCommodityReasons(winners){
-  if(!winners.length)return;
-  document.getElementById('cmReasonCard').style.display='block';
-  document.getElementById('cmReasons').innerHTML=winners.map(function(w,i){
-    var price=w.data.closes[w.data.closes.length-1];
-    var sl=fn(price*(1-COMMODITY_RISK.stopLoss),2);
-    var tp=fn(price*(1+COMMODITY_RISK.takeProfit),2);
-    var pts=[];
-    w.patterns.forEach(function(p){
-      if(p.type==='GOLDEN CROSS')pts.push('Golden cross confirmed -- strong long-term signal');
-      if(p.type==='UPTREND')pts.push('Price above EMA50 and EMA200 -- established uptrend');
-      if(p.type==='BREAKOUT')pts.push('Breaking near 52-week high with volume');
-      if(p.type==='MOMENTUM')pts.push('RSI in momentum zone with positive MACD');
-      if(p.type==='OVERSOLD')pts.push('Oversold on quality commodity -- inflation hedge buy');
-    });
-    if(USD_TREND==='weak')pts.push('USD weakening -- tailwind for '+w.c.name+' (corr: '+w.c.usdCorr+')');
-    return '<div style="background:var(--bg3);border:1px solid '+(i===0?'rgba(0,200,150,.3)':'var(--border)')+';border-radius:8px;padding:.85rem;margin-bottom:7px">'
-      +'<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">'
-      +'<span style="font-size:.9rem;font-weight:700">'+w.c.sym+'</span>'
-      +'<span style="font-size:.75rem;color:var(--muted2)">'+w.c.full+'</span>'
-      +'<span class="bdg bdg-buy">'+(i===0?'#1 PICK':i===1?'#2 PICK':'#3 PICK')+'</span>'
-      +'<span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">'+w.score+'/100</strong></span>'
-      +'<span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry $'+fn(price,2)+' | SL $'+sl+' | TP $'+tp+'</span>'
-      +'</div>'
-      +'<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.7">'+(pts.join('. ')||'Commodity momentum signal.')+'</div>'
-      +'<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:'+w.score+'%;background:var(--green)"></div></div>'
-      +'<div style="font-size:.64rem;font-family:var(--mono);color:var(--muted);margin-top:5px">SL '+Math.round(COMMODITY_RISK.stopLoss*100)+'% | TP '+Math.round(COMMODITY_RISK.takeProfit*100)+'% | Max pos '+Math.round(COMMODITY_RISK.maxPosition*100)+'%</div>'
-      +'</div>';
-  }).join('');
-}
-
-// ═══════════════════════════════════════
-//  STRATEGY TABS
-// ═══════════════════════════════════════
-function switchStratTab(tab){
-  ['stock','crypto','commodity','exec'].forEach(function(t){
-    var panel=document.getElementById('st-'+t);
-    var btn=document.getElementById('stTab-'+t);
-    if(panel)panel.style.display=(t===tab?'block':'none');
-    if(btn)btn.className=(t===tab?'btn b-acc b-sm':'btn b-out b-sm');
-  });
-  try{localStorage.setItem('stratTab',tab);}catch(e){}
-}
-
-
-
-function openCG(btn){window.open('https://www.coingecko.com/en/coins/'+btn.dataset.id,'_blank');}
-function cmChart(btn){document.getElementById('iSym').value=btn.dataset.sym;nav('ind',null);computeInd();}
-
-function openCG(btn){window.open('https://www.coingecko.com/en/coins/'+btn.dataset.id,'_blank');}
 </script>
 </body>
 </html>
