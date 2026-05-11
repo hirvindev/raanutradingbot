@@ -22,13 +22,13 @@ XETRA_UNIVERSE = [
     "VNA.DE", "MTX.DE", "SHL.DE", "QIA.DE", "HEI.DE",
     "ENR.DE", "DHER.DE", "HAG.DE", "SY1.DE", "G1A.DE",
     "MUV2.DE", "ZAL.DE", "1COV.DE", "AIR.DE", "PUM.DE",
-    "EVT.DE", "SRT3.DE", "HFG.DE", "SDAX.DE",
+    "EVT.DE", "SRT3.DE", "HFG.DE",
     # MDAX / high momentum picks
     "AFX.DE", "NDX1.DE", "VBK.DE", "GXI.DE", "WAF.DE",
-    "BC8.DE", "AIXA.DE", "DUE.DE", "KGX.DE", "EMG.DE",
-    # US mega-caps listed on XETRA
-    "APC.DE", "MSF.DE", "AMZN.DE", "GOOGL.DE", "META.DE",
-    "NVDA.DE", "TSLA.DE", "AMD.DE", "NFLX.DE", "PYPL.DE",
+    "BC8.DE", "AIXA.DE", "DUE.DE", "KGX.DE",
+    # US mega-caps listed on XETRA (correct Yahoo Finance tickers)
+    "APC.DE", "MSF.DE", "AMZ.DE", "ABEC.DE", "FB2A.DE",
+    "NVD.DE", "TL0.DE", "AMD.DE", "NFC.DE", "PYPL.DE",
 ]
 
 # XETRA ticker → US-listed equivalent for Alpaca execution
@@ -66,13 +66,13 @@ XETRA_TO_US_ADR: dict[str, Optional[str]] = {
     # US mega-caps — trade directly on Alpaca by their US ticker
     "APC.DE":  "AAPL",
     "MSF.DE":  "MSFT",
-    "AMZN.DE": "AMZN",
-    "GOOGL.DE":"GOOGL",
-    "META.DE": "META",
-    "NVDA.DE": "NVDA",
-    "TSLA.DE": "TSLA",
+    "AMZ.DE":  "AMZN",
+    "ABEC.DE": "GOOGL",
+    "FB2A.DE": "META",
+    "NVD.DE":  "NVDA",
+    "TL0.DE":  "TSLA",
     "AMD.DE":  "AMD",
-    "NFLX.DE": "NFLX",
+    "NFC.DE":  "NFLX",
     "PYPL.DE": "PYPL",
 }
 
