@@ -26,6 +26,9 @@ XETRA_UNIVERSE = [
     # MDAX / high momentum picks
     "AFX.DE", "NDX1.DE", "VBK.DE", "GXI.DE", "WAF.DE",
     "BC8.DE", "AIXA.DE", "DUE.DE", "KGX.DE", "EMG.DE",
+    # US mega-caps listed on XETRA
+    "APC.DE", "MSF.DE", "AMZN.DE", "GOOGL.DE", "META.DE",
+    "NVDA.DE", "TSLA.DE", "AMD.DE", "NFLX.DE", "PYPL.DE",
 ]
 
 # XETRA ticker → US-listed equivalent for Alpaca execution
@@ -60,6 +63,17 @@ XETRA_TO_US_ADR: dict[str, Optional[str]] = {
     "1COV.DE": None,     # Covestro — no liquid ADR
     "NDX1.DE": None,
     "AIXA.DE": None,
+    # US mega-caps — trade directly on Alpaca by their US ticker
+    "APC.DE":  "AAPL",
+    "MSF.DE":  "MSFT",
+    "AMZN.DE": "AMZN",
+    "GOOGL.DE":"GOOGL",
+    "META.DE": "META",
+    "NVDA.DE": "NVDA",
+    "TSLA.DE": "TSLA",
+    "AMD.DE":  "AMD",
+    "NFLX.DE": "NFLX",
+    "PYPL.DE": "PYPL",
 }
 
 
