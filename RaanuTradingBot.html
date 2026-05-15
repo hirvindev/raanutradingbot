@@ -187,9 +187,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 @media(max-width:1200px){.mrow{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:960px){.g3l{grid-template-columns:1fr;}.mrow{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:720px){.sb{display:none;}.g2,.g4{grid-template-columns:1fr;}.mrow{grid-template-columns:1fr 1fr;}}
+#toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:.8rem;font-family:var(--mono);font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
+#toast.show{opacity:1;}
+#toast.t-ok{background:#16a34a;color:#fff;}
+#toast.t-err{background:#dc2626;color:#fff;}
 </style>
 </head>
 <body>
+<div id="toast"></div>
 
 <!-- ══ NAV ══ -->
 <nav>
@@ -314,7 +319,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div style="width:100%;display:flex;flex-direction:column;gap:5px" id="rBreak">
           <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted);text-align:center">Start engine</div>
         </div>
-        <button class="btn b-out b-sm" style="width:100%" onclick="runScan()">↻ Scan Now</button>
+        <button class="btn b-out b-sm" style="width:100%" onclick="nav('sig',null);runScan()">↻ Scan Now</button>
       </div>
     </div>
   </div>
@@ -400,7 +405,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── SIGNALS ─────────── -->
 <div id="s-sig" class="sec">
-  <div class="al al-info">🔍 Auto-scans 370+ large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top 20 sure-shot winners — no watchlist needed.</div>
+  <div class="al al-info">🔍 Auto-scans <span id="universeCount">400+</span> large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top winners — no watchlist needed.</div>
 
   <!-- SCAN CONTROLS -->
   <div class="card">
@@ -883,9 +888,12 @@ async function autoTrade(ticker, price, signal, trend, rsiVal){
     const res = await api('/api/orders/buy', 'POST', { ticker, notional });
     if(res){
       log(`✓ BUY ${ticker} $${notional} submitted — status: ${res.status ?? 'pending'}`, 'ok');
+      showToast(`✓ BUY ${ticker} $${notional} — ${res.status ?? 'accepted'}`, true);
       addRecent({ticker, dir:'BUY', qty: notional, price, status: res.status ?? 'pending', reason: signal});
       deriveStats();
       await fetchAccount();
+    } else {
+      showToast(`✗ Order failed — check Engine Logs`, false);
     }
   }));
 }
@@ -912,7 +920,9 @@ function updatePrev(){
     : 'Fill in the form to see preview.';
 }
 function renderQClose(){
-  document.getElementById('qClose').innerHTML = S.positions.length
+  const el = document.getElementById('qClose');
+  if(!el) return;
+  el.innerHTML = S.positions.length
     ? S.positions.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)"><span>${p.ticker} ×${fn(p.quantity,0)}</span><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></div>`).join('')
     : 'No open positions.';
 }
@@ -1295,8 +1305,8 @@ function _scanRow(r, i) {
   return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
 <td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
 <td style="font-weight:800;font-size:.85rem">${r.ticker} ${medal}</td>
-<td style="font-size:.75rem;color:var(--muted2);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${getStockName(r.ticker)}</td>
-<td><span style="font-size:.62rem;font-family:var(--mono);color:var(--accent2);padding:1px 5px;border-radius:3px;border:1px solid var(--accent2)40">US</span></td>
+<td style="font-size:.75rem;color:var(--muted2);min-width:200px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name||r.ticker}</td>
+<td>${(()=>{const cap=r.cap_label||'—';const c=cap==='Mega'?'#a78bfa':cap==='Large'?'var(--accent2)':cap==='Mid'?'var(--green)':cap==='Small'?'var(--warn)':cap==='Micro'?'var(--muted2)':'var(--muted)';return `<span style="font-size:.62rem;font-family:var(--mono);color:${c};padding:1px 5px;border-radius:3px;border:1px solid ${c}40">${cap}</span>`;})()}</td>
 <td style="font-family:var(--mono)">$${fn(r.price)}</td>
 <td>
   <div style="display:flex;align-items:center;gap:5px">
@@ -1304,7 +1314,7 @@ function _scanRow(r, i) {
     <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:${scoreColor}">${r.score}</span>
   </div>
 </td>
-<td>${badgeHtml}</td>
+<td style="max-width:100px">${badgeHtml}</td>
 <td style="font-family:var(--mono);color:${rsiColor}">${r.rsi!=null?fn(r.rsi,1):'—'}</td>
 <td style="font-size:.68rem"><span style="color:${hasMomt?'var(--green)':'var(--muted)'}">${hasMomt?'✓ YES':'—'}</span></td>
 <td style="font-size:.68rem"><span style="color:${hasBB?'var(--warn)':'var(--muted)'}">${hasBB?'✓ YES':'—'}</span></td>
@@ -1326,16 +1336,27 @@ async function runMarketScan() {
   btn.disabled    = true;
   prog.style.display  = 'block';
   stats.style.display = 'grid';
-  tbody.innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Batch-downloading 42 tickers — first results in ~1 s...</td></tr>`;
+  tbody.innerHTML = `<tr><td class="te" colspan="12"><span class="spin"></span> Batch-downloading universe — first results in ~5 s...</td></tr>`;
 
   const allResults = [];
-  let scanned = 0, total = 42, firstResult = true;
+  let scanned = 0, total = 0, firstResult = true;
 
   await new Promise(resolve => {
     const es = new EventSource('/api/scan/stream');
 
     es.onmessage = e => {
       const d = JSON.parse(e.data);
+
+      if (d.failed) {
+        es.close();
+        tbody.innerHTML = `<tr><td class="te" colspan="12" style="color:var(--red)">⚠ Scan failed: ${d.error}</td></tr>`;
+        prog.style.display = 'none';
+        btn.textContent = '⚡ Scan Market';
+        btn.disabled = false;
+        log(`Scan failed: ${d.error}`, 'err');
+        resolve();
+        return;
+      }
 
       if (d.done) {
         es.close();
@@ -1356,7 +1377,11 @@ async function runMarketScan() {
         return;
       }
 
-      if (d.status === 'downloading') { total = d.total || total; return; }
+      if (d.status === 'downloading') {
+        total = d.total || total;
+        setEl('universeCount', total + '+');
+        return;
+      }
       if (!d.ticker) return;
 
       scanned++;
@@ -1605,6 +1630,8 @@ function addRecent({ticker,dir,qty,price,status,reason}){
 //  LOG
 // ═══════════════════════════════════════
 function log(msg,type='ok'){S.logs.unshift({t:new Date().toLocaleTimeString(),msg,type});if(S.logs.length>300)S.logs.pop();renderLogs();}
+let _toastTimer=null;
+function showToast(msg,ok=true){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(ok?'t-ok':'t-err');clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.className='',3500);}
 function renderLogs(){
   const f=document.getElementById('logFilt')?.value||'all';
   const el=document.getElementById('logBox');if(!el)return;

@@ -83,10 +83,11 @@ def _load_picks() -> Optional[dict]:
 # ---------- BACKGROUND SCAN ----------
 
 async def _run_scan_and_cache() -> list:
-    """Run the scanner, cache results, pass picks to the ad-hoc trader."""
+    """Run the scanner in a thread pool (non-blocking), cache results."""
     from scanner import find_top_picks
     log.info("Running momentum scan...")
-    picks = find_top_picks(3)
+    loop  = asyncio.get_event_loop()
+    picks = await loop.run_in_executor(None, lambda: find_top_picks(3))
     _save_picks(picks)
     log.info(f"Scan done — {len(picks)} picks cached")
 
@@ -735,28 +736,56 @@ async def stocks_market_movers(top: int = 10):
 @app.get("/api/scan/stream")
 async def scan_stream():
     """
-    SSE endpoint — one yfinance batch download (~1-2 s), then streams each
-    scored ticker to the browser immediately. The table populates in real time.
+    SSE endpoint — fetches full Alpaca tradable universe, then batch-downloads
+    in chunks of CHUNK_SIZE so results stream progressively to the browser.
+    Sends an error event (with 'failed': true) if the universe fetch fails.
     """
-    from scanner import UNIVERSE
+    from scanner import get_universe, get_ticker_name, CHUNK_SIZE
     from strategy import score_from_df, batch_download
 
     async def generator():
         import json
-        total = len(UNIVERSE)
+        loop = asyncio.get_event_loop()
+
+        # Fetch universe — fail loudly if Alpaca is unreachable
+        try:
+            universe = await loop.run_in_executor(None, get_universe)
+        except Exception as e:
+            yield f"data: {json.dumps({'failed': True, 'error': str(e)})}\n\n"
+            return
+
+        total = len(universe)
         yield f"data: {json.dumps({'status': 'downloading', 'total': total})}\n\n"
 
-        # Run blocking download in thread so the event loop stays free
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, batch_download, UNIVERSE)
-
         scanned = 0
-        for ticker in UNIVERSE:
-            df     = data.get(ticker)
-            result = score_from_df(ticker, df)
-            result["total"] = total
-            yield f"data: {json.dumps(result)}\n\n"
-            scanned += 1
+        chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
+
+        def _cap_label(mc):
+            if not mc: return "—"
+            if mc >= 200e9: return "Mega"
+            if mc >= 10e9:  return "Large"
+            if mc >= 2e9:   return "Mid"
+            if mc >= 300e6: return "Small"
+            return "Micro"
+
+        def _fetch_market_cap(ticker):
+            try:
+                import yfinance as yf
+                return yf.Ticker(ticker).fast_info.market_cap
+            except Exception:
+                return None
+
+        for chunk in chunks:
+            data = await loop.run_in_executor(None, batch_download, chunk)
+            for ticker in chunk:
+                result = score_from_df(ticker, data.get(ticker))
+                result["total"] = total
+                result["name"] = get_ticker_name(ticker)
+                if result.get("ok") and result.get("score", 0) >= 40:
+                    mc = await loop.run_in_executor(None, _fetch_market_cap, ticker)
+                    result["cap_label"] = _cap_label(mc)
+                yield f"data: {json.dumps(result)}\n\n"
+                scanned += 1
 
         yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'total': total})}\n\n"
 

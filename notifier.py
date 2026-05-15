@@ -1,8 +1,8 @@
 """
-notifier.py — WhatsApp alerts via Twilio
-=========================================
-Sends morning picks, trade confirmations, and profit/loss alerts
-to the user's WhatsApp. Executes BUY/SELL commands from replies.
+notifier.py — Telegram alerts via Bot API
+==========================================
+Sends trade alerts, portfolio status, and profit/loss notifications
+to the configured Telegram chat. No session expiry — works 24/7.
 """
 
 import os
@@ -17,38 +17,39 @@ BERLIN = ZoneInfo("Europe/Berlin")
 
 def _creds() -> dict:
     return {
-        "sid":   os.getenv("TWILIO_ACCOUNT_SID", "").strip(),
-        "token": os.getenv("TWILIO_AUTH_TOKEN", "").strip(),
-        "from":  os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886").strip(),
-        "to":    os.getenv("USER_WHATSAPP", "whatsapp:+919176911755").strip(),
+        "token":   os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
+        "chat_id": os.getenv("TELEGRAM_CHAT_ID", "").strip(),
     }
 
 
 def is_configured() -> bool:
     c = _creds()
-    return bool(c["sid"] and c["token"])
+    return bool(c["token"] and c["chat_id"])
 
 
-def send_whatsapp(message: str) -> bool:
-    """Send a WhatsApp message to the configured number."""
+def send_telegram(message: str) -> bool:
+    """Send a Telegram message to the configured chat."""
     c = _creds()
-    if not c["sid"] or not c["token"]:
-        log.warning("Twilio not configured — WhatsApp skipped. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in .env")
+    if not c["token"] or not c["chat_id"]:
+        log.warning("Telegram not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
         return False
-
     try:
         resp = httpx.post(
-            f"https://api.twilio.com/2010-04-01/Accounts/{c['sid']}/Messages.json",
-            auth=(c["sid"], c["token"]),
-            data={"From": c["from"], "To": c["to"], "Body": message},
+            f"https://api.telegram.org/bot{c['token']}/sendMessage",
+            json={"chat_id": c["chat_id"], "text": message, "parse_mode": "Markdown"},
             timeout=15,
         )
         resp.raise_for_status()
-        log.info(f"WhatsApp sent — sid: {resp.json().get('sid', '?')}")
+        log.info(f"Telegram sent — message_id: {resp.json().get('result', {}).get('message_id', '?')}")
         return True
     except Exception as e:
-        log.error(f"WhatsApp send failed: {e}")
+        log.error(f"Telegram send failed: {e}")
         return False
+
+
+# Keep send_whatsapp as an alias so existing callers don't break
+def send_whatsapp(message: str) -> bool:
+    return send_telegram(message)
 
 
 # ── MESSAGE FORMATTERS ───────────────────────────────────────────────────────
@@ -57,54 +58,30 @@ def format_daily_alert(picks: list[dict]) -> str:
     now = datetime.now(BERLIN)
     lines = [
         "🤖 *RaanuTradingBot — Morning Alert*",
-        f"📅 {now.strftime('%A, %d %b %Y')} | 🕢 07:30 Berlin\n",
+        f"📅 {now.strftime('%A, %d %b %Y')} | 🕢 07:00 Berlin\n",
     ]
 
     if not picks:
         lines += [
             "⚠️ *No strong signals today.*",
-            "Market may be choppy — hold existing positions.",
-            "",
-            "Reply *STATUS* to see your portfolio.",
+            "Market may be choppy — holding existing positions.",
         ]
         return "\n".join(lines)
 
-    lines.append(f"📊 *Top {len(picks)} XETRA/GETTEX picks:*\n")
+    lines.append(f"📊 *Top {len(picks)} US picks:*\n")
     rank_emoji = ["1️⃣", "2️⃣", "3️⃣"]
 
-    dashboard_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
-    if dashboard_url and not dashboard_url.startswith("http"):
-        dashboard_url = "https://" + dashboard_url
-
     for i, p in enumerate(picks):
-        score = p.get("score", 0)
-        heat = "🔥" if score >= 75 else "📈" if score >= 60 else "📊"
-        ticker = p["ticker"].replace(".DE", "")
-        adr = p.get("us_adr")
-        buy_ticker = adr or ticker
+        score   = p.get("score", 0)
+        heat    = "🔥" if score >= 75 else "📈" if score >= 60 else "📊"
+        ticker  = p["ticker"]
         reasons = " | ".join(p.get("reasons", [])[:2])
-
         lines += [
-            f"{rank_emoji[i]} *{ticker}* (XETRA) {heat} Score {score}/100",
-            f"   💶 €{p.get('price', 0):.2f} | RSI {p.get('rsi', 0):.0f} | {reasons}",
-            f"   🇺🇸 Buy on Alpaca as: *{buy_ticker}*",
+            f"{rank_emoji[i]} *{ticker}* {heat} Score {score}/100",
+            f"   💵 ${p.get('price', 0):.2f} | RSI {p.get('rsi', 0):.0f} | {reasons}",
             "",
         ]
 
-    top = picks[0]
-    top_adr = top.get("us_adr") or top["ticker"].replace(".DE", "")
-
-    lines += [
-        "─────────────────────",
-        "📲 *Reply to act:*",
-        f"  *BUY {top_adr}* — buy top pick ($500)",
-        f"  *BUY {top_adr} 200* — custom USD amount",
-        f"  *SELL {top_adr}* — close position",
-        f"  *STATUS* — portfolio summary",
-        f"  *PICKS* — refresh now",
-    ]
-    if dashboard_url:
-        lines += ["", f"🖥 Dashboard: {dashboard_url}"]
     return "\n".join(lines)
 
 
@@ -113,7 +90,7 @@ def format_pre_trade_alert(adr: str, xetra: str, usd: float, score: int,
     reasons_str = " | ".join(reasons[:2]) if reasons else "momentum signal"
     return (
         f"⚡ *RaanuBot — About to BUY*\n"
-        f"   Stock: *{adr}* (XETRA: {xetra.replace('.DE', '')})\n"
+        f"   Stock: *{adr}*\n"
         f"   Amount: *${usd:.2f}*\n"
         f"   Score: {score}/100\n"
         f"   Signal: {reasons_str}\n"
@@ -124,7 +101,7 @@ def format_pre_trade_alert(adr: str, xetra: str, usd: float, score: int,
 
 def format_trade_confirm(action: str, ticker: str, usd: float, status: str) -> str:
     emoji = "✅" if action == "BUY" else "🔴"
-    verb = "Bought" if action == "BUY" else "Sold"
+    verb  = "Bought" if action == "BUY" else "Sold"
     return (
         f"{emoji} *{verb}: {ticker}*\n"
         f"   Amount: ${usd:.2f}\n"
@@ -147,8 +124,8 @@ def format_profit_alert(ticker: str, entry: float, exit_price: float,
 
 def format_portfolio_status(positions: list[dict], account: dict) -> str:
     total = float(account.get("total", account.get("portfolio_value", 0)))
-    cash  = float(account.get("free", account.get("cash", 0)))
-    pnl   = float(account.get("ppl", account.get("unrealized_pl", 0)))
+    cash  = float(account.get("free",  account.get("cash", 0)))
+    pnl   = float(account.get("ppl",   account.get("unrealized_pl", 0)))
 
     lines = [
         "📊 *Portfolio Status*",

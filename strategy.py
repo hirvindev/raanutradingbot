@@ -49,7 +49,7 @@ def bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0):
 
 
 # ---------- DATA ----------
-def fetch_ohlc(ticker: str, period: str = "120d") -> Optional[pd.DataFrame]:
+def fetch_ohlc(ticker: str, period: str = "1y") -> Optional[pd.DataFrame]:
     """Daily candles via yfinance (fast, free, no API key needed)."""
     try:
         df = yf.download(
@@ -219,7 +219,7 @@ def score_from_df(ticker: str, df: pd.DataFrame) -> dict:
     }
 
 
-def batch_download(tickers: list[str], period: str = "90d") -> dict[str, pd.DataFrame]:
+def batch_download(tickers: list[str], period: str = "1y") -> dict[str, pd.DataFrame]:
     """Download OHLCV for all tickers in a single yfinance call. Returns {ticker: df}.
     Delisted or unavailable tickers are silently skipped — they produce empty rows."""
     if not tickers:

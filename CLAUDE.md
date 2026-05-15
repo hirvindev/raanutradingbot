@@ -129,12 +129,13 @@ Indicators computed locally from Yahoo Finance daily OHLCV data.
 ## 🔭 Scanner — scanner.py
 Scans 42 US-listed tickers (mega-caps + European ADRs) in one batch download.
 
-**Universe includes:**
-- US mega-caps: AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA, AMD, NFLX, PYPL
-- European ADRs: SAP, SIEGY, ALIZY, DTEGY, BAYRY, DB, ADDYY, RWEOY, EONGY, IFNNY, EADSY, MURGY, VWAGY, BASFY, HENKY, PUMSY, CTTAY, FSNUY
-- US financials: JPM, GS, MS, BAC, V, MA
-- US tech: ORCL, CRM, ADBE, INTC, QCOM
-- ETFs: SPY, QQQ, IWM
+**Universe includes (~418 US-listed tickers, no European ADRs):**
+- Mega-cap tech: AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA, AMD, NFLX, AVGO
+- Semiconductors, Software/Cloud, Cybersecurity, Fintech
+- Healthcare/Pharma/Biotech, Financials, Consumer, Energy
+- Industrials/Defense, Materials, Utilities, Communication, REITs
+- Broad market & sector ETFs: SPY, QQQ, IWM, XLE, XLF, XLV, ARKK, etc.
+- **No European ADRs** — pure US-listed stocks only (Alpaca-native)
 
 **TEST_UNIVERSE** (used when `force=true`): AAPL, NVDA, MSFT, GOOGL, META
 
