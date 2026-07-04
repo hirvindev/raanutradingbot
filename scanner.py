@@ -74,9 +74,148 @@ def get_universe() -> list[str]:
     return _universe_cache
 
 
+TICKER_NAMES = {
+    # Mega-cap tech
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet",
+    "META": "Meta Platforms", "AMZN": "Amazon", "TSLA": "Tesla", "AMD": "AMD",
+    "NFLX": "Netflix", "AVGO": "Broadcom",
+    # Semiconductors
+    "TXN": "Texas Instruments", "QCOM": "Qualcomm", "MU": "Micron", "AMAT": "Applied Materials",
+    "LRCX": "Lam Research", "KLAC": "KLA Corp", "SNPS": "Synopsys", "CDNS": "Cadence Design",
+    "INTC": "Intel", "ADI": "Analog Devices", "MRVL": "Marvell Technology", "MCHP": "Microchip Tech",
+    "ON": "ON Semiconductor", "SWKS": "Skyworks", "MPWR": "Monolithic Power", "ENTG": "Entegris",
+    "ACLS": "Axcelis Technologies", "WOLF": "Wolfspeed",
+    # Software / Cloud / Cybersecurity
+    "ORCL": "Oracle", "CRM": "Salesforce", "ADBE": "Adobe", "NOW": "ServiceNow",
+    "WDAY": "Workday", "TEAM": "Atlassian", "OKTA": "Okta", "ZM": "Zoom Video",
+    "DOCU": "DocuSign", "SNOW": "Snowflake", "DDOG": "Datadog", "CRWD": "CrowdStrike",
+    "ZS": "Zscaler", "NET": "Cloudflare", "PANW": "Palo Alto Networks", "FTNT": "Fortinet",
+    "PLTR": "Palantir", "HUBS": "HubSpot", "PAYC": "Paycom", "ADP": "ADP",
+    "PAYX": "Paychex", "EPAM": "EPAM Systems", "GLOB": "Globant", "TENB": "Tenable",
+    "QLYS": "Qualys", "VRNS": "Varonis", "S": "SentinelOne", "ESTC": "Elastic",
+    # Internet / Fintech / Platforms
+    "UBER": "Uber", "LYFT": "Lyft", "ABNB": "Airbnb", "BKNG": "Booking Holdings",
+    "EXPE": "Expedia", "DASH": "DoorDash", "HOOD": "Robinhood", "COIN": "Coinbase",
+    "XYZ": "Block (fka Square)", "PYPL": "PayPal", "AFRM": "Affirm", "SOFI": "SoFi Technologies",
+    "UPST": "Upstart", "EBAY": "eBay", "ETSY": "Etsy", "W": "Wayfair",
+    "CHWY": "Chewy", "PINS": "Pinterest", "SNAP": "Snap", "RDDT": "Reddit",
+    "TTD": "The Trade Desk", "ROKU": "Roku", "U": "Unity Software", "RBLX": "Roblox",
+    "EA": "Electronic Arts", "TTWO": "Take-Two Interactive",
+    # Hardware / Enterprise IT
+    "IBM": "IBM", "CSCO": "Cisco", "HPQ": "HP Inc", "HPE": "Hewlett Packard Enterprise",
+    "DELL": "Dell Technologies", "ACN": "Accenture", "NTAP": "NetApp", "ZBRA": "Zebra Technologies",
+    # Healthcare / Pharma / Biotech
+    "JNJ": "Johnson & Johnson", "UNH": "UnitedHealth", "PFE": "Pfizer", "MRK": "Merck",
+    "ABBV": "AbbVie", "LLY": "Eli Lilly", "BMY": "Bristol-Myers Squibb", "AMGN": "Amgen",
+    "GILD": "Gilead Sciences", "BIIB": "Biogen", "REGN": "Regeneron", "VRTX": "Vertex Pharma",
+    "MRNA": "Moderna", "ISRG": "Intuitive Surgical", "MDT": "Medtronic", "BSX": "Boston Scientific",
+    "ABT": "Abbott Labs", "BDX": "Becton Dickinson", "SYK": "Stryker", "EW": "Edwards Lifesciences",
+    "IDXX": "IDEXX Labs", "DXCM": "DexCom", "VEEV": "Veeva Systems", "CVS": "CVS Health",
+    "CI": "Cigna", "HUM": "Humana", "ELV": "Elevance Health", "MOH": "Molina Healthcare",
+    "CNC": "Centene", "HCA": "HCA Healthcare", "TDOC": "Teladoc Health", "HIMS": "Hims & Hers",
+    "PODD": "Insulet", "GEHC": "GE HealthCare", "RMD": "ResMed", "IQV": "IQVIA",
+    "A": "Agilent Technologies", "MTD": "Mettler-Toledo", "INCY": "Incyte",
+    "ALNY": "Alnylam Pharma", "SRPT": "Sarepta Therapeutics", "ACAD": "Acadia Pharma",
+    "AXSM": "Axsome Therapeutics", "RARE": "Ultragenyx Pharma", "NTRA": "Natera",
+    "ILMN": "Illumina", "ZBH": "Zimmer Biomet",
+    # Financials
+    "JPM": "JPMorgan Chase", "GS": "Goldman Sachs", "MS": "Morgan Stanley",
+    "BAC": "Bank of America", "WFC": "Wells Fargo", "C": "Citigroup", "USB": "US Bancorp",
+    "PNC": "PNC Financial", "TFC": "Truist Financial", "SCHW": "Charles Schwab",
+    "BK": "Bank of New York Mellon", "STT": "State Street", "AXP": "American Express",
+    "COF": "Capital One", "SYF": "Synchrony Financial", "ALLY": "Ally Financial",
+    "V": "Visa", "MA": "Mastercard", "BX": "Blackstone", "KKR": "KKR & Co",
+    "APO": "Apollo Global", "BLK": "BlackRock", "TROW": "T. Rowe Price",
+    "ICE": "Intercontinental Exchange", "CME": "CME Group", "CBOE": "Cboe Global Markets",
+    "SPGI": "S&P Global", "MCO": "Moody's", "MSCI": "MSCI", "RJF": "Raymond James",
+    "SF": "Stifel Financial", "LAZ": "Lazard", "EVR": "Evercore", "NAVI": "Navient",
+    "HBAN": "Huntington Bancshares", "RF": "Regions Financial", "CFG": "Citizens Financial",
+    "FITB": "Fifth Third Bancorp", "KEY": "KeyCorp", "MTB": "M&T Bank", "ZION": "Zions Bancorp",
+    # Consumer Discretionary
+    "HD": "Home Depot", "LOW": "Lowe's", "TGT": "Target", "COST": "Costco",
+    "WMT": "Walmart", "NKE": "Nike", "SBUX": "Starbucks", "MCD": "McDonald's",
+    "YUM": "Yum! Brands", "CMG": "Chipotle", "DRI": "Darden Restaurants",
+    "TXRH": "Texas Roadhouse", "EAT": "Brinker International", "HLT": "Hilton",
+    "MAR": "Marriott", "WYNN": "Wynn Resorts", "MGM": "MGM Resorts", "LVS": "Las Vegas Sands",
+    "F": "Ford", "GM": "General Motors", "RIVN": "Rivian", "LCID": "Lucid Group",
+    "ANF": "Abercrombie & Fitch", "AEO": "American Eagle", "LULU": "Lululemon",
+    "PVH": "PVH Corp", "RL": "Ralph Lauren", "TPR": "Tapestry",
+    "GAP": "Gap", "URBN": "Urban Outfitters", "FIVE": "Five Below",
+    "DG": "Dollar General", "DLTR": "Dollar Tree", "OLLI": "Ollie's Bargain Outlet",
+    "BBWI": "Bath & Body Works", "RH": "RH (Restoration Hardware)", "WSM": "Williams-Sonoma",
+    "BBY": "Best Buy",
+    # Consumer Staples
+    "PG": "Procter & Gamble", "KO": "Coca-Cola", "PEP": "PepsiCo", "PM": "Philip Morris",
+    "MO": "Altria", "MDLZ": "Mondelez", "GIS": "General Mills", "CAG": "Conagra Brands",
+    "HRL": "Hormel Foods", "MKC": "McCormick", "CHD": "Church & Dwight", "CL": "Colgate-Palmolive",
+    "CLX": "Clorox", "KMB": "Kimberly-Clark", "EL": "Estee Lauder", "ULTA": "Ulta Beauty",
+    "SFM": "Sprouts Farmers Market", "KR": "Kroger", "ACI": "Albertsons", "COTY": "Coty",
+    # Energy
+    "XOM": "ExxonMobil", "CVX": "Chevron", "COP": "ConocoPhillips", "EOG": "EOG Resources",
+    "DVN": "Devon Energy", "MPC": "Marathon Petroleum", "VLO": "Valero Energy",
+    "PSX": "Phillips 66", "OXY": "Occidental Petroleum", "SLB": "Schlumberger",
+    "HAL": "Halliburton", "BKR": "Baker Hughes", "FANG": "Diamondback Energy",
+    "CTRA": "Coterra Energy", "APA": "APA Corp", "OKE": "ONEOK", "KMI": "Kinder Morgan",
+    "WMB": "Williams Companies", "ET": "Energy Transfer", "EPD": "Enterprise Products",
+    "MPLX": "MPLX LP", "TRGP": "Targa Resources", "AM": "Antero Midstream",
+    # Industrials / Aerospace / Defense
+    "BA": "Boeing", "RTX": "RTX Corp", "LMT": "Lockheed Martin", "NOC": "Northrop Grumman",
+    "GD": "General Dynamics", "HII": "Huntington Ingalls", "TDG": "TransDigm",
+    "HEI": "HEICO", "TXT": "Textron", "LHX": "L3Harris Technologies",
+    "CAT": "Caterpillar", "DE": "Deere & Co", "EMR": "Emerson Electric",
+    "HON": "Honeywell", "GE": "GE Aerospace", "MMM": "3M", "ITW": "Illinois Tool Works",
+    "PH": "Parker-Hannifin", "ETN": "Eaton Corp", "ROP": "Roper Technologies",
+    "CARR": "Carrier Global", "OTIS": "Otis Worldwide", "AME": "AMETEK",
+    "LDOS": "Leidos", "BAH": "Booz Allen Hamilton", "SAIC": "SAIC",
+    "CACI": "CACI International", "GNRC": "Generac", "XYL": "Xylem", "FTV": "Fortive",
+    "UAL": "United Airlines", "DAL": "Delta Air Lines", "AAL": "American Airlines",
+    "LUV": "Southwest Airlines", "ALK": "Alaska Air", "FDX": "FedEx", "UPS": "UPS",
+    "XPO": "XPO Logistics", "ODFL": "Old Dominion Freight", "JBHT": "J.B. Hunt Transport",
+    # Materials
+    "FCX": "Freeport-McMoRan", "NEM": "Newmont", "GOLD": "Barrick Gold",
+    "AEM": "Agnico Eagle Mines", "WPM": "Wheaton Precious Metals", "ALB": "Albemarle",
+    "SQM": "Sociedad Quimica y Minera", "LAC": "Lithium Americas", "MP": "MP Materials",
+    "LIN": "Linde", "APD": "Air Products", "DD": "DuPont", "DOW": "Dow Inc",
+    "ECL": "Ecolab", "IFF": "International Flavors", "NTR": "Nutrien", "MOS": "Mosaic",
+    "CF": "CF Industries", "FMC": "FMC Corp", "EMN": "Eastman Chemical",
+    # Utilities
+    "NEE": "NextEra Energy", "DUK": "Duke Energy", "SO": "Southern Company",
+    "AEP": "American Electric Power", "EXC": "Exelon", "SRE": "Sempra",
+    "PCG": "PG&E", "ED": "Consolidated Edison", "XEL": "Xcel Energy",
+    "WEC": "WEC Energy", "ETR": "Entergy", "PPL": "PPL Corp",
+    "CNP": "CenterPoint Energy", "AES": "AES Corp", "NI": "NiSource", "EVRG": "Evergy",
+    # Communication Services
+    "T": "AT&T", "VZ": "Verizon", "TMUS": "T-Mobile US", "CMCSA": "Comcast",
+    "CHTR": "Charter Communications", "DIS": "Walt Disney", "WBD": "Warner Bros Discovery",
+    "FOXA": "Fox Corp", "NYT": "New York Times",
+    # Real Estate / REITs
+    "AMT": "American Tower", "CCI": "Crown Castle", "EQIX": "Equinix",
+    "PLD": "Prologis", "SPG": "Simon Property Group", "O": "Realty Income",
+    "VICI": "VICI Properties", "WELL": "Welltower", "VTR": "Ventas",
+    "EQR": "Equity Residential", "AVB": "AvalonBay", "MAA": "Mid-America Apartment",
+    "NLY": "Annaly Capital", "AGNC": "AGNC Investment",
+    # Mid-cap Tech
+    "MELI": "MercadoLibre", "SE": "Sea Limited", "SHOP": "Shopify", "SPOT": "Spotify",
+    "NTNX": "Nutanix", "FIVN": "Five9", "APPF": "AppFolio", "PCTY": "Paylocity",
+    "JAMF": "Jamf", "MNDY": "monday.com", "BILL": "BILL Holdings", "ZI": "ZoomInfo",
+    "BRZE": "Braze", "GTLB": "GitLab",
+    # Mid-cap Healthcare
+    "JAZZ": "Jazz Pharmaceuticals", "TECH": "Bio-Techne", "PRGO": "Perrigo",
+    "SUPN": "Supernus Pharma", "HALO": "Halozyme", "IRTC": "iRhythm Technologies",
+    "MMSI": "Merit Medical", "NVCR": "NovoCure",
+    # ETFs
+    "SPY": "SPDR S&P 500 ETF", "QQQ": "Invesco QQQ (Nasdaq-100)", "IWM": "iShares Russell 2000",
+    "GLD": "SPDR Gold Shares", "SLV": "iShares Silver Trust",
+    "XLE": "Energy Select SPDR", "XLF": "Financial Select SPDR", "XLV": "Health Care Select SPDR",
+    "XLI": "Industrial Select SPDR", "XLK": "Technology Select SPDR", "XLC": "Communication Services SPDR",
+    "XLY": "Consumer Discretionary SPDR", "XLP": "Consumer Staples SPDR", "XLRE": "Real Estate Select SPDR",
+    "XLB": "Materials Select SPDR", "XLU": "Utilities Select SPDR", "ARKK": "ARK Innovation ETF",
+}
+
+
 def get_ticker_name(ticker: str) -> str:
     """Return the company name for a ticker, or the ticker itself if unknown."""
-    return _universe_names.get(ticker, ticker)
+    return _universe_names.get(ticker) or TICKER_NAMES.get(ticker, ticker)
 
 
 def reset_universe_cache():
@@ -183,6 +322,7 @@ def find_top_picks(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
                 r = score_from_df(ticker, data.get(ticker), bench_ret_3m=bench)
                 # Only actionable, confirmed-uptrend names are picks.
                 if r.get("ok") and r.get("uptrend") and r.get("score", 0) >= 60:
+                    r["name"] = get_ticker_name(ticker)
                     results.append(r)
             except Exception as e:
                 log.debug(f"Score error {ticker}: {e}")

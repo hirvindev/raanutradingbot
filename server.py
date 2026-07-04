@@ -218,12 +218,13 @@ async def _premarket_scan_and_notify():
         score = p.get("score", 0)
         heat = "🔥" if score >= 75 else "📈"
         ticker = p.get("ticker", "?")
+        name = p.get("name", ticker)
         price = p.get("price", 0)
         rsi = p.get("rsi", 0)
         reasons = " | ".join(p.get("reasons", [])[:2])
         gp = " | 🎯 Golden Pocket" if p.get("in_golden_pocket") else ""
         lines.append(
-            f"{medals[i] if i < 3 else '  '} *{ticker}* {heat} Score {score}/100\n"
+            f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} Score {score}/100\n"
             f"   💵 ${price:.2f} | RSI {rsi:.0f}{gp}\n"
             f"   {reasons}"
         )
