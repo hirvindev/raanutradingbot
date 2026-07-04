@@ -464,7 +464,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="stWinners">0</div>
       </div>
       <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Breakouts</div>
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Golden Pocket</div>
         <div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="stBreakouts">0</div>
       </div>
       <div class="card-sm" style="text-align:center">
@@ -474,7 +474,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
 
     <table>
-      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>Momentum</th><th>Breakout</th><th>Uptrend</th><th>Action</th></tr></thead>
+      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>Momentum</th><th>Fib Zone</th><th>Uptrend</th><th>Action</th></tr></thead>
       <tbody id="sigBody"><tr><td class="te" colspan="12">Click ⚡ Scan Market to find top opportunities across all US stocks</td></tr></tbody>
     </table>
   </div>
@@ -1356,7 +1356,8 @@ function deriveBadges(reasons) {
   if (r.includes('uptrend'))                      b.push({type:'UPTREND',   color:'#818cf8'});
   else if (r.includes('downtrend'))               b.push({type:'DOWNTREND', color:'#f59e0b'});
   if (r.includes('oversold'))                     b.push({type:'OVERSOLD',  color:'#06b6d4'});
-  if (r.includes('lower BB'))                     b.push({type:'BB BOUNCE', color:'#a78bfa'});
+  if (r.includes('golden pocket'))                b.push({type:'FIB GP',    color:'#f59e0b'});
+  else if (r.includes('optimal trade zone'))      b.push({type:'FIB OTE',   color:'#a78bfa'});
   return b;
 }
 
@@ -1369,11 +1370,13 @@ function _scanRow(r, i) {
   const rsiColor   = r.rsi > 70 ? 'var(--warn)' : r.rsi < 35 ? 'var(--green)' : 'var(--muted2)';
   const hasUp   = (r.reasons||[]).some(x=>x.includes('uptrend'));
   const hasMomt = (r.reasons||[]).some(x=>x.includes('MACD bullish'));
-  const hasBB   = (r.reasons||[]).some(x=>x.includes('lower BB'));
+  const hasGP   = r.in_golden_pocket || (r.reasons||[]).some(x=>x.includes('golden pocket'));
+  const hasOTE  = !hasGP && (r.reasons||[]).some(x=>x.includes('optimal trade zone'));
   const medal   = i===0?'🏆':i===1?'🥈':i===2?'🥉':'';
+  const ic = r.score>=75?'#00c896':r.score>=65?'#22c55e':r.score>=55?'#f59e0b':'#64748b';
   return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
 <td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem">${r.ticker} ${medal}</td>
+<td style="font-weight:800;font-size:.85rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ic};box-shadow:0 0 6px ${ic};margin-right:6px;vertical-align:middle"></span>${r.ticker} ${medal}</td>
 <td style="font-size:.75rem;color:var(--muted2);min-width:200px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name||r.ticker}</td>
 <td>${(()=>{const cap=r.cap_label||'—';const c=cap==='Mega'?'#a78bfa':cap==='Large'?'var(--accent2)':cap==='Mid'?'var(--green)':cap==='Small'?'var(--warn)':cap==='Micro'?'var(--muted2)':'var(--muted)';return `<span style="font-size:.62rem;font-family:var(--mono);color:${c};padding:1px 5px;border-radius:3px;border:1px solid ${c}40">${cap}</span>`;})()}</td>
 <td style="font-family:var(--mono)">$${fn(r.price)}</td>
@@ -1386,7 +1389,7 @@ function _scanRow(r, i) {
 <td style="max-width:100px">${badgeHtml}</td>
 <td style="font-family:var(--mono);color:${rsiColor}">${r.rsi!=null?fn(r.rsi,1):'—'}</td>
 <td style="font-size:.68rem"><span style="color:${hasMomt?'var(--green)':'var(--muted)'}">${hasMomt?'✓ YES':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasBB?'var(--warn)':'var(--muted)'}">${hasBB?'✓ YES':'—'}</span></td>
+<td style="font-size:.68rem"><span style="color:${hasGP?'var(--warn)':hasOTE?'var(--accent2)':'var(--muted)'}">${hasGP?'✓ GP':hasOTE?'✓ OTE':'—'}</span></td>
 <td style="font-size:.68rem"><span style="color:${hasUp?'var(--accent2)':'var(--muted)'}">${hasUp?'✓ YES':'—'}</span></td>
 <td style="display:flex;gap:4px">
   <button class="btn b-acc b-xs" onclick="autoTrade('${r.ticker}',${r.price},'score${r.score}','UPTREND',${fn(r.rsi,1)})">Execute</button>
@@ -1473,6 +1476,7 @@ async function runMarketScan() {
         allResults.push(d);
         allResults.sort((a, b) => b.score - a.score);
         document.getElementById('stWinners').textContent = allResults.filter(x=>x.score>=60).length;
+        document.getElementById('stBreakouts').textContent = allResults.filter(x=>x.in_golden_pocket||(x.reasons||[]).some(r=>r.includes('golden pocket')||r.includes('optimal trade zone'))).length;
         document.getElementById('stAvg').textContent     = allResults.length ? Math.round(allResults.reduce((s,x)=>s+x.score,0)/allResults.length) : 0;
         document.getElementById('scanStatus').textContent = `Found ${d.ticker} — ${d.score}/100`;
         // Show results as they arrive (partial render)
