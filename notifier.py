@@ -85,12 +85,12 @@ def format_daily_alert(picks: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def format_pre_trade_alert(adr: str, xetra: str, usd: float, score: int,
+def format_pre_trade_alert(ticker: str, _unused: str, usd: float, score: int,
                            free_cash: float, reasons: list[str]) -> str:
     reasons_str = " | ".join(reasons[:2]) if reasons else "momentum signal"
     return (
         f"⚡ *RaanuBot — About to BUY*\n"
-        f"   Stock: *{adr}*\n"
+        f"   Stock: *{ticker}*\n"
         f"   Amount: *${usd:.2f}*\n"
         f"   Score: {score}/100\n"
         f"   Signal: {reasons_str}\n"

@@ -106,42 +106,94 @@ Then open: **http://localhost:8000**
 ---
 
 ## 📊 Strategy Engine — strategy.py
-Indicators computed locally from Yahoo Finance daily OHLCV data.
+**Trend + momentum model (pullback-in-uptrend).** Indicators computed locally
+from Yahoo Finance daily OHLCV. The engine only surfaces stocks that can
+actually make money — it does NOT buy falling knives.
 
-| Indicator | Params | Weight |
-|-----------|--------|--------|
-| RSI | 14 periods | <30 +30pts, <40 +18pts, >70 −25pts |
-| MACD | 12/26/9 | Bullish +25pts, fresh crossover +10pts extra |
-| EMA Trend | EMA50 vs EMA200 | Above +20pts, below −15pts |
-| Bollinger | 20 periods, 2σ | At lower band +15pts, stretched −5pts |
+**HARD UPTREND GATE:** a stock must be in a confirmed uptrend
+(`price > EMA200` AND `EMA50 > EMA200` AND `EMA50 rising`) or its score is
+capped at `UPTREND_SCORE_CAP` (45) so it can never reach the actionable
+threshold. Only `uptrend == true` stocks become picks.
 
-**Score range:** 0–100. Score ≥ 60 = actionable BUY signal.
+Among uptrending stocks, scoring favours a **healthy pullback entry** (price
+dipped toward the rising 20-EMA, RSI 40–60) over extended/overbought names.
+
+| Component | Max | Notes |
+|-----------|----:|-------|
+| Trend structure | 20 | confirmed uptrend + price above EMA50 |
+| Momentum (3M ROC) | 15 | scaled by 3-month return |
+| Relative strength vs SPY | 12 | only rewards stocks **beating the market** |
+| MACD regime | 10 | bullish + fresh crossover bonus |
+| Pullback quality (RSI zone) | 15 | RSI 40–55 ideal; >72 penalised (chasing) |
+| Proximity to 20-EMA | 10 | pulled-back-to-support bonus; >12% above = chasing penalty |
+| Volume / structure | 10 | up-day on above-avg volume, holding above weekly low |
+| Fib golden pocket (SMC) | 12 | price retraced into 0.618–0.786 zone of last up-impulse, turning up |
+
+**Score range:** 0–100. Score ≥ 60 **and** `uptrend == true` = actionable BUY.
+
+**Golden-pocket layer (SMC structure):** `golden_pocket()` finds the last
+up-impulse (fractal swing low → higher swing high) and the Fibonacci
+retracement the price sits in. Inside an uptrend, price sitting in the
+0.618–0.786 "golden pocket" and turning up is the highest-conviction pullback
+entry — an original implementation of public Fibonacci/Smart-Money concepts
+(NOT a copy of any invite-only indicator). Only applied when `uptrend == true`.
 
 ### Key Functions
-- `score_ticker(ticker)` — download + score one ticker
-- `score_from_df(ticker, df)` — score from pre-fetched DataFrame (fast path)
+- `score_ticker(ticker, bench_ret_3m=None)` — download + score one ticker
+- `score_from_df(ticker, df, bench_ret_3m=None)` — score from pre-fetched DataFrame (fast path)
+- `benchmark_return_3m()` — SPY 3-month return, the relative-strength benchmark (fetched once per scan)
+- `golden_pocket(high, low, close)` — Fib retracement zone of the last swing impulse
+- `_score_core(...)` — shared scoring logic behind both entry points
 - `batch_download(tickers)` — one yfinance call for all tickers, returns `{ticker: df}`
   - Uses `timeout=8` so a stalled ticker fails fast
   - Delisted/unavailable tickers return empty DataFrames and are silently skipped
 
+Each result dict now also carries: `uptrend` (bool), `mom_1m`, `mom_3m`,
+`rel_strength`, `ema20`, `in_golden_pocket` (bool), `swing_high`, `swing_low`, `fib_retrace`.
+
+---
+
+## 🚪 Exit Engine — profit_monitor.py
+
+Polls open Alpaca positions every `PROFIT_CHECK_SEC` (default 300s) and closes
+on the first rule that fires. A **trailing stop** replaced the old fixed +5%
+take-profit so winners can ride the trend:
+
+| Rule | Default | Behaviour |
+|------|---------|-----------|
+| Hard stop-loss | -3% | Cut losers fast (`STOP_LOSS_PCT`) |
+| Trailing stop | arms at +5%, trails 2.5% | Track peak once up `TRAIL_ACTIVATE_PCT`; exit if price gives back `TRAIL_PCT` from peak |
+| Hard take-profit | disabled (0) | Optional ceiling backstop (`HARD_TAKE_PROFIT_PCT`) |
+
+Per-position peak prices persist to `position_peaks.json` so the trail keeps
+its high-water mark across restarts. Wired into the FastAPI lifespan
+(`server.py`) — runs continuously alongside the scheduled-trade loop.
+
 ---
 
 ## 🔭 Scanner — scanner.py
-Scans 42 US-listed tickers (mega-caps + European ADRs) in one batch download.
+**Strategy-driven, not brute-force.** The scanner screens a single curated,
+liquid **quality universe** (`FALLBACK_UNIVERSE`, ~400 large/mid-cap US
+equities + sector ETFs) and only surfaces stocks that pass our strategy — those
+in a **confirmed uptrend**. It does NOT scan the entire Alpaca universe
+(thousands of illiquid names the strategy would never trade); a big scan is
+unnecessary when only uptrend pullbacks are ever bought.
 
-**Universe includes (~418 US-listed tickers, no European ADRs):**
-- Mega-cap tech: AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA, AMD, NFLX, AVGO
-- Semiconductors, Software/Cloud, Cybersecurity, Fintech
-- Healthcare/Pharma/Biotech, Financials, Consumer, Energy
-- Industrials/Defense, Materials, Utilities, Communication, REITs
-- Broad market & sector ETFs: SPY, QQQ, IWM, XLE, XLF, XLV, ARKK, etc.
-- **No European ADRs** — pure US-listed stocks only (Alpaca-native)
+- `find_top_picks(n)` — auto-trader path. Batch-scores the curated universe,
+  keeps only `uptrend == true AND score >= 60`, returns the top `n`.
+- `/api/scan/stream` (browser Live Signals) — screens the **same** curated
+  universe and streams **only confirmed-uptrend candidates** (emits a lightweight
+  `progress` tick per 25 tickers so the bar advances; non-uptrend names are
+  scored but never emitted).
+- Both compute the SPY relative-strength benchmark once per scan.
 
 **TEST_UNIVERSE** (used when `force=true`): AAPL, NVDA, MSFT, GOOGL, META
 
-**Performance:** ~1–3 seconds for full universe (single batch yfinance call).
+**Performance:** curated universe scans in a few seconds (batched yfinance,
+`CHUNK_SIZE=250`). `get_universe()` (full Alpaca list) still exists but is no
+longer used for scanning — kept only for reference.
 
-**Note:** All tickers are US-listed and directly executable on Alpaca. No XETRA `.DE` tickers — those caused Alpaca 401 errors and yfinance timeout issues.
+**Note:** All tickers are US-listed and directly executable on Alpaca.
 
 ---
 
@@ -186,8 +238,11 @@ WEEKLY_TRADE_LIMIT=2
 PER_TRADE_MAX_USD=500
 MIN_SIGNAL_SCORE=60
 SCAN_INTERVAL_SEC=1800
-TAKE_PROFIT_PCT=5.0
-STOP_LOSS_PCT=3.0
+STOP_LOSS_PCT=3.0            # Hard stop-loss (cut losers)
+TRAIL_ACTIVATE_PCT=5.0      # Arm the trailing stop once up this % (defaults to TAKE_PROFIT_PCT)
+TRAIL_PCT=2.5               # Exit if price gives back this % from its peak
+HARD_TAKE_PROFIT_PCT=0      # Optional hard TP ceiling; 0 = disabled (let the trail ride)
+TAKE_PROFIT_PCT=5.0         # Legacy — now only the fallback for TRAIL_ACTIVATE_PCT
 PROFIT_CHECK_SEC=300
 ```
 

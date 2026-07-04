@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 BERLIN = ZoneInfo("Europe/Berlin")
 IST    = ZoneInfo("Asia/Kolkata")
+US_EAST = ZoneInfo("US/Eastern")
 
 # ---------- CONFIG ----------
 HERE = Path(__file__).parent
@@ -125,7 +126,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
 
     actionable = [
         p for p in picks
-        if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("us_adr")
+        if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("uptrend") and p.get("ticker")
     ]
 
     if not actionable:
@@ -149,7 +150,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
     for pick in actionable:
         if placed >= n_orders:
             break
-        ticker = pick["us_adr"].upper()
+        ticker = pick["ticker"].upper()
         if ticker in held:
             log.info(f"[{label}] {ticker} already held — skipping")
             continue
@@ -169,7 +170,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
             result = await alpaca_buy_notional(ticker, notional)
             trader.tradelog.record({
                 "action":       "BUY",
-                "us_adr":       ticker,
+                "ticker":       ticker,
                 "notional_usd": notional,
                 "score":        pick["score"],
                 "reasons":      pick.get("reasons", []),
@@ -194,13 +195,79 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
     log.info(f"[{label}] Done — placed {placed}/{n_orders} order(s)")
 
 
-# Berlin schedule:
+# ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
+async def _premarket_scan_and_notify():
+    """Scan the universe and send top picks via Telegram. No orders placed."""
+    from notifier import send_telegram
+    log.info("[Pre-market] Running scan 30 min before pre-market...")
+    picks = await _run_scan_and_cache()
+
+    if not picks:
+        send_telegram(
+            "📡 *RaanuBot — Pre-market Scan*\n"
+            "⚠️ No strong signals found. Market may be choppy today."
+        )
+        return
+
+    lines = [
+        "📡 *RaanuBot — Pre-market Scan*",
+        f"🕒 30 min before pre-market | {len(picks)} signal(s)\n",
+    ]
+    medals = ["🏆", "🥈", "🥉"]
+    for i, p in enumerate(picks):
+        score = p.get("score", 0)
+        heat = "🔥" if score >= 75 else "📈"
+        ticker = p.get("ticker", "?")
+        price = p.get("price", 0)
+        rsi = p.get("rsi", 0)
+        reasons = " | ".join(p.get("reasons", [])[:2])
+        gp = " | 🎯 Golden Pocket" if p.get("in_golden_pocket") else ""
+        lines.append(
+            f"{medals[i] if i < 3 else '  '} *{ticker}* {heat} Score {score}/100\n"
+            f"   💵 ${price:.2f} | RSI {rsi:.0f}{gp}\n"
+            f"   {reasons}"
+        )
+    lines.append("\n_Auto-trader will execute at market open if enabled._")
+    send_telegram("\n".join(lines))
+    log.info(f"[Pre-market] Telegram sent with {len(picks)} picks")
+
+
+# Schedule slots:
+#   03:30 ET  — pre-market scan + Telegram alert (scan only, no orders)
 #   07:00 Berlin — scan + execute top 2 orders  (alternating days)
 #   14:30 Berlin — scan + execute top 1 order   (alternating days)
+
+# Trade slots run in Berlin time
 _BERLIN_SLOTS = [
     (7,  0,  2, "Morning-7am"),
     (14, 30, 1, "Afternoon-2:30pm"),
 ]
+
+# Pre-market slot runs in US/Eastern time
+_PREMARKET_ET = (3, 30)  # 3:30 AM ET = 30 min before 4:00 AM pre-market
+
+
+async def _premarket_loop():
+    """Fires daily at 3:30 AM ET — scan + Telegram notification, no orders."""
+    log.info("Pre-market loop started — 3:30 AM ET daily (30 min before pre-market)")
+    while True:
+        now = datetime.now(US_EAST)
+        t = now.replace(hour=_PREMARKET_ET[0], minute=_PREMARKET_ET[1], second=0, microsecond=0)
+        if now >= t:
+            t += timedelta(days=1)
+        # Skip weekends (Sat=5, Sun=6)
+        while t.weekday() >= 5:
+            t += timedelta(days=1)
+        sleep_sec = (t - now).total_seconds()
+        log.info(
+            f"Next pre-market scan: {t.strftime('%Y-%m-%d %H:%M %Z')} "
+            f"(in {sleep_sec/3600:.1f}h)"
+        )
+        await asyncio.sleep(sleep_sec)
+        try:
+            await _premarket_scan_and_notify()
+        except Exception as e:
+            log.exception(f"Pre-market scan error: {e}")
 
 
 async def _scheduled_trade_loop():
@@ -244,6 +311,7 @@ async def _scheduled_trade_loop():
 async def lifespan(app: FastAPI):
     from profit_monitor import monitor_loop
     tasks = [
+        asyncio.create_task(_premarket_loop()),
         asyncio.create_task(_scheduled_trade_loop()),
         asyncio.create_task(monitor_loop()),
     ]
@@ -331,12 +399,48 @@ def get_config():
 
 @app.get("/api/health")
 def health():
+    from notifier import is_configured as tg_configured
     return {
         "status":         "ok",
         "broker":         "alpaca",
         "mode":           ALPACA_MODE,
         "key_configured": bool(ALPACA_API_KEY),
+        "telegram_configured": tg_configured(),
+        "config": {
+            "stop_loss_pct":       os.getenv("STOP_LOSS_PCT", "3.0"),
+            "trail_activate_pct":  os.getenv("TRAIL_ACTIVATE_PCT", os.getenv("TAKE_PROFIT_PCT", "5.0")),
+            "trail_pct":           os.getenv("TRAIL_PCT", "2.5"),
+            "hard_take_profit_pct": os.getenv("HARD_TAKE_PROFIT_PCT", "0"),
+            "scan_interval_sec":   os.getenv("SCAN_INTERVAL_SEC", "1800"),
+            "min_signal_score":    os.getenv("MIN_SIGNAL_SCORE", "60"),
+            "weekly_trade_limit":  os.getenv("WEEKLY_TRADE_LIMIT", "2"),
+            "per_trade_max_usd":   os.getenv("PER_TRADE_MAX_USD", "500"),
+            "profit_check_sec":    os.getenv("PROFIT_CHECK_SEC", "300"),
+        },
     }
+
+
+@app.post("/api/telegram/test")
+def telegram_test():
+    from notifier import send_telegram, is_configured
+    if not is_configured():
+        return {"ok": False, "error": "Telegram not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env"}
+    ok = send_telegram("🧪 *RaanuTradingBot — Test*\nTelegram notifications are working.")
+    return {"ok": ok, "error": None if ok else "Send failed — check bot token and chat ID"}
+
+
+@app.get("/api/exit-config")
+def get_exit_cfg():
+    from profit_monitor import get_exit_config
+    return get_exit_config()
+
+
+@app.post("/api/exit-config")
+async def save_exit_cfg(request: Request):
+    from profit_monitor import update_exit_config
+    body = await request.json()
+    updated = update_exit_config(body)
+    return {"ok": True, "config": updated}
 
 
 @app.get("/api/account/cash")
@@ -498,7 +602,7 @@ async def auto_scan_preview():
         "scanned_at": cached["scanned_at"],
         "min_score":  MIN_SIGNAL_SCORE,
         "picks":      cached["picks"],
-        "actionable": [p for p in cached["picks"] if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("us_adr")],
+        "actionable": [p for p in cached["picks"] if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("uptrend") and p.get("ticker")],
     }
 
 
@@ -736,28 +840,29 @@ async def stocks_market_movers(top: int = 10):
 @app.get("/api/scan/stream")
 async def scan_stream():
     """
-    SSE endpoint — fetches full Alpaca tradable universe, then batch-downloads
-    in chunks of CHUNK_SIZE so results stream progressively to the browser.
-    Sends an error event (with 'failed': true) if the universe fetch fails.
+    SSE endpoint — scans the curated, liquid quality universe (the same one the
+    auto-trader uses) and streams ONLY stocks that pass our strategy: those in a
+    confirmed uptrend. Non-uptrend names are scored but not emitted — there's no
+    point brute-forcing the entire market when the strategy only ever buys
+    uptrend pullbacks. Batch-downloads in chunks so results stream progressively.
     """
-    from scanner import get_universe, get_ticker_name, CHUNK_SIZE
-    from strategy import score_from_df, batch_download
+    from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
+    from strategy import score_from_df, batch_download, benchmark_return_3m
 
     async def generator():
         import json
         loop = asyncio.get_event_loop()
 
-        # Fetch universe — fail loudly if Alpaca is unreachable
-        try:
-            universe = await loop.run_in_executor(None, get_universe)
-        except Exception as e:
-            yield f"data: {json.dumps({'failed': True, 'error': str(e)})}\n\n"
-            return
+        universe = FALLBACK_UNIVERSE
+
+        # SPY 3-month return — relative-strength benchmark (computed once).
+        bench = await loop.run_in_executor(None, benchmark_return_3m)
 
         total = len(universe)
         yield f"data: {json.dumps({'status': 'downloading', 'total': total})}\n\n"
 
         scanned = 0
+        emitted = 0
         chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
 
         def _cap_label(mc):
@@ -778,16 +883,23 @@ async def scan_stream():
         for chunk in chunks:
             data = await loop.run_in_executor(None, batch_download, chunk)
             for ticker in chunk:
-                result = score_from_df(ticker, data.get(ticker))
+                result = score_from_df(ticker, data.get(ticker), bench_ret_3m=bench)
+                scanned += 1
+                # Lightweight progress tick so the bar advances even though most
+                # tickers are filtered out (only uptrend candidates are emitted).
+                if scanned % 25 == 0 or scanned == total:
+                    yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
+                # Strategy filter: only surface confirmed-uptrend candidates.
+                if not (result.get("ok") and result.get("uptrend")):
+                    continue
                 result["total"] = total
                 result["name"] = get_ticker_name(ticker)
-                if result.get("ok") and result.get("score", 0) >= 40:
-                    mc = await loop.run_in_executor(None, _fetch_market_cap, ticker)
-                    result["cap_label"] = _cap_label(mc)
+                mc = await loop.run_in_executor(None, _fetch_market_cap, ticker)
+                result["cap_label"] = _cap_label(mc)
                 yield f"data: {json.dumps(result)}\n\n"
-                scanned += 1
+                emitted += 1
 
-        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'total': total})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
 
     return StreamingResponse(
         generator(),
@@ -817,7 +929,8 @@ if __name__ == "__main__":
     print(f"  Broker URL:    {BROKER_BASE}")
     print(f"  API key:       {'configured ✓' if ALPACA_API_KEY else 'NOT SET — edit .env'}")
     print(f"  Dashboard:     http://localhost:8000")
-    print(f"  Schedule:      07:00 Berlin — top 2 orders | 14:30 Berlin — top 1 order")
+    print(f"  Pre-market:    03:30 ET daily — scan + Telegram alert (no orders)")
+    print(f"  Trade slots:   07:00 Berlin — top 2 orders | 14:30 Berlin — top 1 order")
     print(f"                 Alternating days (trade / rest / trade / rest...)")
     print(f"  Weekly limit:  {WEEKLY_TRADE_LIMIT} trades / ${PER_TRADE_MAX_USD} max each")
     print(f"  Min score:     {MIN_SIGNAL_SCORE}/100")

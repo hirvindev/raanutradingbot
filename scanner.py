@@ -14,7 +14,7 @@ import os
 from typing import Optional
 
 import httpx
-from strategy import score_from_df, batch_download
+from strategy import score_from_df, batch_download, benchmark_return_3m
 
 log = logging.getLogger("raanu.scanner")
 
@@ -168,6 +168,11 @@ def find_top_picks(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
     universe = TEST_UNIVERSE[:max_stocks] if max_stocks else FALLBACK_UNIVERSE
     log.info(f"Auto-trader scanning {len(universe)} curated stocks...")
 
+    # SPY 3-month return — the relative-strength benchmark. Computed once so
+    # only stocks actually beating the market score well.
+    bench = benchmark_return_3m()
+    log.info(f"Benchmark (SPY 3M) = {bench * 100:.1f}%" if bench is not None else "Benchmark unavailable")
+
     results = []
     for i in range(0, len(universe), CHUNK_SIZE):
         chunk = universe[i:i + CHUNK_SIZE]
@@ -175,17 +180,19 @@ def find_top_picks(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
         log.info(f"Chunk {i//CHUNK_SIZE + 1}: {len(data)}/{len(chunk)} tickers returned data")
         for ticker in chunk:
             try:
-                r = score_from_df(ticker, data.get(ticker))
-                if r.get("ok") and r.get("score", 0) >= 60:
+                r = score_from_df(ticker, data.get(ticker), bench_ret_3m=bench)
+                # Only actionable, confirmed-uptrend names are picks.
+                if r.get("ok") and r.get("uptrend") and r.get("score", 0) >= 60:
                     results.append(r)
             except Exception as e:
                 log.debug(f"Score error {ticker}: {e}")
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    log.info(f"Auto-trader scan done — {len(results)} picks above threshold, returning top {n}")
+    log.info(f"Auto-trader scan done — {len(results)} uptrend picks above threshold, returning top {n}")
     return results[:n]
 
 
 def get_universe_summary() -> dict:
-    u = get_universe()
-    return {"exchange": "US", "total_stocks": len(u)}
+    # Report the curated, strategy-scanned universe (not the full Alpaca list) —
+    # the scanner only ever screens these liquid quality names.
+    return {"exchange": "US", "total_stocks": len(FALLBACK_UNIVERSE)}

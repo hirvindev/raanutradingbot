@@ -262,8 +262,9 @@ class AutoTrader:
         best = next(
             (p for p in picks
              if p.get("score", 0) >= MIN_SIGNAL_SCORE
-             and p.get("us_adr")
-             and p["us_adr"].upper() not in held),
+             and p.get("uptrend")
+             and p.get("ticker")
+             and p["ticker"].upper() not in held),
             None,
         )
 
@@ -279,7 +280,7 @@ class AutoTrader:
             self.last_decision = {"action": "hold", "reason": msg}
             return
 
-        adr = best["us_adr"]
+        sym = best["ticker"]
 
         # ── Gate 5: position sizing (min of cap and 5% of free cash) ─────
         max_by_cash = round(free_cash * 0.05, 2)   # never risk >5% of cash
@@ -293,24 +294,24 @@ class AutoTrader:
 
         self.event(
             "buy",
-            f"BUY ${notional} of {adr} (XETRA: {best['ticker']}) "
+            f"BUY ${notional} of {sym} "
             f"score {best['score']} — cash ${free_cash:.0f}, 5% cap ${max_by_cash:.0f} — "
             f"{' | '.join(best['reasons'][:2])}",
-            {"score": best["score"], "xetra": best["ticker"], "adr": adr, "usd": notional},
+            {"score": best["score"], "ticker": sym, "usd": notional},
         )
 
         # ── Notify BEFORE placing the order ──────────────────────────────
         try:
             from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm
             send_whatsapp(format_pre_trade_alert(
-                adr, best["ticker"], notional, best["score"],
+                sym, sym, notional, best["score"],
                 free_cash, best.get("reasons", []),
             ))
         except Exception:
             pass
 
         try:
-            result = await alpaca_buy_notional(adr, notional)
+            result = await alpaca_buy_notional(sym, notional)
         except Exception as e:
             self.event("error", f"Alpaca rejected order: {e}")
             self.last_decision = {"action": "error", "reason": str(e)}
@@ -318,8 +319,7 @@ class AutoTrader:
 
         self.tradelog.record({
             "action":          "BUY",
-            "xetra_ticker":    best["ticker"],
-            "us_adr":          adr,
+            "ticker":          sym,
             "notional_usd":    notional,
             "score":           best["score"],
             "reasons":         best["reasons"],
@@ -328,15 +328,14 @@ class AutoTrader:
 
         # Notify AFTER order confirmed
         try:
-            send_whatsapp(format_trade_confirm("BUY", adr, notional, result.get("status", "submitted")))
+            send_whatsapp(format_trade_confirm("BUY", sym, notional, result.get("status", "submitted")))
         except Exception:
             pass
 
-        self.event("filled", f"Order submitted — {adr} id {result.get('id', '?')}")
+        self.event("filled", f"Order submitted — {sym} id {result.get('id', '?')}")
         self.last_decision = {
             "action":  "buy",
-            "xetra":   best["ticker"],
-            "adr":     adr,
+            "ticker":  sym,
             "usd":     notional,
             "score":   best["score"],
         }

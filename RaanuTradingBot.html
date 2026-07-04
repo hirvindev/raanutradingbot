@@ -230,11 +230,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <div class="sb-item" onclick="nav('logs',this)"><span class="sb-icon">≡</span>Engine Logs</div>
   <div class="sb-foot">
     <div>Mode: <strong id="sbMode">—</strong></div>
-    <div>Scan: <strong id="sbEng" style="color:var(--accent)">07:00 &amp; 18:00</strong></div>
+    <div>Pre-mkt: <strong style="color:var(--warn)">3:30 AM ET</strong></div>
+    <div>Trade: <strong id="sbEng" style="color:var(--accent)">07:00 &amp; 14:30</strong></div>
     <div>Auto-trade: <strong id="sbNext" style="color:var(--muted)">OFF</strong></div>
     <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
-      Stop Loss: <strong style="color:var(--red)" id="sbSL">5%</strong><br>
-      Target: <strong style="color:var(--green)">+4–5% /mo</strong><br>
+      Stop Loss: <strong style="color:var(--red)" id="sbSL">3%</strong><br>
+      Trail: <strong style="color:var(--green)">+5% arm / 2.5%</strong><br>
       Positions: <strong id="sbPos">0</strong> open
     </div>
   </div>
@@ -477,48 +478,103 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 <div id="s-strat" class="sec">
   <div class="g2">
     <div class="card">
-      <div class="card-title">Signal Weights (must total 100%)</div>
-      <div style="display:flex;flex-direction:column;gap:11px" id="wCtrls"></div>
-      <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:.68rem;font-family:var(--mono);color:var(--muted)">Total: <span id="wTot" style="color:var(--green)">100%</span></span>
-        <button class="btn b-acc b-sm" onclick="saveWeights()">Save</button>
+      <div class="card-title">Scoring Engine — Trend + Momentum (Pullback-in-Uptrend)</div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--green)">uptrend = true</span> AND <span style="color:var(--green)">score &ge; 60</span> become actionable BUY signals.</div>
+      <table>
+        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--accent)">Trend structure</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Confirmed uptrend + price above EMA50</td></tr>
+          <tr><td style="color:var(--accent)">Momentum (3M ROC)</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">3-month rate of change</td></tr>
+          <tr><td style="color:var(--accent)">Relative strength vs SPY</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">Only rewards stocks beating the market</td></tr>
+          <tr><td style="color:var(--accent)">MACD regime</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Bullish + fresh crossover bonus</td></tr>
+          <tr><td style="color:var(--accent)">Pullback quality (RSI)</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">RSI 40–55 ideal; >72 penalised (chasing)</td></tr>
+          <tr><td style="color:var(--accent)">Proximity to 20-EMA</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Pulled-back-to-support; >12% above = penalty</td></tr>
+          <tr><td style="color:var(--accent)">Volume / structure</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Up-day on above-avg volume, holding weekly low</td></tr>
+          <tr><td style="color:var(--accent)">Fib golden pocket (SMC)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">Price in 0.618–0.786 retracement, turning up</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--warn)">
+        Hard gate: price &gt; EMA200 AND EMA50 &gt; EMA200 AND EMA50 rising — otherwise score capped at 45 (never actionable)
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Risk Controls</div>
+      <div class="card-hdr">
+        <div class="card-title" style="margin:0">Exit Engine — Trailing Stop</div>
+        <button class="btn b-acc b-sm" onclick="saveExitConfig()">Save</button>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Polls positions every <span id="stratProfitSec" style="color:var(--accent)">300s</span>. First rule to fire closes the position. Changes apply immediately — no restart needed.</div>
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="fg"><div class="fl">Stop Loss % <span style="color:var(--red)" id="slD">5%</span></div><input type="range" min="1" max="15" value="5" id="slR" oninput="slD.textContent=this.value+'%';sbSL.textContent=this.value+'%'"></div>
-        <div class="fg"><div class="fl">Take Profit % <span style="color:var(--green)" id="tpD">8%</span></div><input type="range" min="2" max="30" value="8" id="tpR" oninput="tpD.textContent=this.value+'%'"></div>
-        <div class="fg"><div class="fl">Max Position Size <span style="color:var(--accent)" id="psD">20%</span></div><input type="range" min="5" max="50" value="20" id="psR" oninput="psD.textContent=this.value+'%'"></div>
-        <div class="fg"><div class="fl">Min Score to Trade <span style="color:var(--accent)" id="msD">70</span></div><input type="range" min="50" max="95" value="70" id="msR" oninput="msD.textContent=this.value"></div>
-        <div class="fg"><div class="fl">Max Positions <span style="color:var(--accent)" id="mpD">6</span></div><input type="range" min="1" max="20" value="6" id="mpR" oninput="mpD.textContent=this.value"></div>
-        <div class="fg"><div class="fl">Monthly Circuit Breaker <span style="color:var(--red)" id="cbD">-8%</span></div><input type="range" min="3" max="20" value="8" id="cbR" oninput="cbD.textContent='-'+this.value+'%'"></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="color:var(--red);font-size:.75rem;font-weight:600;min-width:120px">Hard stop-loss</span>
+          <div style="display:flex;align-items:center;gap:4px;flex:1">
+            <span style="color:var(--red);font-size:.72rem">-</span>
+            <input type="number" id="exitSL" step="0.5" min="1" max="20" value="3.0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
+            <span style="color:var(--muted);font-size:.72rem">%</span>
+          </div>
+          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Cut losers fast</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="color:var(--green);font-size:.75rem;font-weight:600;min-width:120px">Trail activate</span>
+          <div style="display:flex;align-items:center;gap:4px;flex:1">
+            <span style="color:var(--green);font-size:.72rem">+</span>
+            <input type="number" id="exitTrailAct" step="0.5" min="1" max="50" value="5.0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
+            <span style="color:var(--muted);font-size:.72rem">%</span>
+          </div>
+          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Arm trailing stop once up this %</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="color:var(--accent);font-size:.75rem;font-weight:600;min-width:120px">Trail giveback</span>
+          <div style="display:flex;align-items:center;gap:4px;flex:1">
+            <input type="number" id="exitTrailPct" step="0.5" min="0.5" max="20" value="2.5" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
+            <span style="color:var(--muted);font-size:.72rem">%</span>
+          </div>
+          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Exit if price gives back this % from peak</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="color:var(--warn);font-size:.75rem;font-weight:600;min-width:120px">Hard take-profit</span>
+          <div style="display:flex;align-items:center;gap:4px;flex:1">
+            <span style="color:var(--green);font-size:.72rem">+</span>
+            <input type="number" id="exitHardTP" step="1" min="0" max="100" value="0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
+            <span style="color:var(--muted);font-size:.72rem">%</span>
+          </div>
+          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">0 = disabled (let trail ride)</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--muted2)">
+        Per-position peak persisted to <span style="color:var(--accent)">position_peaks.json</span> — trail survives restarts
       </div>
     </div>
   </div>
-  <div class="card">
-    <div class="card-title">Execution Settings</div>
-    <div class="g4">
-      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div><div style="font-size:.76rem;font-weight:600">Auto Execute</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Place orders automatically</div></div>
-        <label class="tog"><input type="checkbox" id="tAuto" checked><span class="tog-s"></span></label>
-      </div>
-      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div><div style="font-size:.76rem;font-weight:600">News Filter</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Block on bad sentiment</div></div>
-        <label class="tog"><input type="checkbox" id="tNews" checked><span class="tog-s"></span></label>
-      </div>
-      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div><div style="font-size:.76rem;font-weight:600">Fundamentals</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">P/E + EPS filter</div></div>
-        <label class="tog"><input type="checkbox" id="tFund" checked><span class="tog-s"></span></label>
-      </div>
-      <div class="card-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div><div style="font-size:.76rem;font-weight:600">Auto Close TP</div><div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Sell at take-profit</div></div>
-        <label class="tog"><input type="checkbox" id="tTP" checked><span class="tog-s"></span></label>
-      </div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-title">Scanner Config</div>
+      <table>
+        <thead><tr><th>Setting</th><th style="text-align:right">Value</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--muted2)">Universe</td><td style="text-align:right;font-family:var(--mono);color:var(--accent)" id="stratUniverse">~400 curated</td></tr>
+          <tr><td style="color:var(--muted2)">Scan interval</td><td style="text-align:right;font-family:var(--mono)" id="stratScanInt">30 min</td></tr>
+          <tr><td style="color:var(--muted2)">Min signal score</td><td style="text-align:right;font-family:var(--mono);color:var(--green)" id="stratMinScore">60</td></tr>
+          <tr><td style="color:var(--muted2)">Weekly trade limit</td><td style="text-align:right;font-family:var(--mono)" id="stratWeeklyLimit">2</td></tr>
+          <tr><td style="color:var(--muted2)">Per trade max</td><td style="text-align:right;font-family:var(--mono)" id="stratPerTrade">$500</td></tr>
+          <tr><td style="color:var(--muted2)">Position sizing</td><td style="text-align:right;font-family:var(--mono);color:var(--muted2)">min($500, 5% free cash)</td></tr>
+        </tbody>
+      </table>
     </div>
-    <div class="g2" style="margin-top:.7rem;gap:.7rem">
-      <div class="fg"><div class="fl">Scan Interval</div><select id="scanInt"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option></select></div>
-      <div class="fg"><div class="fl">Order Type</div><select id="ordType"><option value="MARKET" selected>Market</option><option value="LIMIT">Limit (0.2% below ask)</option></select></div>
+    <div class="card">
+      <div class="card-title">Notifications</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="font-size:1rem">📱</span>
+          <div>
+            <div style="font-size:.76rem;font-weight:600">Telegram Alerts</div>
+            <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)" id="stratTgStatus">checking...</div>
+          </div>
+          <button class="btn b-out b-xs" style="margin-left:auto" onclick="testTelegram()">Test</button>
+        </div>
+        <div style="padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.65rem;font-family:var(--mono);color:var(--muted2)">
+          Pre-trade alert → Order confirmation → Profit/loss close → Portfolio status
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -619,7 +675,7 @@ const S = {
   closedTrades:[], // derived from order history for win-rate
   slHitsThisMonth:0,
   watchlist: JSON.parse(localStorage.getItem('wl')||'["AAPL","NVDA","MSFT","META","AMZN","TSLA"]'),
-  weights:   JSON.parse(localStorage.getItem('wts')||'null') || {rsi:25,macd:25,bb:20,ema:15,news:10,fund:5},
+  weights:   {},
   todayTrades:0,
 };
 
@@ -1372,7 +1428,7 @@ async function runMarketScan() {
           document.getElementById('rNum').textContent = allResults[0].score;
           document.getElementById('rLbl').textContent = 'STRONGEST SIGNAL';
         }
-        log(`Scan done — ${d.scanned}/${d.total} stocks scored, ${allResults.length} with score ≥ 40`, 'ok');
+        log(`Scan done — ${d.scanned} screened, ${d.emitted ?? allResults.length} in confirmed uptrend, ${allResults.filter(x=>x.score>=60).length} actionable (score ≥ 60)`, 'ok');
         resolve();
         return;
       }
@@ -1382,28 +1438,31 @@ async function runMarketScan() {
         setEl('universeCount', total + '+');
         return;
       }
+
+      // Lightweight progress tick — advance the bar as tickers are screened.
+      if (d.progress) {
+        scanned = d.scanned || scanned;
+        total   = d.total || total;
+        const pct = Math.round(scanned / total * 100);
+        document.getElementById('scanBar').style.width    = pct + '%';
+        document.getElementById('scanCount').textContent  = `${scanned} / ${total}`;
+        document.getElementById('scanStatus').textContent = `Screening — ${scanned}/${total} (uptrend only)`;
+        document.getElementById('stScanned').textContent  = scanned;
+        return;
+      }
+
       if (!d.ticker) return;
 
-      scanned++;
-      total = d.total || total;
-      const pct = Math.round(scanned / total * 100);
-      document.getElementById('scanBar').style.width    = pct + '%';
-      document.getElementById('scanCount').textContent  = `${scanned} / ${total}`;
-      document.getElementById('scanStatus').textContent = `Scored ${d.ticker} — ${d.score}/100`;
-      document.getElementById('stScanned').textContent  = scanned;
-
+      // Only confirmed-uptrend candidates reach the browser now.
       if (d.ok && d.score >= 40) {
         allResults.push(d);
         allResults.sort((a, b) => b.score - a.score);
         document.getElementById('stWinners').textContent = allResults.filter(x=>x.score>=60).length;
         document.getElementById('stAvg').textContent     = allResults.length ? Math.round(allResults.reduce((s,x)=>s+x.score,0)/allResults.length) : 0;
+        document.getElementById('scanStatus').textContent = `Found ${d.ticker} — ${d.score}/100`;
         // Show results as they arrive (partial render)
-        if (firstResult) {
-          tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
-          firstResult = false;
-        } else {
-          tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
-        }
+        firstResult = false;
+        tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
       }
     };
 
@@ -1582,29 +1641,64 @@ function updateConnBadge(ok){
 }
 
 // ═══════════════════════════════════════
-//  WATCHLIST + WEIGHTS
+//  STRATEGY PAGE HELPERS
 // ═══════════════════════════════════════
-function renderWTags(){
+async function loadStrategyConfig(){
+  try{
+    const r=await fetch(getBackendUrl()+'/api/health');
+    if(!r.ok)return;
+    const d=await r.json();
+    const cfg=d.config||{};
+    const el=id=>document.getElementById(id);
+    if(cfg.stop_loss_pct) el('stratSL').textContent='-'+cfg.stop_loss_pct+'%';
+    if(cfg.trail_activate_pct && cfg.trail_pct) el('stratTrail').textContent='+'+cfg.trail_activate_pct+'% arm, '+cfg.trail_pct+'% trail';
+    const htp=parseFloat(cfg.hard_take_profit_pct||0);
+    el('stratHardTP').textContent=htp>0?'+'+htp+'%':'disabled';
+    if(cfg.scan_interval_sec) el('stratScanInt').textContent=(cfg.scan_interval_sec/60)+' min';
+    if(cfg.min_signal_score) el('stratMinScore').textContent=cfg.min_signal_score;
+    if(cfg.weekly_trade_limit) el('stratWeeklyLimit').textContent=cfg.weekly_trade_limit;
+    if(cfg.per_trade_max_usd) el('stratPerTrade').textContent='$'+cfg.per_trade_max_usd;
+    if(cfg.profit_check_sec) el('stratProfitSec').textContent=cfg.profit_check_sec+'s';
+    el('stratTgStatus').textContent=d.telegram_configured?'Connected':'Not configured — set TELEGRAM_BOT_TOKEN in .env';
+    el('stratTgStatus').style.color=d.telegram_configured?'var(--green)':'var(--warn)';
+  }catch(e){}
 }
-
-function renderWCtrls(){
-  const keys=['rsi','macd','bb','ema','news','fund'];
-  const names={rsi:'RSI (14)',macd:'MACD (12,26,9)',bb:'Bollinger Bands',ema:'EMA 50/200',news:'News Sentiment',fund:'Fundamentals'};
-  const cols={rsi:'var(--green)',macd:'var(--accent2)',bb:'var(--accent)',ema:'var(--warn)',news:'var(--purple)',fund:'var(--green)'};
-  document.getElementById('wCtrls').innerHTML=keys.map(k=>`<div><div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);margin-bottom:3px"><span style="color:var(--muted)">${names[k]}</span><span id="wl-${k}" style="color:${cols[k]}">${S.weights[k]}%</span></div><input type="range" min="0" max="60" value="${S.weights[k]}" id="w-${k}" oninput="updateWD()" style="width:100%"></div>`).join('');
-  updateWD();
+async function loadExitConfig(){
+  try{
+    const r=await fetch(getBackendUrl()+'/api/exit-config');
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('exitSL').value=d.stop_loss_pct||3;
+    document.getElementById('exitTrailAct').value=d.trail_activate_pct||5;
+    document.getElementById('exitTrailPct').value=d.trail_pct||2.5;
+    document.getElementById('exitHardTP').value=d.hard_take_profit_pct||0;
+  }catch(e){}
 }
-function updateWD(){
-  const keys=['rsi','macd','bb','ema','news','fund'];let tot=0;
-  keys.forEach(k=>{const v=parseInt(document.getElementById('w-'+k)?.value||0);document.getElementById('wl-'+k).textContent=v+'%';tot+=v;});
-  const tw=document.getElementById('wTot');tw.textContent=tot+'%';tw.style.color=tot===100?'var(--green)':'var(--red)';
+async function saveExitConfig(){
+  const body={
+    stop_loss_pct:parseFloat(document.getElementById('exitSL').value),
+    trail_activate_pct:parseFloat(document.getElementById('exitTrailAct').value),
+    trail_pct:parseFloat(document.getElementById('exitTrailPct').value),
+    hard_take_profit_pct:parseFloat(document.getElementById('exitHardTP').value),
+  };
+  try{
+    const r=await fetch(getBackendUrl()+'/api/exit-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.ok){
+      log(`Exit config saved — SL ${d.config.stop_loss_pct}% | trail arms +${d.config.trail_activate_pct}%, gives back ${d.config.trail_pct}% | hard TP ${d.config.hard_take_profit_pct||'disabled'}`,'ok');
+      const sb=document.getElementById('sbSL');if(sb)sb.textContent=d.config.stop_loss_pct+'%';
+    }else{log('Failed to save exit config','err');}
+  }catch(e){log('Exit config save error: '+e.message,'err');}
 }
-function saveWeights(){
-  const keys=['rsi','macd','bb','ema','news','fund'];
-  const tot=keys.reduce((s,k)=>s+parseInt(document.getElementById('w-'+k)?.value||0),0);
-  if(tot!==100){log('Weights must sum to 100%','err');return;}
-  keys.forEach(k=>S.weights[k]=parseInt(document.getElementById('w-'+k).value));
-  localStorage.setItem('wts',JSON.stringify(S.weights));log('Weights saved','ok');
+async function testTelegram(){
+  const el=document.getElementById('stratTgStatus');
+  el.textContent='Sending test...';el.style.color='var(--warn)';
+  try{
+    const r=await fetch(getBackendUrl()+'/api/telegram/test',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){el.textContent='Test sent — check Telegram';el.style.color='var(--green)';log('Telegram test message sent','ok');}
+    else{el.textContent='Failed: '+(d.error||'unknown');el.style.color='var(--red)';log('Telegram test failed: '+(d.error||'unknown'),'err');}
+  }catch(e){el.textContent='Error: '+e.message;el.style.color='var(--red)';log('Telegram test error: '+e.message,'err');}
 }
 
 // ═══════════════════════════════════════
@@ -1770,7 +1864,8 @@ async function loadConfigFromBackend(){
 //  INIT
 // ═══════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async ()=>{
-  renderWCtrls();
+  loadStrategyConfig();
+  loadExitConfig();
   drawEqChart();
 
   log('RaanuTradingBot v2.1 starting...','info');
