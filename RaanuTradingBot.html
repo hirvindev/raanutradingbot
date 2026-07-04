@@ -191,10 +191,23 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 #toast.show{opacity:1;}
 #toast.t-ok{background:#16a34a;color:#fff;}
 #toast.t-err{background:#dc2626;color:#fff;}
+#confBuy{position:fixed;top:0;left:0;right:0;z-index:300;display:none;flex-direction:column;gap:0;cursor:pointer;}
+#confBuy.show{display:flex;}
+#confBuy .cb-bar{display:flex;align-items:center;gap:10px;padding:10px 1.25rem;border-bottom:1px solid rgba(0,200,150,.15);animation:cbPulse 1.5s ease-in-out infinite;}
+@keyframes cbPulse{0%,100%{background:rgba(0,200,150,.12)}50%{background:rgba(0,200,150,.25)}}
+#confBuy .cb-ticker{font-size:1rem;font-weight:800;color:var(--green);}
+#confBuy .cb-name{font-size:.72rem;color:var(--muted2);font-family:var(--mono);}
+#confBuy .cb-score{font-size:.85rem;font-weight:700;color:#fff;background:var(--green);padding:2px 8px;border-radius:4px;font-family:var(--mono);}
+#confBuy .cb-detail{font-size:.68rem;font-family:var(--mono);color:var(--muted2);}
+#confBuy .cb-gp{font-size:.62rem;font-family:var(--mono);color:var(--warn);padding:1px 6px;border:1px solid rgba(245,158,11,.3);border-radius:3px;}
+#confBuy .cb-close{margin-left:auto;color:var(--muted);font-size:.9rem;padding:4px 8px;cursor:pointer;flex-shrink:0;}
+#confBuy .cb-close:hover{color:var(--text);}
+#confBuy .cb-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1s infinite;flex-shrink:0;}
 </style>
 </head>
 <body>
 <div id="toast"></div>
+<div id="confBuy" onclick="this.classList.remove('show')"></div>
 
 <!-- ══ NAV ══ -->
 <nav>
@@ -1428,6 +1441,8 @@ async function runMarketScan() {
           document.getElementById('rNum').textContent = allResults[0].score;
           document.getElementById('rLbl').textContent = 'STRONGEST SIGNAL';
         }
+        const confident = allResults.filter(x => x.score >= 75);
+        if (confident.length) showConfidentBuy(confident);
         log(`Scan done — ${d.scanned} screened, ${d.emitted ?? allResults.length} in confirmed uptrend, ${allResults.filter(x=>x.score>=60).length} actionable (score ≥ 60)`, 'ok');
         resolve();
         return;
@@ -1726,6 +1741,30 @@ function addRecent({ticker,dir,qty,price,status,reason}){
 function log(msg,type='ok'){S.logs.unshift({t:new Date().toLocaleTimeString(),msg,type});if(S.logs.length>300)S.logs.pop();renderLogs();}
 let _toastTimer=null;
 function showToast(msg,ok=true){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(ok?'t-ok':'t-err');clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.className='',3500);}
+
+let _confBuyTimer=null;
+function showConfidentBuy(picks){
+  const el=document.getElementById('confBuy');
+  if(!picks.length){el.classList.remove('show');return;}
+  el.innerHTML=picks.map(p=>{
+    const gp=p.in_golden_pocket?`<span class="cb-gp">Golden Pocket</span>`:'';
+    const name=p.name||getStockName(p.ticker)||p.ticker;
+    return `<div class="cb-bar">
+      <span class="cb-dot"></span>
+      <span class="cb-ticker">${p.ticker}</span>
+      <span class="cb-name">${name}</span>
+      <span class="cb-score">${p.score}</span>
+      <span class="cb-detail">RSI ${Math.round(p.rsi||0)} | $${(p.price||0).toFixed(2)}</span>
+      ${gp}
+      <span class="cb-detail" style="color:var(--green)">CONFIDENT BUY</span>
+      <span class="cb-close" onclick="event.stopPropagation();document.getElementById('confBuy').classList.remove('show')">✕</span>
+    </div>`;
+  }).join('');
+  el.classList.add('show');
+  clearTimeout(_confBuyTimer);
+  _confBuyTimer=setTimeout(()=>el.classList.remove('show'),30000);
+  try{new Audio('data:audio/wav;base64,UklGRl9LAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTtLAACAgICAgICAgICAgICA').play().catch(()=>{});}catch(e){}
+}
 function renderLogs(){
   const f=document.getElementById('logFilt')?.value||'all';
   const el=document.getElementById('logBox');if(!el)return;
