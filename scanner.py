@@ -102,23 +102,23 @@ FALLBACK_UNIVERSE = [
     "DDOG", "CRWD", "ZS", "NET", "PANW", "FTNT", "PLTR", "HUBS", "PAYC", "ADP",
     "PAYX", "EPAM", "GLOB", "TENB", "QLYS", "VRNS", "S", "ESTC",
     # Internet / Fintech / Platforms
-    "UBER", "LYFT", "ABNB", "BKNG", "EXPE", "DASH", "HOOD", "COIN", "SQ", "PYPL",
+    "UBER", "LYFT", "ABNB", "BKNG", "EXPE", "DASH", "HOOD", "COIN", "XYZ", "PYPL",
     "AFRM", "SOFI", "UPST", "EBAY", "ETSY", "W", "CHWY", "PINS", "SNAP", "RDDT",
     "TTD", "ROKU", "U", "RBLX", "EA", "TTWO",
     # Hardware / Enterprise IT
-    "IBM", "CSCO", "HPQ", "HPE", "DELL", "ACN", "NTAP", "PSTG", "ZBRA",
+    "IBM", "CSCO", "HPQ", "HPE", "DELL", "ACN", "NTAP", "ZBRA",
     # Healthcare / Pharma / Biotech
     "JNJ", "UNH", "PFE", "MRK", "ABBV", "LLY", "BMY", "AMGN", "GILD", "BIIB",
     "REGN", "VRTX", "MRNA", "ISRG", "MDT", "BSX", "ABT", "BDX", "SYK", "EW",
     "IDXX", "DXCM", "VEEV", "CVS", "CI", "HUM", "ELV", "MOH", "CNC", "HCA",
-    "TDOC", "HIMS", "PODD", "HOLX", "GEHC", "RMD", "IQV", "A", "MTD", "INCY",
-    "ALNY", "SRPT", "ACAD", "AXSM", "RARE", "NTRA", "EXAS", "ILMN", "ZBH",
+    "TDOC", "HIMS", "PODD", "GEHC", "RMD", "IQV", "A", "MTD", "INCY",
+    "ALNY", "SRPT", "ACAD", "AXSM", "RARE", "NTRA", "ILMN", "ZBH",
     # Financials
     "JPM", "GS", "MS", "BAC", "WFC", "C", "USB", "PNC", "TFC", "SCHW",
     "BK", "STT", "AXP", "COF", "SYF", "ALLY", "V", "MA",
     "BX", "KKR", "APO", "BLK", "TROW", "ICE", "CME", "CBOE", "SPGI", "MCO", "MSCI",
     "RJF", "SF", "LAZ", "EVR", "NAVI",
-    "HBAN", "RF", "CFG", "FITB", "KEY", "MTB", "ZION", "CMA",
+    "HBAN", "RF", "CFG", "FITB", "KEY", "MTB", "ZION",
     # Consumer Discretionary
     "HD", "LOW", "TGT", "COST", "WMT", "NKE", "SBUX", "MCD", "YUM", "CMG",
     "DRI", "TXRH", "EAT", "HLT", "MAR", "WYNN", "MGM", "LVS",
