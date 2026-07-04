@@ -92,6 +92,8 @@ async def _run_scan_and_cache() -> list:
     _save_picks(picks)
     log.info(f"Scan done — {len(picks)} picks cached")
 
+    _send_confident_buy_alerts(picks)
+
     try:
         await trader.run_one_cycle(picks=picks)
     except Exception as e:
@@ -99,6 +101,39 @@ async def _run_scan_and_cache() -> list:
         trader.event("error", f"Trader cycle crashed: {e}")
 
     return picks
+
+
+# Score >= 75 in a confirmed uptrend = high-conviction entry
+_CONFIDENT_BUY_THRESHOLD = 75
+
+def _send_confident_buy_alerts(picks: list):
+    """Send Telegram alert for high-conviction uptrend picks."""
+    from notifier import send_telegram
+    confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get("uptrend")]
+    if not confident:
+        return
+
+    for p in confident:
+        ticker = p.get("ticker", "?")
+        name = p.get("name", ticker)
+        score = p.get("score", 0)
+        price = p.get("price", 0)
+        rsi = p.get("rsi", 0)
+        mom_3m = p.get("mom_3m", 0)
+        rel = p.get("rel_strength", 0)
+        reasons = " | ".join(p.get("reasons", [])[:3])
+        gp = "\n   🎯 *In Golden Pocket* (0.618–0.786 fib)" if p.get("in_golden_pocket") else ""
+
+        msg = (
+            f"🟢 *CONFIDENT BUY — {ticker}* ({name})\n"
+            f"   Score: *{score}/100* | Uptrend confirmed\n"
+            f"   💵 ${price:.2f} | RSI {rsi:.0f} | 3M momentum {mom_3m:+.1f}%\n"
+            f"   Rel. strength vs SPY: {rel:+.1f}%{gp}\n"
+            f"   {reasons}\n\n"
+            f"   _Score ≥ {_CONFIDENT_BUY_THRESHOLD} = high conviction. Review and act._"
+        )
+        send_telegram(msg)
+        log.info(f"Confident buy alert sent: {ticker} score {score}")
 
 
 def _is_trade_day() -> bool:
