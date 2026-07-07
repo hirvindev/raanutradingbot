@@ -419,7 +419,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <!-- ─────────── SIGNALS ─────────── -->
 <div id="s-sig" class="sec">
-  <div class="al al-info">🔍 Auto-scans <span id="universeCount">400+</span> large, mid and small cap US stocks across all sectors. Filters for momentum, uptrend and breakout patterns only. Shows top winners — no watchlist needed.</div>
+  <div class="al al-info">🔍 Scans <span id="universeCount">400+</span> US stocks and filters for swing setups: confirmed uptrend + MACD bullish + RSI not overbought + score ≥ 60. Only high-conviction picks shown.</div>
 
   <!-- SCAN CONTROLS -->
   <div class="card">
@@ -460,7 +460,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="stScanned">0</div>
       </div>
       <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Winners Found</div>
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Swing Picks</div>
         <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="stWinners">0</div>
       </div>
       <div class="card-sm" style="text-align:center">
@@ -474,7 +474,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
 
     <table>
-      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>Momentum</th><th>Fib Zone</th><th>Uptrend</th><th>Action</th></tr></thead>
+      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>3M Mom</th><th>Fib Zone</th><th>Rel Str</th><th>Action</th></tr></thead>
       <tbody id="sigBody"><tr><td class="te" colspan="12">Click ⚡ Scan Market to find top opportunities across all US stocks</td></tr></tbody>
     </table>
   </div>
@@ -1388,9 +1388,9 @@ function _scanRow(r, i) {
 </td>
 <td style="max-width:100px">${badgeHtml}</td>
 <td style="font-family:var(--mono);color:${rsiColor}">${r.rsi!=null?fn(r.rsi,1):'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasMomt?'var(--green)':'var(--muted)'}">${hasMomt?'✓ YES':'—'}</span></td>
+<td style="font-family:var(--mono);font-size:.72rem;color:${(r.mom_3m||0)>0?'var(--green)':'var(--muted)'}">${r.mom_3m!=null?(r.mom_3m>0?'+':'')+r.mom_3m+'%':'—'}</td>
 <td style="font-size:.68rem"><span style="color:${hasGP?'var(--warn)':hasOTE?'var(--accent2)':'var(--muted)'}">${hasGP?'✓ GP':hasOTE?'✓ OTE':'—'}</span></td>
-<td style="font-size:.68rem"><span style="color:${hasUp?'var(--accent2)':'var(--muted)'}">${hasUp?'✓ YES':'—'}</span></td>
+<td style="font-family:var(--mono);font-size:.72rem;color:${(r.rel_strength||0)>0?'var(--green)':'var(--muted)'}">${r.rel_strength!=null?(r.rel_strength>0?'+':'')+r.rel_strength+'%':'—'}</td>
 <td style="display:flex;gap:4px">
   <button class="btn b-acc b-xs" onclick="autoTrade('${r.ticker}',${r.price},'score${r.score}','UPTREND',${fn(r.rsi,1)})">Execute</button>
 </td>
@@ -1471,11 +1471,11 @@ async function runMarketScan() {
 
       if (!d.ticker) return;
 
-      // Only confirmed-uptrend candidates reach the browser now.
-      if (d.ok && d.score >= 40) {
+      // Backend already filters: uptrend + score>=60 + MACD bullish + RSI<72.
+      if (d.ok && d.score >= 60) {
         allResults.push(d);
         allResults.sort((a, b) => b.score - a.score);
-        document.getElementById('stWinners').textContent = allResults.filter(x=>x.score>=60).length;
+        document.getElementById('stWinners').textContent = allResults.length;
         document.getElementById('stBreakouts').textContent = allResults.filter(x=>x.in_golden_pocket||(x.reasons||[]).some(r=>r.includes('golden pocket')||r.includes('optimal trade zone'))).length;
         document.getElementById('stAvg').textContent     = allResults.length ? Math.round(allResults.reduce((s,x)=>s+x.score,0)/allResults.length) : 0;
         document.getElementById('scanStatus').textContent = `Found ${d.ticker} — ${d.score}/100`;

@@ -197,7 +197,7 @@ TICKER_NAMES = {
     # Mid-cap Tech
     "MELI": "MercadoLibre", "SE": "Sea Limited", "SHOP": "Shopify", "SPOT": "Spotify",
     "NTNX": "Nutanix", "FIVN": "Five9", "APPF": "AppFolio", "PCTY": "Paylocity",
-    "JAMF": "Jamf", "MNDY": "monday.com", "BILL": "BILL Holdings", "ZI": "ZoomInfo",
+    "MNDY": "monday.com", "BILL": "BILL Holdings",
     "BRZE": "Braze", "GTLB": "GitLab",
     # Mid-cap Healthcare
     "JAZZ": "Jazz Pharmaceuticals", "TECH": "Bio-Techne", "PRGO": "Perrigo",
@@ -288,7 +288,7 @@ FALLBACK_UNIVERSE = [
     "AVB", "MAA", "NLY", "AGNC",
     # Mid-cap Tech
     "MELI", "SE", "SHOP", "SPOT", "NTNX", "FIVN", "APPF", "PCTY",
-    "JAMF", "MNDY", "BILL", "ZI", "BRZE", "GTLB",
+    "MNDY", "BILL", "BRZE", "GTLB",
     # Mid-cap Healthcare
     "JAZZ", "INCY", "TECH", "PRGO", "SUPN", "HALO", "IRTC", "MMSI", "NVCR",
     # ETFs

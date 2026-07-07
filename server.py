@@ -925,8 +925,15 @@ async def scan_stream():
                 # tickers are filtered out (only uptrend candidates are emitted).
                 if scanned % 25 == 0 or scanned == total:
                     yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
-                # Strategy filter: only surface confirmed-uptrend candidates.
+                # Swing filter: uptrend + score >= 60 + MACD not bearish + RSI not overbought.
                 if not (result.get("ok") and result.get("uptrend")):
+                    continue
+                if result.get("score", 0) < 60:
+                    continue
+                rsi_val = result.get("rsi", 50)
+                macd_val = result.get("macd", 0)
+                macd_sig = result.get("macd_signal", 0)
+                if rsi_val > 72 or macd_val < macd_sig:
                     continue
                 result["total"] = total
                 result["name"] = get_ticker_name(ticker)
