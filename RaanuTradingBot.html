@@ -415,6 +415,36 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <tbody id="ordBody"><tr><td class="te" colspan="8">No orders loaded</td></tr></tbody>
     </table>
   </div>
+
+  <!-- TRADE PERFORMANCE -->
+  <div class="card" style="margin-top:10px">
+    <div class="card-hdr">
+      <div class="card-title" style="margin:0">Trade Performance</div>
+      <div id="perfSummary" style="font-size:.72rem;font-family:var(--mono);color:var(--muted)"></div>
+    </div>
+    <div id="perfStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Total Trades</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="pfTotal">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Profitable</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="pfWins">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Loss Making</div>
+        <div style="font-size:1.1rem;font-weight:800;color:var(--red)" id="pfLosses">0</div>
+      </div>
+      <div class="card-sm" style="text-align:center">
+        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Net P&L</div>
+        <div style="font-size:1.1rem;font-weight:800" id="pfNet">—</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Closed</th><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>Return</th><th>Held</th></tr></thead>
+      <tbody id="perfBody"><tr><td class="te" colspan="8">No closed trades yet</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- ─────────── SIGNALS ─────────── -->
@@ -830,15 +860,27 @@ function deriveStats(){
   const sells  = filled.filter(o=>o.side==='sell');
 
   const tradeResults = [];
+  const closedTrades = [];
+  const usedBuys = new Set();
   sells.forEach(sell=>{
-    const matchBuy = buys.find(b=>b.symbol===sell.symbol && new Date(b.created_at)<new Date(sell.created_at));
+    const matchBuy = buys.find((b,i)=>!usedBuys.has(i) && b.symbol===sell.symbol && new Date(b.created_at)<new Date(sell.created_at));
     if(matchBuy){
+      usedBuys.add(buys.indexOf(matchBuy));
       const sellPrice = parseFloat(sell.filled_avg_price||0);
       const buyPrice  = parseFloat(matchBuy.filled_avg_price||0);
       const qty = Math.min(parseFloat(sell.filled_qty||sell.qty||0), parseFloat(matchBuy.filled_qty||matchBuy.qty||0));
-      tradeResults.push((sellPrice - buyPrice) * qty);
+      const pnl = (sellPrice - buyPrice) * qty;
+      const pct = buyPrice ? ((sellPrice - buyPrice) / buyPrice * 100) : 0;
+      const buyDate = new Date(matchBuy.created_at);
+      const sellDate = new Date(sell.created_at);
+      const heldMs = sellDate - buyDate;
+      const heldDays = Math.floor(heldMs / 86400000);
+      const heldHrs = Math.floor((heldMs % 86400000) / 3600000);
+      tradeResults.push(pnl);
+      closedTrades.push({ symbol: sell.symbol, qty, buyPrice, sellPrice, pnl, pct, buyDate, sellDate, heldDays, heldHrs });
     }
   });
+  S.closedTrades = closedTrades;
 
   const wins   = tradeResults.filter(p=>p>0).length;
   const total  = tradeResults.length;
@@ -895,6 +937,37 @@ function deriveStats(){
     document.getElementById('mtdBar').style.width = Math.min(Math.max(pct/10*100,0),100)+'%';
     document.getElementById('mtdBar').style.background = pct>=4?'var(--green)':pct>=2?'var(--warn)':'var(--red)';
   }
+  renderPerf();
+}
+
+function renderPerf(){
+  const trades = S.closedTrades || [];
+  const wins = trades.filter(t=>t.pnl>0);
+  const losses = trades.filter(t=>t.pnl<=0);
+  const net = trades.reduce((s,t)=>s+t.pnl,0);
+  document.getElementById('pfTotal').textContent = trades.length;
+  document.getElementById('pfWins').textContent = wins.length;
+  document.getElementById('pfLosses').textContent = losses.length;
+  const netEl = document.getElementById('pfNet');
+  netEl.textContent = trades.length ? (net>=0?'+':'')+fmtCur(net) : '—';
+  netEl.style.color = net>=0?'var(--green)':'var(--red)';
+  const tbody = document.getElementById('perfBody');
+  if(!trades.length){ tbody.innerHTML='<tr><td class="te" colspan="8">No closed trades yet</td></tr>'; return; }
+  tbody.innerHTML = trades.sort((a,b)=>b.sellDate-a.sellDate).map(t=>{
+    const col = t.pnl>=0?'var(--green)':'var(--red)';
+    const icon = t.pnl>=0?'▲':'▼';
+    const held = t.heldDays>0 ? t.heldDays+'d '+t.heldHrs+'h' : t.heldHrs+'h';
+    return `<tr style="background:${t.pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
+      <td style="font-size:.66rem;color:var(--muted)">${t.sellDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
+      <td style="font-weight:700">${t.symbol}</td>
+      <td style="font-family:var(--mono)">${fn(t.qty,2)}</td>
+      <td style="font-family:var(--mono)">${fmtCur(t.buyPrice)}</td>
+      <td style="font-family:var(--mono)">${fmtCur(t.sellPrice)}</td>
+      <td style="font-weight:700;color:${col}">${icon} ${t.pnl>=0?'+':''}${fmtCur(t.pnl)}</td>
+      <td style="font-weight:700;color:${col}">${t.pct>=0?'+':''}${fn(t.pct,2)}%</td>
+      <td style="font-size:.66rem;color:var(--muted)">${held}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderOrders(){
