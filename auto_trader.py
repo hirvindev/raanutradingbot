@@ -41,8 +41,8 @@ def _float_env(name, default):
 
 
 WEEKLY_TRADE_LIMIT = _int_env("WEEKLY_TRADE_LIMIT", 2)
-PER_TRADE_MAX_USD  = _float_env("PER_TRADE_MAX_USD", 500.0)
-MIN_SIGNAL_SCORE   = _int_env("MIN_SIGNAL_SCORE", 60)
+PER_TRADE_MAX_USD  = _float_env("PER_TRADE_MAX_USD", 1000.0)
+MIN_SIGNAL_SCORE   = _int_env("MIN_SIGNAL_SCORE", 70)
 SCAN_INTERVAL_SEC  = _int_env("SCAN_INTERVAL_SEC", 1800)  # 30 min default
 WATCHLIST = [t.strip().upper() for t in os.getenv("WATCHLIST", "AAPL,MSFT,NVDA,GOOGL,AMZN").split(",") if t.strip()]
 
@@ -288,8 +288,8 @@ class AutoTrader:
 
         sym = best["ticker"]
 
-        # ── Gate 5: position sizing (min of cap and 5% of free cash) ─────
-        max_by_cash = round(free_cash * 0.05, 2)   # never risk >5% of cash
+        # ── Gate 5: position sizing (min of cap and 10% of free cash) ────
+        max_by_cash = round(free_cash * 0.10, 2)   # never risk >10% of cash
         notional    = min(float(PER_TRADE_MAX_USD), max_by_cash)
 
         if notional < 1.0:
