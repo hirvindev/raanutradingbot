@@ -54,10 +54,11 @@ def send_whatsapp(message: str) -> bool:
 
 # ── MESSAGE FORMATTERS ───────────────────────────────────────────────────────
 
-def format_daily_alert(picks: list[dict]) -> str:
+def format_daily_alert(picks: list[dict], strategy: str = "") -> str:
     now = datetime.now(BERLIN)
+    strat_label = f" [{strategy.upper()}]" if strategy else ""
     lines = [
-        "🤖 *RaanuTradingBot — Morning Alert*",
+        f"🤖 *RaanuTradingBot — Morning Alert{strat_label}*",
         f"📅 {now.strftime('%A, %d %b %Y')} | 🕢 07:00 Berlin\n",
     ]
 
@@ -85,12 +86,22 @@ def format_daily_alert(picks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _strat_tag(strategy: str) -> str:
+    if strategy == "s1":
+        return "📊 S1 Pullback"
+    if strategy == "s2":
+        return "🚀 S2 Breakout"
+    return ""
+
+
 def format_pre_trade_alert(ticker: str, _unused: str, usd: float, score: int,
-                           free_cash: float, reasons: list[str]) -> str:
+                           free_cash: float, reasons: list[str],
+                           strategy: str = "") -> str:
     reasons_str = " | ".join(reasons[:2]) if reasons else "momentum signal"
+    tag = f"\n   Strategy: *{_strat_tag(strategy)}*" if strategy else ""
     return (
         f"⚡ *RaanuBot — About to BUY*\n"
-        f"   Stock: *{ticker}*\n"
+        f"   Stock: *{ticker}*{tag}\n"
         f"   Amount: *${usd:.2f}*\n"
         f"   Score: {score}/100\n"
         f"   Signal: {reasons_str}\n"
@@ -99,11 +110,13 @@ def format_pre_trade_alert(ticker: str, _unused: str, usd: float, score: int,
     )
 
 
-def format_trade_confirm(action: str, ticker: str, usd: float, status: str) -> str:
+def format_trade_confirm(action: str, ticker: str, usd: float, status: str,
+                         strategy: str = "") -> str:
     emoji = "✅" if action == "BUY" else "🔴"
     verb  = "Bought" if action == "BUY" else "Sold"
+    tag = f"\n   Strategy: *{_strat_tag(strategy)}*" if strategy else ""
     return (
-        f"{emoji} *{verb}: {ticker}*\n"
+        f"{emoji} *{verb}: {ticker}*{tag}\n"
         f"   Amount: ${usd:.2f}\n"
         f"   Status: {status}\n"
         f"   _via RaanuTradingBot (Alpaca Paper)_"

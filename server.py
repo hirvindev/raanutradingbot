@@ -112,7 +112,7 @@ async def _run_scan_and_cache() -> list:
     _save_picks(picks)
     log.info(f"[S1] Scan done — {len(picks)} picks cached")
 
-    _send_confident_buy_alerts(picks)
+    _send_confident_buy_alerts(picks, strategy="s1")
 
     try:
         await trader.run_one_cycle(picks=picks, strategy="s1")
@@ -132,7 +132,7 @@ async def _run_scan_and_cache_s2() -> list:
     _save_picks_s2(picks)
     log.info(f"[S2] Scan done — {len(picks)} picks cached")
 
-    _send_confident_buy_alerts(picks)
+    _send_confident_buy_alerts(picks, strategy="s2")
 
     try:
         await trader.run_one_cycle(picks=picks, strategy="s2")
@@ -146,13 +146,15 @@ async def _run_scan_and_cache_s2() -> list:
 # Score >= 75 in a confirmed uptrend = high-conviction entry
 _CONFIDENT_BUY_THRESHOLD = 75
 
-def _send_confident_buy_alerts(picks: list):
-    """Send Telegram alert for high-conviction uptrend picks."""
-    from notifier import send_telegram
-    confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get("uptrend")]
+def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
+    """Send Telegram alert for high-conviction picks, tagged by strategy."""
+    from notifier import send_telegram, _strat_tag
+    gate_key = "uptrend" if strategy == "s1" else "stage2"
+    confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get(gate_key)]
     if not confident:
         return
 
+    stag = _strat_tag(strategy)
     for p in confident:
         ticker = p.get("ticker", "?")
         name = p.get("name", ticker)
@@ -166,6 +168,7 @@ def _send_confident_buy_alerts(picks: list):
 
         msg = (
             f"🟢 *CONFIDENT BUY — {ticker}* ({name})\n"
+            f"   {stag}\n"
             f"   Score: *{score}/100* | Uptrend confirmed\n"
             f"   💵 ${price:.2f} | RSI {rsi:.0f} | 3M momentum {mom_3m:+.1f}%\n"
             f"   Rel. strength vs SPY: {rel:+.1f}%{gp}\n"
@@ -173,7 +176,7 @@ def _send_confident_buy_alerts(picks: list):
             f"   _Score ≥ {_CONFIDENT_BUY_THRESHOLD} = high conviction. Review and act._"
         )
         send_telegram(msg)
-        log.info(f"Confident buy alert sent: {ticker} score {score}")
+        log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score}")
 
 
 def _is_trade_day() -> bool:
@@ -181,44 +184,52 @@ def _is_trade_day() -> bool:
     return datetime.now(BERLIN).toordinal() % 2 == 0
 
 
-async def _execute_scheduled_trades(n_orders: int, label: str):
+async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "s1"):
     """
     Scan and place up to n_orders market buys for a scheduled slot.
     Respects score threshold, position sizing, and already-held check.
-    Sends WhatsApp alerts before and after each order.
+    Sends Telegram alerts before and after each order, tagged by strategy.
     """
-    from scanner import find_top_picks
+    from scanner import find_top_picks, find_top_picks_s2
     from auto_trader import (
         get_free_cash, get_held_symbols, alpaca_buy_notional,
         MIN_SIGNAL_SCORE, PER_TRADE_MAX_USD,
     )
-    from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm
+    from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm, _strat_tag
 
-    log.info(f"[{label}] Scheduled run — targeting {n_orders} order(s)")
+    stag = _strat_tag(strategy)
+    log.info(f"[{label}][{strategy.upper()}] Scheduled run — targeting {n_orders} order(s)")
 
-    picks = find_top_picks(n=n_orders + 3)
-    _save_picks(picks)
+    if strategy == "s2":
+        picks = find_top_picks_s2(n=n_orders + 3)
+        _save_picks_s2(picks)
+        gate_key = "stage2"
+    else:
+        picks = find_top_picks(n=n_orders + 3)
+        _save_picks(picks)
+        gate_key = "uptrend"
 
     actionable = [
         p for p in picks
-        if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get("uptrend") and p.get("ticker")
+        if p.get("score", 0) >= MIN_SIGNAL_SCORE and p.get(gate_key) and p.get("ticker")
     ]
 
     if not actionable:
         msg = (
             f"📊 *RaanuBot — {label}*\n"
+            f"{stag}\n"
             f"No stocks above score {MIN_SIGNAL_SCORE} today.\n"
             f"_No trades placed._"
         )
         send_whatsapp(msg)
-        log.info(f"[{label}] 0 actionable picks — skipping")
+        log.info(f"[{label}][{strategy.upper()}] 0 actionable picks — skipping")
         return
 
     held      = await get_held_symbols()
     free_cash = await get_free_cash()
 
     if free_cash is None:
-        log.error(f"[{label}] Could not fetch account balance — aborting")
+        log.error(f"[{label}][{strategy.upper()}] Could not fetch account balance — aborting")
         return
 
     placed = 0
@@ -227,18 +238,19 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
             break
         ticker = pick["ticker"].upper()
         if ticker in held:
-            log.info(f"[{label}] {ticker} already held — skipping")
+            log.info(f"[{label}][{strategy.upper()}] {ticker} already held — skipping")
             continue
 
         notional = min(float(PER_TRADE_MAX_USD), round(free_cash * 0.05, 2))
         if notional < 1.0:
-            log.info(f"[{label}] Insufficient cash (${free_cash:.2f}) — stopping")
+            log.info(f"[{label}][{strategy.upper()}] Insufficient cash (${free_cash:.2f}) — stopping")
             break
 
         try:
             send_whatsapp(format_pre_trade_alert(
                 ticker, pick.get("ticker", ticker), notional,
                 pick["score"], free_cash, pick.get("reasons", []),
+                strategy=strategy,
             ))
             await asyncio.sleep(2)
 
@@ -249,25 +261,27 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
                 "notional_usd": notional,
                 "score":        pick["score"],
                 "reasons":      pick.get("reasons", []),
+                "strategy":     strategy,
                 "scheduled":    label,
                 "alpaca_response": result,
             })
-            trader.event("buy", f"[{label}] BUY ${notional} of {ticker} score {pick['score']}")
-            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted")))
+            trader.event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
+            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy))
 
             held.add(ticker)
             free_cash -= notional
             placed += 1
         except Exception as e:
-            log.error(f"[{label}] Order failed for {ticker}: {e}")
-            trader.event("error", f"[{label}] {ticker} failed: {e}")
+            log.error(f"[{label}][{strategy.upper()}] Order failed for {ticker}: {e}")
+            trader.event("error", f"[{label}][{strategy.upper()}] {ticker} failed: {e}")
 
     if placed == 0:
         send_whatsapp(
             f"📊 *RaanuBot — {label}*\n"
+            f"{stag}\n"
             f"Top picks already held. No new positions opened."
         )
-    log.info(f"[{label}] Done — placed {placed}/{n_orders} order(s)")
+    log.info(f"[{label}][{strategy.upper()}] Done — placed {placed}/{n_orders} order(s)")
 
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
@@ -386,8 +400,8 @@ async def _scheduled_trade_loop():
         try:
             if _is_trade_day():
                 log.info(f"[{next_label}] Trade day ✓ — executing both strategies")
-                await _execute_scheduled_trades(next_n, next_label)
-                await _run_scan_and_cache_s2()
+                await _execute_scheduled_trades(next_n, next_label, strategy="s1")
+                await _execute_scheduled_trades(next_n, next_label, strategy="s2")
             else:
                 log.info(f"[{next_label}] Rest day — scanning only, no orders")
                 await _run_scan_and_cache()
@@ -770,17 +784,28 @@ async def test_twilio():
 
 @app.post("/api/scan/alert-now")
 async def scan_alert_now():
-    """Trigger the morning WhatsApp alert immediately (for testing)."""
+    """Trigger morning alerts for both strategies immediately (for testing)."""
     from notifier import send_whatsapp, format_daily_alert
-    cached = _load_picks()
-    picks  = cached["picks"] if cached else []
-    if not picks:
+
+    cached_s1 = _load_picks()
+    picks_s1  = cached_s1["picks"] if cached_s1 else []
+    if not picks_s1:
         from scanner import find_top_picks
-        picks = find_top_picks(3)
-        _save_picks(picks)
-    msg = format_daily_alert(picks)
-    ok  = send_whatsapp(msg)
-    return {"sent": ok, "picks": len(picks), "message_preview": msg[:300]}
+        picks_s1 = find_top_picks(3)
+        _save_picks(picks_s1)
+
+    cached_s2 = _load_picks_s2()
+    picks_s2  = cached_s2["picks"] if cached_s2 else []
+    if not picks_s2:
+        from scanner import find_top_picks_s2
+        picks_s2 = find_top_picks_s2(3)
+        _save_picks_s2(picks_s2)
+
+    msg_s1 = format_daily_alert(picks_s1, strategy="s1")
+    msg_s2 = format_daily_alert(picks_s2, strategy="s2")
+    ok1 = send_whatsapp(msg_s1)
+    ok2 = send_whatsapp(msg_s2)
+    return {"sent_s1": ok1, "sent_s2": ok2, "picks_s1": len(picks_s1), "picks_s2": len(picks_s2)}
 
 
 # ---------- WHATSAPP WEBHOOK (Twilio) ----------
@@ -803,17 +828,26 @@ async def _handle_whatsapp_command(cmd: str):
             send_whatsapp(reply)
 
         elif cmd in ("PICKS", "SCAN"):
-            send_whatsapp("🔍 Fetching latest picks...")
-            # Use cached results first (instant); fall back to fresh scan if no cache
-            cached = _load_picks()
-            if cached and cached.get("picks"):
-                picks = cached["picks"]
+            send_whatsapp("🔍 Fetching latest picks for both strategies...")
+            cached_s1 = _load_picks()
+            if cached_s1 and cached_s1.get("picks"):
+                picks_s1 = cached_s1["picks"]
             else:
                 from scanner import find_top_picks
                 loop = asyncio.get_event_loop()
-                picks = await loop.run_in_executor(None, lambda: find_top_picks(3))
-                _save_picks(picks)
-            send_whatsapp(format_daily_alert(picks))
+                picks_s1 = await loop.run_in_executor(None, lambda: find_top_picks(3))
+                _save_picks(picks_s1)
+            send_whatsapp(format_daily_alert(picks_s1, strategy="s1"))
+
+            cached_s2 = _load_picks_s2()
+            if cached_s2 and cached_s2.get("picks"):
+                picks_s2 = cached_s2["picks"]
+            else:
+                from scanner import find_top_picks_s2
+                loop = asyncio.get_event_loop()
+                picks_s2 = await loop.run_in_executor(None, lambda: find_top_picks_s2(3))
+                _save_picks_s2(picks_s2)
+            send_whatsapp(format_daily_alert(picks_s2, strategy="s2"))
 
         elif cmd.startswith("BUY "):
             parts  = cmd.split()
