@@ -638,8 +638,16 @@ async def orders():
 
 @app.get("/api/history/orders")
 async def history_orders(limit: int = 50):
-    """Closed orders (filled, cancelled, expired)."""
-    return await alpaca_get("/orders", params={"status": "closed", "limit": min(limit, 500)})
+    """Closed orders (filled, cancelled, expired), tagged with strategy."""
+    orders = await alpaca_get("/orders", params={"status": "closed", "limit": min(limit, 500)})
+    strat_map = {}
+    for t in trader.tradelog.data.get("trades", []):
+        if t.get("action") == "BUY" and t.get("ticker"):
+            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    for o in orders:
+        sym = (o.get("symbol") or "").upper()
+        o["strategy"] = strat_map.get(sym, "s1")
+    return orders
 
 
 class OrderRequest(BaseModel):

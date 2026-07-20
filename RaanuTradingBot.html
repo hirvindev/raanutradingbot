@@ -405,9 +405,16 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
   <!-- SUB: CLOSED P&L -->
   <div id="perfSub-closed">
+    <!-- Strategy filter pills -->
+    <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center">
+      <span style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-right:4px">FILTER</span>
+      <button class="btn b-acc b-xs closedStratFilter on" onclick="filterClosedByStrat('all',this)">All</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s1',this)" style="border-color:rgba(0,200,150,.3);color:var(--accent)">S1 Pullback</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s2',this)" style="border-color:rgba(245,158,11,.3);color:var(--warn)">S2 Breakout</button>
+    </div>
     <div class="card">
       <div class="card-hdr">
-        <div class="card-title" style="margin:0">Trade Performance</div>
+        <div class="card-title" style="margin:0">Closed Trades</div>
         <div id="perfSummary" style="font-size:.72rem;font-family:var(--mono);color:var(--muted)"></div>
       </div>
       <div id="perfStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
@@ -429,8 +436,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         </div>
       </div>
       <table>
-        <thead><tr><th>Closed</th><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>Return</th><th>Held</th></tr></thead>
-        <tbody id="perfBody"><tr><td class="te" colspan="8">No closed trades yet</td></tr></tbody>
+        <thead><tr><th>Closed</th><th>Strategy</th><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>Return</th><th>Held</th></tr></thead>
+        <tbody id="perfBody"><tr><td class="te" colspan="9">No closed trades yet</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1012,7 +1019,7 @@ function deriveStats(){
       const heldDays = Math.floor(heldMs / 86400000);
       const heldHrs = Math.floor((heldMs % 86400000) / 3600000);
       tradeResults.push(pnl);
-      closedTrades.push({ symbol: sell.symbol, qty, buyPrice, sellPrice, pnl, pct, buyDate, sellDate, heldDays, heldHrs });
+      closedTrades.push({ symbol: sell.symbol, strategy: matchBuy.strategy||'s1', qty, buyPrice, sellPrice, pnl, pct, buyDate, sellDate, heldDays, heldHrs });
     }
   });
   S.closedTrades = closedTrades;
@@ -1075,8 +1082,24 @@ function deriveStats(){
   renderPerf();
 }
 
+let _closedStratFilter = 'all';
+
+function filterClosedByStrat(strat, btn){
+  _closedStratFilter = strat;
+  document.querySelectorAll('.closedStratFilter').forEach(b=>{b.classList.remove('b-acc','on');b.classList.add('b-out');});
+  btn.classList.remove('b-out');btn.classList.add('b-acc','on');
+  renderPerf();
+}
+
+function _stratBadge(s){
+  if(s==='s1') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>';
+  if(s==='s2') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--warn)">S2</span>';
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:var(--bg3);color:var(--muted2)">${(s||'?').toUpperCase()}</span>`;
+}
+
 function renderPerf(){
-  const trades = S.closedTrades || [];
+  const all = S.closedTrades || [];
+  const trades = _closedStratFilter === 'all' ? all : all.filter(t=>t.strategy===_closedStratFilter);
   const wins = trades.filter(t=>t.pnl>0);
   const losses = trades.filter(t=>t.pnl<=0);
   const net = trades.reduce((s,t)=>s+t.pnl,0);
@@ -1086,14 +1109,17 @@ function renderPerf(){
   const netEl = document.getElementById('pfNet');
   netEl.textContent = trades.length ? (net>=0?'+':'')+fmtCur(net) : '—';
   netEl.style.color = net>=0?'var(--green)':'var(--red)';
+  const sumEl = document.getElementById('perfSummary');
+  if(sumEl) sumEl.textContent = _closedStratFilter==='all' ? '' : _closedStratFilter.toUpperCase()+' only';
   const tbody = document.getElementById('perfBody');
-  if(!trades.length){ tbody.innerHTML='<tr><td class="te" colspan="8">No closed trades yet</td></tr>'; return; }
+  if(!trades.length){ tbody.innerHTML='<tr><td class="te" colspan="9">No closed trades yet</td></tr>'; return; }
   tbody.innerHTML = trades.sort((a,b)=>b.sellDate-a.sellDate).map(t=>{
     const col = t.pnl>=0?'var(--green)':'var(--red)';
     const icon = t.pnl>=0?'▲':'▼';
     const held = t.heldDays>0 ? t.heldDays+'d '+t.heldHrs+'h' : t.heldHrs+'h';
     return `<tr style="background:${t.pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
       <td style="font-size:.66rem;color:var(--muted)">${t.sellDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
+      <td style="text-align:center">${_stratBadge(t.strategy)}</td>
       <td style="font-weight:700">${t.symbol}</td>
       <td style="font-family:var(--mono)">${fn(t.qty,2)}</td>
       <td style="font-family:var(--mono)">${fmtCur(t.buyPrice)}</td>
