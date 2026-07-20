@@ -2291,6 +2291,11 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     await fetchAccount();
     await fetchPositions();
     await fetchOrders();
+    // Sync auto-trader state from backend
+    try{
+      const ar=await fetch(getBackendUrl()+'/api/auto/status');
+      if(ar.ok){const ad=await ar.json();if(ad.enabled && !S.engineOn){toggleEngine();}}
+    }catch(e){}
     log('All data loaded successfully','ok');
   }else{
     log('Backend not reachable — ensure server.py is running and .env has Alpaca keys','warn');

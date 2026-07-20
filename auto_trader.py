@@ -178,7 +178,7 @@ async def alpaca_buy_notional(symbol: str, notional: float) -> dict:
 # ---------- AUTO TRADER ----------
 class AutoTrader:
     def __init__(self):
-        self.enabled = False
+        self.enabled = True
         self.tradelog = TradeLog()
         self.last_scan: Optional[dict] = None
         self.last_decision: Optional[dict] = None
