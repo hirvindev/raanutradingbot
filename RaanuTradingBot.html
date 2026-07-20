@@ -339,18 +339,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
   </div>
 
-  <!-- RECENT TRADES -->
+  <!-- OPEN POSITIONS -->
   <div class="card">
     <div class="card-hdr">
-      <div class="card-title" style="margin:0">Recent Activity</div>
+      <div class="card-title" style="margin:0">Open Positions</div>
       <div style="display:flex;gap:6px;align-items:center">
         <span id="lastRefresh" style="font-size:.62rem;font-family:var(--mono);color:var(--muted)"></span>
-        <button class="btn b-out b-sm" onclick="refreshAll()">↻ Refresh</button>
+        <button class="btn b-out b-sm" onclick="fetchPositions()">↻ Refresh</button>
       </div>
     </div>
     <table>
-      <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>Status</th><th>P&amp;L</th><th>Signal / Note</th></tr></thead>
-      <tbody id="recTrades"><tr><td class="te" colspan="8">Picks load automatically — enable Auto-Trade to execute orders</td></tr></tbody>
+      <thead><tr><th>Symbol</th><th>Strategy</th><th>Qty</th><th>Avg Buy</th><th>Current</th><th>Mkt Value</th><th>P&amp;L</th><th>Return</th><th></th></tr></thead>
+      <tbody id="ovPosBody"><tr><td class="te" colspan="9">Loading positions...</td></tr></tbody>
     </table>
   </div>
 
@@ -948,8 +948,10 @@ async function fetchPositions(){
 
 function renderPositions(){
   const tbody = document.getElementById('posBody');
+  const ovBody = document.getElementById('ovPosBody');
   if(!S.positions.length){
     tbody.innerHTML = '<tr><td class="te" colspan="9">No open positions</td></tr>';
+    if(ovBody) ovBody.innerHTML = '<tr><td class="te" colspan="8">No open positions</td></tr>';
     return;
   }
   tbody.innerHTML = S.positions.map(p=>{
@@ -970,6 +972,34 @@ function renderPositions(){
       <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
     </tr>`;
   }).join('');
+  if(ovBody){
+    if(!S.positions.length){
+      ovBody.innerHTML = '<tr><td class="te" colspan="9">No open positions</td></tr>';
+    } else {
+      ovBody.innerHTML = S.positions.map(p=>{
+        const cur  = p.currentPrice ?? p.averagePrice;
+        const pnl  = p.ppl ?? (cur - p.averagePrice) * p.quantity;
+        const pct  = ((cur - p.averagePrice) / p.averagePrice) * 100;
+        const mval = cur * p.quantity;
+        const strat = p.strategy === 's2'
+          ? '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.62rem;font-weight:600;font-family:var(--mono);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--warn)">S2</span>'
+          : p.strategy === 's1'
+          ? '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.62rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>'
+          : '<span style="font-size:.62rem;color:var(--muted)">—</span>';
+        return `<tr style="background:${pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
+          <td style="font-weight:700">${p.ticker}</td>
+          <td style="text-align:center">${strat}</td>
+          <td style="font-family:var(--mono)">${fn(p.quantity,2)}</td>
+          <td style="font-family:var(--mono)">${fmtCur(p.averagePrice)}</td>
+          <td style="font-family:var(--mono)">${fmtCur(cur)}</td>
+          <td style="font-family:var(--mono)">${fmtCur(mval)}</td>
+          <td style="font-weight:700" class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}${fmtCur(pnl)}</td>
+          <td style="font-weight:700" class="${pct>=0?'up':'down'}">${pct>=0?'+':''}${fn(pct,2)}%</td>
+          <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
+        </tr>`;
+      }).join('');
+    }
+  }
 }
 
 // ── FETCH ORDERS & DERIVE WIN RATE ──────────────────────

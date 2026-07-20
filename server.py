@@ -592,19 +592,24 @@ async def account_info():
 
 @app.get("/api/portfolio")
 async def portfolio():
-    """Open positions."""
+    """Open positions, tagged with strategy from trade log."""
     positions = await alpaca_get("/positions")
-    # Map Alpaca fields to what the dashboard renders
+    strat_map = {}
+    for t in trader.tradelog.data.get("trades", []):
+        if t.get("action") == "BUY" and t.get("ticker"):
+            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
     out = []
     for p in positions:
+        sym = p.get("symbol", "").upper()
         out.append({
-            "ticker":        p.get("symbol"),
+            "ticker":        sym,
             "quantity":      float(p.get("qty", 0)),
             "averagePrice":  float(p.get("avg_entry_price", 0)),
             "currentPrice":  float(p.get("current_price", 0)),
             "ppl":           float(p.get("unrealized_pl", 0)),
             "fxPpl":         0,
             "initialFill":   p.get("asset_id"),
+            "strategy":      strat_map.get(sym, ""),
             "_raw":          p,
         })
     return out
