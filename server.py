@@ -1046,12 +1046,15 @@ async def scan_stream():
                 mc_fetched = False
                 mc_val = None
 
-                # S1: Pullback-in-Uptrend
+                # S1: Pullback-in-Uptrend — high conviction only
                 r1 = score_from_df(ticker, df, bench_ret_3m=bench)
-                if (r1.get("ok") and r1.get("uptrend")
-                        and r1.get("score", 0) >= 60
-                        and r1.get("rsi", 50) <= 72
-                        and r1.get("macd", 0) >= r1.get("macd_signal", 0)):
+                s1_pass = (r1.get("ok") and r1.get("uptrend")
+                        and r1.get("score", 0) >= 70
+                        and r1.get("rsi", 50) <= 68
+                        and r1.get("macd", 0) >= r1.get("macd_signal", 0)
+                        and (r1.get("rel_strength") or 0) > 0
+                        and (r1.get("mom_3m") or 0) > 0)
+                if s1_pass:
                     r1["strategy"] = "s1"
                     r1["total"] = total
                     r1["name"] = get_ticker_name(ticker)
@@ -1061,10 +1064,12 @@ async def scan_stream():
                     yield f"data: {json.dumps(r1)}\n\n"
                     emitted += 1
 
-                # S2: VCP Breakout
+                # S2: VCP Breakout — high conviction only
                 r2 = score_from_df_s2(ticker, df, bench_ret_3m=bench)
-                if (r2.get("ok") and r2.get("stage2")
-                        and r2.get("score", 0) >= 60):
+                s2_pass = (r2.get("ok") and r2.get("stage2")
+                        and r2.get("score", 0) >= 70
+                        and (r2.get("rel_strength") or 0) > 0)
+                if s2_pass:
                     r2["strategy"] = "s2"
                     r2["total"] = total
                     r2["name"] = get_ticker_name(ticker)
