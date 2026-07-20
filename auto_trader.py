@@ -313,7 +313,7 @@ class AutoTrader:
                 sym, sym, notional, best["score"],
                 free_cash, best.get("reasons", []),
                 strategy=strategy,
-            ))
+            ), strategy=strategy)
         except Exception:
             pass
 
@@ -336,7 +336,7 @@ class AutoTrader:
 
         # Notify AFTER order confirmed
         try:
-            send_whatsapp(format_trade_confirm("BUY", sym, notional, result.get("status", "submitted"), strategy=strategy))
+            send_whatsapp(format_trade_confirm("BUY", sym, notional, result.get("status", "submitted"), strategy=strategy), strategy=strategy)
         except Exception:
             pass
 

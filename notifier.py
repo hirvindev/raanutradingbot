@@ -15,32 +15,42 @@ log = logging.getLogger("raanu.notifier")
 BERLIN = ZoneInfo("Europe/Berlin")
 
 
-def _creds() -> dict:
-    return {
-        "token":   os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
-        "chat_id": os.getenv("TELEGRAM_CHAT_ID", "").strip(),
-    }
+def _token() -> str:
+    return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+
+def _chat_id_for(strategy: str = "") -> str:
+    """Return the chat ID for a strategy, falling back to the default."""
+    if strategy == "s1":
+        sid = os.getenv("TELEGRAM_CHAT_ID_S1", "").strip()
+        if sid:
+            return sid
+    elif strategy == "s2":
+        sid = os.getenv("TELEGRAM_CHAT_ID_S2", "").strip()
+        if sid:
+            return sid
+    return os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 
 def is_configured() -> bool:
-    c = _creds()
-    return bool(c["token"] and c["chat_id"])
+    return bool(_token() and _chat_id_for())
 
 
-def send_telegram(message: str) -> bool:
-    """Send a Telegram message to the configured chat."""
-    c = _creds()
-    if not c["token"] or not c["chat_id"]:
+def send_telegram(message: str, strategy: str = "") -> bool:
+    """Send a Telegram message to the strategy-specific or default chat."""
+    token = _token()
+    chat_id = _chat_id_for(strategy)
+    if not token or not chat_id:
         log.warning("Telegram not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
         return False
     try:
         resp = httpx.post(
-            f"https://api.telegram.org/bot{c['token']}/sendMessage",
-            json={"chat_id": c["chat_id"], "text": message, "parse_mode": "Markdown"},
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"},
             timeout=15,
         )
         resp.raise_for_status()
-        log.info(f"Telegram sent — message_id: {resp.json().get('result', {}).get('message_id', '?')}")
+        log.info(f"Telegram sent [{strategy or 'general'}] — message_id: {resp.json().get('result', {}).get('message_id', '?')}")
         return True
     except Exception as e:
         log.error(f"Telegram send failed: {e}")
@@ -48,8 +58,8 @@ def send_telegram(message: str) -> bool:
 
 
 # Keep send_whatsapp as an alias so existing callers don't break
-def send_whatsapp(message: str) -> bool:
-    return send_telegram(message)
+def send_whatsapp(message: str, strategy: str = "") -> bool:
+    return send_telegram(message, strategy=strategy)
 
 
 # ── MESSAGE FORMATTERS ───────────────────────────────────────────────────────

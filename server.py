@@ -175,7 +175,7 @@ def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
             f"   {reasons}\n\n"
             f"   _Score ≥ {_CONFIDENT_BUY_THRESHOLD} = high conviction. Review and act._"
         )
-        send_telegram(msg)
+        send_telegram(msg, strategy=strategy)
         log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score}")
 
 
@@ -221,7 +221,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             f"No stocks above score {MIN_SIGNAL_SCORE} today.\n"
             f"_No trades placed._"
         )
-        send_whatsapp(msg)
+        send_whatsapp(msg, strategy=strategy)
         log.info(f"[{label}][{strategy.upper()}] 0 actionable picks — skipping")
         return
 
@@ -251,7 +251,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 ticker, pick.get("ticker", ticker), notional,
                 pick["score"], free_cash, pick.get("reasons", []),
                 strategy=strategy,
-            ))
+            ), strategy=strategy)
             await asyncio.sleep(2)
 
             result = await alpaca_buy_notional(ticker, notional)
@@ -266,7 +266,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 "alpaca_response": result,
             })
             trader.event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
-            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy))
+            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy), strategy=strategy)
 
             held.add(ticker)
             free_cash -= notional
@@ -279,57 +279,57 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         send_whatsapp(
             f"📊 *RaanuBot — {label}*\n"
             f"{stag}\n"
-            f"Top picks already held. No new positions opened."
+            f"Top picks already held. No new positions opened.",
+            strategy=strategy,
         )
     log.info(f"[{label}][{strategy.upper()}] Done — placed {placed}/{n_orders} order(s)")
 
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
 async def _premarket_scan_and_notify():
-    """Scan both strategies and send top picks via Telegram. No orders placed."""
+    """Scan both strategies and send separate Telegram alerts to each strategy's chat."""
     from notifier import send_telegram
     log.info("[Pre-market] Running dual-strategy scan...")
     picks_s1 = await _run_scan_and_cache()
     picks_s2 = await _run_scan_and_cache_s2()
 
-    if not picks_s1 and not picks_s2:
-        send_telegram(
-            "📡 *RaanuBot — Pre-market Scan*\n"
-            "⚠️ No strong signals found. Market may be choppy today."
-        )
-        return
-
-    lines = ["📡 *RaanuBot — Pre-market Scan*", ""]
-
+    # S1 alert → S1 chat
+    s1_lines = ["📡 *RaanuBot — Pre-market Scan*", "📊 *S1 Pullback*", ""]
     if picks_s1:
-        lines.append(f"📊 *S1 Pullback* — {len(picks_s1)} signal(s)")
         medals = ["🏆", "🥈", "🥉"]
+        s1_lines.append(f"{len(picks_s1)} signal(s) found:\n")
         for i, p in enumerate(picks_s1):
             score = p.get("score", 0)
             heat = "🔥" if score >= 75 else "📈"
             ticker = p.get("ticker", "?")
             name = p.get("name", ticker)
             gp = " | 🎯 GP" if p.get("in_golden_pocket") else ""
-            lines.append(
+            s1_lines.append(
                 f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} {score}/100{gp}"
             )
-        lines.append("")
+    else:
+        s1_lines.append("⚠️ No strong pullback signals today.")
+    s1_lines.append("\n_Auto-trader will execute at market open if enabled._")
+    send_telegram("\n".join(s1_lines), strategy="s1")
 
+    # S2 alert → S2 chat
+    s2_lines = ["📡 *RaanuBot — Pre-market Scan*", "🚀 *S2 Breakout*", ""]
     if picks_s2:
-        lines.append(f"🚀 *S2 Breakout* — {len(picks_s2)} signal(s)")
         medals = ["🏆", "🥈", "🥉"]
+        s2_lines.append(f"{len(picks_s2)} signal(s) found:\n")
         for i, p in enumerate(picks_s2):
             score = p.get("score", 0)
             heat = "🔥" if score >= 75 else "📈"
             ticker = p.get("ticker", "?")
             name = p.get("name", ticker)
-            lines.append(
+            s2_lines.append(
                 f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} {score}/100"
             )
-        lines.append("")
+    else:
+        s2_lines.append("⚠️ No strong breakout signals today.")
+    s2_lines.append("\n_Auto-trader will execute at market open if enabled._")
+    send_telegram("\n".join(s2_lines), strategy="s2")
 
-    lines.append("_Auto-trader will execute at market open if enabled._")
-    send_telegram("\n".join(lines))
     log.info(f"[Pre-market] Telegram sent — S1: {len(picks_s1)}, S2: {len(picks_s2)}")
 
 
@@ -525,11 +525,17 @@ def health():
 
 @app.post("/api/telegram/test")
 def telegram_test():
-    from notifier import send_telegram, is_configured
+    from notifier import send_telegram, is_configured, _chat_id_for
     if not is_configured():
         return {"ok": False, "error": "Telegram not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env"}
-    ok = send_telegram("🧪 *RaanuTradingBot — Test*\nTelegram notifications are working.")
-    return {"ok": ok, "error": None if ok else "Send failed — check bot token and chat ID"}
+    ok1 = send_telegram("🧪 *RaanuTradingBot — Test*\n📊 S1 Pullback channel working.", strategy="s1")
+    ok2 = send_telegram("🧪 *RaanuTradingBot — Test*\n🚀 S2 Breakout channel working.", strategy="s2")
+    return {
+        "ok": ok1 and ok2,
+        "s1_chat": _chat_id_for("s1")[-4:] if _chat_id_for("s1") else "not set",
+        "s2_chat": _chat_id_for("s2")[-4:] if _chat_id_for("s2") else "not set",
+        "error": None if (ok1 and ok2) else "One or both sends failed — check chat IDs",
+    }
 
 
 @app.get("/api/exit-config")
@@ -803,8 +809,8 @@ async def scan_alert_now():
 
     msg_s1 = format_daily_alert(picks_s1, strategy="s1")
     msg_s2 = format_daily_alert(picks_s2, strategy="s2")
-    ok1 = send_whatsapp(msg_s1)
-    ok2 = send_whatsapp(msg_s2)
+    ok1 = send_whatsapp(msg_s1, strategy="s1")
+    ok2 = send_whatsapp(msg_s2, strategy="s2")
     return {"sent_s1": ok1, "sent_s2": ok2, "picks_s1": len(picks_s1), "picks_s2": len(picks_s2)}
 
 
@@ -837,7 +843,7 @@ async def _handle_whatsapp_command(cmd: str):
                 loop = asyncio.get_event_loop()
                 picks_s1 = await loop.run_in_executor(None, lambda: find_top_picks(3))
                 _save_picks(picks_s1)
-            send_whatsapp(format_daily_alert(picks_s1, strategy="s1"))
+            send_whatsapp(format_daily_alert(picks_s1, strategy="s1"), strategy="s1")
 
             cached_s2 = _load_picks_s2()
             if cached_s2 and cached_s2.get("picks"):
@@ -847,7 +853,7 @@ async def _handle_whatsapp_command(cmd: str):
                 loop = asyncio.get_event_loop()
                 picks_s2 = await loop.run_in_executor(None, lambda: find_top_picks_s2(3))
                 _save_picks_s2(picks_s2)
-            send_whatsapp(format_daily_alert(picks_s2, strategy="s2"))
+            send_whatsapp(format_daily_alert(picks_s2, strategy="s2"), strategy="s2")
 
         elif cmd.startswith("BUY "):
             parts  = cmd.split()
