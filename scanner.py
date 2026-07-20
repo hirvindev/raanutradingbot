@@ -15,6 +15,7 @@ from typing import Optional
 
 import httpx
 from strategy import score_from_df, batch_download, benchmark_return_3m
+from strategy2 import score_from_df_s2
 
 log = logging.getLogger("raanu.scanner")
 
@@ -332,7 +333,32 @@ def find_top_picks(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
     return results[:n]
 
 
+def find_top_picks_s2(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
+    """Strategy 2 scan — VCP Breakout. Same universe, different scoring."""
+    universe = TEST_UNIVERSE[:max_stocks] if max_stocks else FALLBACK_UNIVERSE
+    log.info(f"[S2] Scanning {len(universe)} stocks for VCP breakouts...")
+
+    bench = benchmark_return_3m()
+    log.info(f"[S2] Benchmark (SPY 3M) = {bench * 100:.1f}%" if bench is not None else "[S2] Benchmark unavailable")
+
+    results = []
+    for i in range(0, len(universe), CHUNK_SIZE):
+        chunk = universe[i:i + CHUNK_SIZE]
+        data = batch_download(chunk)
+        log.info(f"[S2] Chunk {i//CHUNK_SIZE + 1}: {len(data)}/{len(chunk)} tickers returned data")
+        for ticker in chunk:
+            try:
+                r = score_from_df_s2(ticker, data.get(ticker), bench_ret_3m=bench)
+                if r.get("ok") and r.get("stage2") and r.get("score", 0) >= 60:
+                    r["name"] = get_ticker_name(ticker)
+                    results.append(r)
+            except Exception as e:
+                log.debug(f"[S2] Score error {ticker}: {e}")
+
+    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    log.info(f"[S2] Scan done — {len(results)} breakout picks above threshold, returning top {n}")
+    return results[:n]
+
+
 def get_universe_summary() -> dict:
-    # Report the curated, strategy-scanned universe (not the full Alpaca list) —
-    # the scanner only ever screens these liquid quality names.
     return {"exchange": "US", "total_stocks": len(FALLBACK_UNIVERSE)}

@@ -32,6 +32,7 @@ HERE = Path(__file__).parent
 load_dotenv(HERE / ".env", override=False)  # no-op on Railway; env vars come from dashboard
 _DATA_DIR = Path("/tmp") if Path("/tmp").exists() and not (HERE / ".env").exists() else HERE
 PICKS_CACHE = _DATA_DIR / "last_picks.json"
+PICKS_CACHE_S2 = _DATA_DIR / "last_picks_s2.json"
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "").strip()
 ALPACA_SECRET  = os.getenv("ALPACA_SECRET_KEY", "").strip()
@@ -81,24 +82,63 @@ def _load_picks() -> Optional[dict]:
     return None
 
 
+# ---------- S2 PICKS CACHE ----------
+
+def _save_picks_s2(picks: list):
+    data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
+    try:
+        PICKS_CACHE_S2.write_text(json.dumps(data, indent=2, default=str))
+    except Exception as e:
+        log.warning(f"Could not write S2 picks cache: {e}")
+
+
+def _load_picks_s2() -> Optional[dict]:
+    if PICKS_CACHE_S2.exists():
+        try:
+            return json.loads(PICKS_CACHE_S2.read_text())
+        except Exception:
+            pass
+    return None
+
+
 # ---------- BACKGROUND SCAN ----------
 
 async def _run_scan_and_cache() -> list:
-    """Run the scanner in a thread pool (non-blocking), cache results."""
+    """Run S1 scanner in a thread pool (non-blocking), cache results."""
     from scanner import find_top_picks
-    log.info("Running momentum scan...")
+    log.info("[S1] Running momentum scan...")
     loop  = asyncio.get_event_loop()
     picks = await loop.run_in_executor(None, lambda: find_top_picks(3))
     _save_picks(picks)
-    log.info(f"Scan done — {len(picks)} picks cached")
+    log.info(f"[S1] Scan done — {len(picks)} picks cached")
 
     _send_confident_buy_alerts(picks)
 
     try:
-        await trader.run_one_cycle(picks=picks)
+        await trader.run_one_cycle(picks=picks, strategy="s1")
     except Exception as e:
-        log.exception(f"Trader cycle error: {e}")
-        trader.event("error", f"Trader cycle crashed: {e}")
+        log.exception(f"[S1] Trader cycle error: {e}")
+        trader.event("error", f"[S1] Trader cycle crashed: {e}")
+
+    return picks
+
+
+async def _run_scan_and_cache_s2() -> list:
+    """Run S2 scanner in a thread pool (non-blocking), cache results."""
+    from scanner import find_top_picks_s2
+    log.info("[S2] Running VCP breakout scan...")
+    loop  = asyncio.get_event_loop()
+    picks = await loop.run_in_executor(None, lambda: find_top_picks_s2(3))
+    _save_picks_s2(picks)
+    log.info(f"[S2] Scan done — {len(picks)} picks cached")
+
+    _send_confident_buy_alerts(picks)
+
+    try:
+        await trader.run_one_cycle(picks=picks, strategy="s2")
+    except Exception as e:
+        log.exception(f"[S2] Trader cycle error: {e}")
+        trader.event("error", f"[S2] Trader cycle crashed: {e}")
 
     return picks
 
@@ -232,40 +272,51 @@ async def _execute_scheduled_trades(n_orders: int, label: str):
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
 async def _premarket_scan_and_notify():
-    """Scan the universe and send top picks via Telegram. No orders placed."""
+    """Scan both strategies and send top picks via Telegram. No orders placed."""
     from notifier import send_telegram
-    log.info("[Pre-market] Running scan 30 min before pre-market...")
-    picks = await _run_scan_and_cache()
+    log.info("[Pre-market] Running dual-strategy scan...")
+    picks_s1 = await _run_scan_and_cache()
+    picks_s2 = await _run_scan_and_cache_s2()
 
-    if not picks:
+    if not picks_s1 and not picks_s2:
         send_telegram(
             "📡 *RaanuBot — Pre-market Scan*\n"
             "⚠️ No strong signals found. Market may be choppy today."
         )
         return
 
-    lines = [
-        "📡 *RaanuBot — Pre-market Scan*",
-        f"🕒 30 min before pre-market | {len(picks)} signal(s)\n",
-    ]
-    medals = ["🏆", "🥈", "🥉"]
-    for i, p in enumerate(picks):
-        score = p.get("score", 0)
-        heat = "🔥" if score >= 75 else "📈"
-        ticker = p.get("ticker", "?")
-        name = p.get("name", ticker)
-        price = p.get("price", 0)
-        rsi = p.get("rsi", 0)
-        reasons = " | ".join(p.get("reasons", [])[:2])
-        gp = " | 🎯 Golden Pocket" if p.get("in_golden_pocket") else ""
-        lines.append(
-            f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} Score {score}/100\n"
-            f"   💵 ${price:.2f} | RSI {rsi:.0f}{gp}\n"
-            f"   {reasons}"
-        )
-    lines.append("\n_Auto-trader will execute at market open if enabled._")
+    lines = ["📡 *RaanuBot — Pre-market Scan*", ""]
+
+    if picks_s1:
+        lines.append(f"📊 *S1 Pullback* — {len(picks_s1)} signal(s)")
+        medals = ["🏆", "🥈", "🥉"]
+        for i, p in enumerate(picks_s1):
+            score = p.get("score", 0)
+            heat = "🔥" if score >= 75 else "📈"
+            ticker = p.get("ticker", "?")
+            name = p.get("name", ticker)
+            gp = " | 🎯 GP" if p.get("in_golden_pocket") else ""
+            lines.append(
+                f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} {score}/100{gp}"
+            )
+        lines.append("")
+
+    if picks_s2:
+        lines.append(f"🚀 *S2 Breakout* — {len(picks_s2)} signal(s)")
+        medals = ["🏆", "🥈", "🥉"]
+        for i, p in enumerate(picks_s2):
+            score = p.get("score", 0)
+            heat = "🔥" if score >= 75 else "📈"
+            ticker = p.get("ticker", "?")
+            name = p.get("name", ticker)
+            lines.append(
+                f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} {score}/100"
+            )
+        lines.append("")
+
+    lines.append("_Auto-trader will execute at market open if enabled._")
     send_telegram("\n".join(lines))
-    log.info(f"[Pre-market] Telegram sent with {len(picks)} picks")
+    log.info(f"[Pre-market] Telegram sent — S1: {len(picks_s1)}, S2: {len(picks_s2)}")
 
 
 # Schedule slots:
@@ -334,11 +385,13 @@ async def _scheduled_trade_loop():
 
         try:
             if _is_trade_day():
-                log.info(f"[{next_label}] Trade day ✓ — executing")
+                log.info(f"[{next_label}] Trade day ✓ — executing both strategies")
                 await _execute_scheduled_trades(next_n, next_label)
+                await _run_scan_and_cache_s2()
             else:
                 log.info(f"[{next_label}] Rest day — scanning only, no orders")
                 await _run_scan_and_cache()
+                await _run_scan_and_cache_s2()
         except Exception as e:
             log.exception(f"Scheduled slot error [{next_label}]: {e}")
 
@@ -949,6 +1002,119 @@ async def scan_stream():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------- STRATEGY COMPARISON ----------
+
+@app.get("/api/strategy/compare")
+async def strategy_compare():
+    """Return trade performance split by strategy for the dashboard Strategy tab."""
+    from auto_trader import trader as _trader
+    all_trades = _trader.tradelog.data.get("trades", [])
+
+    # Also pull closed orders from Alpaca for real P&L
+    try:
+        closed = await alpaca_get("/orders", params={
+            "status": "closed", "limit": "200", "direction": "desc"
+        })
+    except Exception:
+        closed = []
+
+    # Build a map of filled orders by symbol+side for P&L lookup
+    order_map = {}
+    for o in closed:
+        sym = o.get("symbol", "")
+        side = o.get("side", "")
+        key = f"{sym}_{side}_{(o.get('filled_at') or '')[:10]}"
+        order_map[key] = o
+
+    def _strategy_stats(strat: str) -> dict:
+        trades = [t for t in all_trades if t.get("strategy") == strat]
+        if not trades:
+            return {
+                "strategy": strat,
+                "label": "S1 Pullback" if strat == "s1" else "S2 Breakout",
+                "total_trades": 0, "profitable": 0, "loss_making": 0,
+                "win_rate": 0, "net_pnl": 0, "avg_return_pct": 0,
+                "trades": [],
+            }
+
+        return {
+            "strategy": strat,
+            "label": "S1 Pullback" if strat == "s1" else "S2 Breakout",
+            "total_trades": len(trades),
+            "trades": trades[-50:],
+        }
+
+    # Picks caches
+    s1_picks = _load_picks()
+    s2_picks = _load_picks_s2()
+
+    return {
+        "s1": _strategy_stats("s1"),
+        "s2": _strategy_stats("s2"),
+        "s1_picks": s1_picks.get("picks", []) if s1_picks else [],
+        "s2_picks": s2_picks.get("picks", []) if s2_picks else [],
+        "s1_scanned_at": s1_picks.get("scanned_at") if s1_picks else None,
+        "s2_scanned_at": s2_picks.get("scanned_at") if s2_picks else None,
+    }
+
+
+@app.get("/api/scan/stream/s2")
+async def scan_stream_s2():
+    """SSE endpoint — scans the curated universe with Strategy 2 (VCP Breakout)."""
+    from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
+    from strategy2 import score_from_df_s2
+    from strategy import batch_download, benchmark_return_3m
+
+    async def generator():
+        import json
+        loop = asyncio.get_event_loop()
+        universe = FALLBACK_UNIVERSE
+        bench = await loop.run_in_executor(None, benchmark_return_3m)
+        total = len(universe)
+        yield f"data: {json.dumps({'status': 'downloading', 'total': total, 'strategy': 's2'})}\n\n"
+
+        scanned = 0
+        emitted = 0
+        chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
+
+        for chunk in chunks:
+            data = await loop.run_in_executor(None, batch_download, chunk)
+            for ticker in chunk:
+                result = score_from_df_s2(ticker, data.get(ticker), bench_ret_3m=bench)
+                scanned += 1
+                if scanned % 25 == 0 or scanned == total:
+                    yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
+                if not (result.get("ok") and result.get("stage2")):
+                    continue
+                if result.get("score", 0) < 60:
+                    continue
+                result["total"] = total
+                result["name"] = get_ticker_name(ticker)
+                yield f"data: {json.dumps(result)}\n\n"
+                emitted += 1
+
+        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/auto/scan-now/s2")
+async def auto_scan_now_s2(force: bool = False):
+    """Force an immediate S2 scan."""
+    from scanner import find_top_picks_s2
+    if force:
+        log.info("[S2] TEST MODE — scanning 5 stocks only")
+        picks = find_top_picks_s2(n=3, max_stocks=5)
+        _save_picks_s2(picks)
+    else:
+        picks = await _run_scan_and_cache_s2()
+    return {"picks": len(picks), "strategy": "s2", "forced": force}
 
 
 # ---------- STATIC ----------

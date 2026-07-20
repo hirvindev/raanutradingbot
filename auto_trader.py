@@ -20,7 +20,7 @@ from typing import Optional
 import httpx
 
 from strategy import scan, score_ticker
-from scanner import find_top_picks
+from scanner import find_top_picks, find_top_picks_s2
 
 log = logging.getLogger("raanu.auto")
 
@@ -67,7 +67,7 @@ class TradeLog:
         except Exception as e:
             log.error(f"Failed to write trade log: {e}")
 
-    def trades_in_last_7_days(self):
+    def trades_in_last_7_days(self, strategy: Optional[str] = None):
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         out = []
         for t in self.data.get("trades", []):
@@ -76,17 +76,20 @@ class TradeLog:
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 if ts > cutoff:
+                    if strategy and t.get("strategy") != strategy:
+                        continue
                     out.append(t)
             except Exception:
                 continue
         return out
 
-    def can_trade_now(self) -> tuple[bool, str]:
-        recent = self.trades_in_last_7_days()
+    def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
+        recent = self.trades_in_last_7_days(strategy=strategy)
+        label = "S1 Pullback" if strategy == "s1" else "S2 Breakout"
         if len(recent) >= WEEKLY_TRADE_LIMIT:
             oldest = min(recent, key=lambda x: x["timestamp"])
-            return False, f"Weekly limit reached ({len(recent)}/{WEEKLY_TRADE_LIMIT}). Oldest expires {oldest['timestamp']}"
-        return True, f"OK ({len(recent)}/{WEEKLY_TRADE_LIMIT} this week)"
+            return False, f"[{label}] Weekly limit reached ({len(recent)}/{WEEKLY_TRADE_LIMIT}). Oldest expires {oldest['timestamp']}"
+        return True, f"[{label}] OK ({len(recent)}/{WEEKLY_TRADE_LIMIT} this week)"
 
     def record(self, payload: dict):
         payload["timestamp"] = datetime.now(timezone.utc).isoformat()
@@ -209,18 +212,21 @@ class AutoTrader:
             "recent_events":   self.events[-30:],
         }
 
-    async def run_one_cycle(self, picks: Optional[list] = None, force_market_open: bool = False):
+    async def run_one_cycle(self, picks: Optional[list] = None,
+                           force_market_open: bool = False,
+                           strategy: str = "s1"):
         """
         Check signals and maybe place a trade.
-        Pass pre-computed picks to avoid a redundant scan (scheduled scan
-        already ran). If picks=None, runs a fresh scan.
-        Scanning always happens; trading only when self.enabled=True.
+        strategy: "s1" (pullback) or "s2" (breakout)
         """
+        label = "S1 Pullback" if strategy == "s1" else "S2 Breakout"
+        uptrend_key = "uptrend" if strategy == "s1" else "stage2"
+
         if picks is None:
-            self.event("scan", "Running XETRA/GETTEX momentum scan...")
-            picks = find_top_picks(3)
+            self.event("scan", f"[{label}] Running scan...")
+            picks = find_top_picks(3) if strategy == "s1" else find_top_picks_s2(3)
         else:
-            self.event("scan", f"Using pre-scanned picks ({len(picks)} candidates)")
+            self.event("scan", f"[{label}] Using pre-scanned picks ({len(picks)} candidates)")
 
         self.last_scan = {
             "ts":      datetime.now(timezone.utc).isoformat(),
@@ -228,7 +234,7 @@ class AutoTrader:
         }
 
         if not self.enabled:
-            self.last_decision = {"action": "idle", "reason": "Auto-execute is off — picks cached, no order placed"}
+            self.last_decision = {"action": "idle", "reason": f"[{label}] Auto-execute is off — picks cached, no order placed"}
             return
 
         # ── Gate 1: market hours ──────────────────────────────────────────
@@ -241,8 +247,8 @@ class AutoTrader:
                 self.last_decision = {"action": "hold", "reason": clock_msg}
                 return
 
-        # ── Gate 2: weekly trade limit ────────────────────────────────────
-        ok, why = self.tradelog.can_trade_now()
+        # ── Gate 2: weekly trade limit (per strategy) ─────────────────────
+        ok, why = self.tradelog.can_trade_now(strategy=strategy)
         if not ok:
             self.event("limit", why)
             self.last_decision = {"action": "skip", "reason": why}
@@ -262,7 +268,7 @@ class AutoTrader:
         best = next(
             (p for p in picks
              if p.get("score", 0) >= MIN_SIGNAL_SCORE
-             and p.get("uptrend")
+             and p.get(uptrend_key)
              and p.get("ticker")
              and p["ticker"].upper() not in held),
             None,
@@ -323,6 +329,7 @@ class AutoTrader:
             "notional_usd":    notional,
             "score":           best["score"],
             "reasons":         best["reasons"],
+            "strategy":        strategy,
             "alpaca_response": result,
         })
 

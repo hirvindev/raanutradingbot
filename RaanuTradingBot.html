@@ -519,9 +519,99 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 <!-- ─────────── INDICATORS ─────────── -->
 <!-- ─────────── STRATEGY ─────────── -->
 <div id="s-strat" class="sec">
+
+  <!-- ── STRATEGY A/B COMPARISON ── -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-hdr">
+      <div class="card-title" style="margin:0">Strategy A/B Test — 6-Month Comparison</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn b-out b-xs stratFilter on" onclick="filterStratTrades('all',this)">All</button>
+        <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('1w',this)">1W</button>
+        <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('1m',this)">1M</button>
+        <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('3m',this)">3M</button>
+        <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('6m',this)">6M</button>
+        <button class="btn b-acc b-xs" onclick="loadStrategyComparison()" style="margin-left:8px">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="g2" style="margin-bottom:16px">
+    <!-- S1 card -->
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <div class="card-title" style="color:var(--accent)">S1 — Pullback-in-Uptrend</div>
+      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys healthy pullbacks to rising EMA20 in confirmed uptrends</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1Trades">0</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1WinRate">—</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Profitable</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono);color:var(--green)" id="s1Wins">0</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1PnL">—</div>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S1 picks</div>
+        <div id="s1PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
+      </div>
+    </div>
+    <!-- S2 card -->
+    <div class="card" style="border-left:3px solid var(--warn)">
+      <div class="card-title" style="color:var(--warn)">S2 — VCP Breakout</div>
+      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys breakouts above tight consolidation near 52-week highs on volume surge</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2Trades">0</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2WinRate">—</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Profitable</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono);color:var(--green)" id="s2Wins">0</div>
+        </div>
+        <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+          <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
+          <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2PnL">—</div>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S2 picks</div>
+        <div id="s2PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STRATEGY TRADE HISTORY ── -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Trade History by Strategy</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>Strategy</th><th>Ticker</th><th style="text-align:right">Amount</th>
+          <th style="text-align:right">Score</th><th>Signal</th>
+        </tr></thead>
+        <tbody id="stratTradeBody">
+          <tr><td colspan="6" style="color:var(--muted2);text-align:center;padding:20px">No trades yet — both strategies will run on the next scan cycle</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── SCORING ENGINE DETAILS ── -->
   <div class="g2">
     <div class="card">
-      <div class="card-title">Scoring Engine — Trend + Momentum (Pullback-in-Uptrend)</div>
+      <div class="card-title">S1 Scoring — Trend + Momentum (Pullback-in-Uptrend)</div>
       <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--green)">uptrend = true</span> AND <span style="color:var(--green)">score &ge; 60</span> become actionable BUY signals.</div>
       <table>
         <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
@@ -540,6 +630,27 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         Hard gate: price &gt; EMA200 AND EMA50 &gt; EMA200 AND EMA50 rising — otherwise score capped at 45 (never actionable)
       </div>
     </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--warn)">S2 Scoring — VCP Breakout (Minervini Template)</div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--warn)">stage2 = true</span> AND <span style="color:var(--warn)">score &ge; 60</span> become actionable BUY signals.</div>
+      <table>
+        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--warn)">Stage 2 trend template</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Price &gt; 150 SMA &gt; 200 SMA, both rising</td></tr>
+          <tr><td style="color:var(--warn)">Near 52-week high</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">Within 25% of 52W high (closer = better)</td></tr>
+          <tr><td style="color:var(--warn)">Consolidation tightness</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">20-day range &lt; 8% = very tight VCP base</td></tr>
+          <tr><td style="color:var(--warn)">Volume pattern</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">Dry-up in base + surge on breakout (1.5x avg)</td></tr>
+          <tr><td style="color:var(--warn)">Relative strength vs SPY</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">3-month outperformance vs market</td></tr>
+          <tr><td style="color:var(--warn)">MACD regime</td><td style="text-align:right;color:var(--green)">8</td><td style="color:var(--muted2)">Bullish + fresh crossover bonus</td></tr>
+          <tr><td style="color:var(--warn)">Breakout confirmation</td><td style="text-align:right;color:var(--green)">7</td><td style="color:var(--muted2)">Price above 20-day high on volume</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--warn)">
+        Hard gate: price &gt; 150 SMA &gt; 200 SMA AND 200 SMA rising — otherwise score capped at 45 (never actionable)
+      </div>
+    </div>
+  </div>
+  <div class="g2">
     <div class="card">
       <div class="card-hdr">
         <div class="card-title" style="margin:0">Exit Engine — Trailing Stop</div>
@@ -1945,7 +2056,99 @@ function nav(id,el){
   if(id==='ov'){fetchAccount();fetchPositions();}
   if(id==='port'){fetchPositions();}
   if(id==='ord'){fetchOrders();}
+  if(id==='strat'){loadStrategyComparison();}
   if(id==='logs'){renderLogs();}
+}
+
+// ═══════════════════════════════════════
+//  STRATEGY A/B COMPARISON
+// ═══════════════════════════════════════
+let _stratData=null;
+let _stratFilter='all';
+
+async function loadStrategyComparison(){
+  try{
+    const r=await fetch('/api/strategy/compare');
+    _stratData=await r.json();
+    renderStratComparison();
+  }catch(e){console.error('Strategy compare failed:',e);}
+}
+
+function filterStratTrades(period,btn){
+  _stratFilter=period;
+  document.querySelectorAll('.stratFilter').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderStratComparison();
+}
+
+function renderStratComparison(){
+  if(!_stratData)return;
+  const d=_stratData;
+
+  // Render S1 stats
+  const s1t=d.s1.trades||[];
+  setEl('s1Trades',s1t.length);
+
+  // Render S2 stats
+  const s2t=d.s2.trades||[];
+  setEl('s2Trades',s2t.length);
+
+  // Win rate placeholders — real P&L comes from closed Alpaca orders
+  // For now show trade counts; P&L tracking builds over time
+  setEl('s1WinRate',s1t.length?'tracking...':'—');
+  setEl('s1Wins','—');
+  setEl('s1PnL','tracking');
+  setEl('s2WinRate',s2t.length?'tracking...':'—');
+  setEl('s2Wins','—');
+  setEl('s2PnL','tracking');
+
+  // S1 picks
+  const s1p=d.s1_picks||[];
+  const s1el=document.getElementById('s1PicksList');
+  if(s1p.length){
+    s1el.innerHTML=s1p.map(p=>`<span style="color:${p.score>=75?'var(--green)':'var(--accent)'}">` +
+      `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
+  }else{s1el.textContent='No picks above threshold';}
+
+  // S2 picks
+  const s2p=d.s2_picks||[];
+  const s2el=document.getElementById('s2PicksList');
+  if(s2p.length){
+    s2el.innerHTML=s2p.map(p=>`<span style="color:${p.score>=75?'var(--green)':'var(--warn)'}">` +
+      `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
+  }else{s2el.textContent='No picks above threshold';}
+
+  // Trade history table
+  const all=[...s1t.map(t=>({...t,_strat:'s1'})),...s2t.map(t=>({...t,_strat:'s2'}))];
+  all.sort((a,b)=>(b.timestamp||'').localeCompare(a.timestamp||''));
+
+  // Apply time filter
+  const now=Date.now();
+  const cutoffs={all:0,'1w':7*864e5,'1m':30*864e5,'3m':90*864e5,'6m':180*864e5};
+  const cut=cutoffs[_stratFilter]||0;
+  const filtered=cut?all.filter(t=>{
+    const ts=new Date(t.timestamp).getTime();
+    return(now-ts)<=cut;
+  }):all;
+
+  const tbody=document.getElementById('stratTradeBody');
+  if(!filtered.length){
+    tbody.innerHTML='<tr><td colspan="6" style="color:var(--muted2);text-align:center;padding:20px">No trades in this period</td></tr>';
+    return;
+  }
+  tbody.innerHTML=filtered.map(t=>{
+    const dt=t.timestamp?new Date(t.timestamp).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—';
+    const strat=t._strat==='s1'?'<span style="color:var(--accent)">S1 Pullback</span>':'<span style="color:var(--warn)">S2 Breakout</span>';
+    const sig=(t.reasons||[]).slice(0,2).join(' | ');
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:.68rem">${dt}</td>
+      <td>${strat}</td>
+      <td style="font-weight:600">${t.ticker||'—'}</td>
+      <td style="text-align:right;font-family:var(--mono)">$${(t.notional_usd||0).toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--green)">${t.score||'—'}</td>
+      <td style="font-size:.65rem;color:var(--muted2)">${sig||'—'}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ═══════════════════════════════════════
