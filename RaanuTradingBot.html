@@ -314,31 +314,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
   </div>
 
-  <!-- CHART + SIGNAL -->
-  <div class="g3l">
-    <div class="card">
-      <div class="card-hdr">
-        <div class="card-title" style="margin:0">Portfolio Equity</div>
-        <div class="ctabs">
-          <button class="ctab on" onclick="switchChart('eq',this)">Equity</button>
-          <button class="ctab" onclick="switchChart('pnl',this)">P&amp;L</button>
-          <button class="ctab" onclick="switchChart('dd',this)">Drawdown</button>
-        </div>
-      </div>
-      <div class="chart-wrap" style="height:185px"><canvas id="eqChart" aria-label="Equity chart">Equity chart.</canvas></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Composite Signal</div>
-      <div class="ring-wrap">
-        <div class="ring"><div class="ring-n" id="rNum">—</div><div class="ring-l" id="rLbl">NO DATA</div></div>
-        <div style="width:100%;display:flex;flex-direction:column;gap:5px" id="rBreak">
-          <div style="font-size:.68rem;font-family:var(--mono);color:var(--muted);text-align:center">Start engine</div>
-        </div>
-        <button class="btn b-out b-sm" style="width:100%" onclick="nav('sig',null);runScan()">↻ Scan Now</button>
-      </div>
-    </div>
-  </div>
-
   <!-- OPEN POSITIONS -->
   <div class="card">
     <div class="card-hdr">
