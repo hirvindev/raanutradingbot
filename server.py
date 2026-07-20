@@ -590,19 +590,34 @@ async def account_info():
     return await alpaca_get("/account")
 
 
+_asset_name_cache: dict[str, str] = {}
+
 @app.get("/api/portfolio")
 async def portfolio():
-    """Open positions, tagged with strategy from trade log."""
+    """Open positions, tagged with strategy and company name."""
     positions = await alpaca_get("/positions")
     strat_map = {}
     for t in trader.tradelog.data.get("trades", []):
         if t.get("action") == "BUY" and t.get("ticker"):
             strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+
+    uncached = [p.get("symbol", "").upper() for p in positions if p.get("symbol", "").upper() not in _asset_name_cache]
+    if uncached:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for sym in uncached:
+                try:
+                    r = await client.get(f"{BROKER_BASE}/assets/{sym}", headers=alpaca_headers())
+                    if r.status_code == 200:
+                        _asset_name_cache[sym] = r.json().get("name", sym)
+                except Exception:
+                    _asset_name_cache[sym] = sym
+
     out = []
     for p in positions:
         sym = p.get("symbol", "").upper()
         out.append({
             "ticker":        sym,
+            "name":          _asset_name_cache.get(sym, sym),
             "quantity":      float(p.get("qty", 0)),
             "averagePrice":  float(p.get("avg_entry_price", 0)),
             "currentPrice":  float(p.get("current_price", 0)),

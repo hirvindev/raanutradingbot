@@ -961,8 +961,9 @@ function renderPositions(){
           : p.strategy === 's1'
           ? '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.62rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>'
           : '<span style="font-size:.62rem;color:var(--muted)">—</span>';
+        const nameStr = p.name && p.name !== p.ticker ? `<div style="font-size:.6rem;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${p.name}</div>` : '';
         return `<tr style="background:${pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
-          <td style="font-weight:700">${p.ticker}</td>
+          <td><div style="font-weight:700">${p.ticker}</div>${nameStr}</td>
           <td style="text-align:center">${strat}</td>
           <td style="font-family:var(--mono)">${fn(p.quantity,2)}</td>
           <td style="font-family:var(--mono)">${fmtCur(p.averagePrice)}</td>
