@@ -997,14 +997,13 @@ async def stocks_market_movers(top: int = 10):
 @app.get("/api/scan/stream")
 async def scan_stream():
     """
-    SSE endpoint — scans the curated, liquid quality universe (the same one the
-    auto-trader uses) and streams ONLY stocks that pass our strategy: those in a
-    confirmed uptrend. Non-uptrend names are scored but not emitted — there's no
-    point brute-forcing the entire market when the strategy only ever buys
-    uptrend pullbacks. Batch-downloads in chunks so results stream progressively.
+    SSE endpoint — scans the curated universe with BOTH S1 (pullback) and S2
+    (VCP breakout) strategies and streams qualifying stocks tagged with which
+    strategy surfaced them. A ticker can appear twice if it passes both.
     """
     from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
     from strategy import score_from_df, batch_download, benchmark_return_3m
+    from strategy2 import score_from_df_s2
 
     async def generator():
         import json
@@ -1012,7 +1011,6 @@ async def scan_stream():
 
         universe = FALLBACK_UNIVERSE
 
-        # SPY 3-month return — relative-strength benchmark (computed once).
         bench = await loop.run_in_executor(None, benchmark_return_3m)
 
         total = len(universe)
@@ -1040,28 +1038,41 @@ async def scan_stream():
         for chunk in chunks:
             data = await loop.run_in_executor(None, batch_download, chunk)
             for ticker in chunk:
-                result = score_from_df(ticker, data.get(ticker), bench_ret_3m=bench)
+                df = data.get(ticker)
                 scanned += 1
-                # Lightweight progress tick so the bar advances even though most
-                # tickers are filtered out (only uptrend candidates are emitted).
                 if scanned % 25 == 0 or scanned == total:
                     yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
-                # Swing filter: uptrend + score >= 60 + MACD not bearish + RSI not overbought.
-                if not (result.get("ok") and result.get("uptrend")):
-                    continue
-                if result.get("score", 0) < 60:
-                    continue
-                rsi_val = result.get("rsi", 50)
-                macd_val = result.get("macd", 0)
-                macd_sig = result.get("macd_signal", 0)
-                if rsi_val > 72 or macd_val < macd_sig:
-                    continue
-                result["total"] = total
-                result["name"] = get_ticker_name(ticker)
-                mc = await loop.run_in_executor(None, _fetch_market_cap, ticker)
-                result["cap_label"] = _cap_label(mc)
-                yield f"data: {json.dumps(result)}\n\n"
-                emitted += 1
+
+                mc_fetched = False
+                mc_val = None
+
+                # S1: Pullback-in-Uptrend
+                r1 = score_from_df(ticker, df, bench_ret_3m=bench)
+                if (r1.get("ok") and r1.get("uptrend")
+                        and r1.get("score", 0) >= 60
+                        and r1.get("rsi", 50) <= 72
+                        and r1.get("macd", 0) >= r1.get("macd_signal", 0)):
+                    r1["strategy"] = "s1"
+                    r1["total"] = total
+                    r1["name"] = get_ticker_name(ticker)
+                    mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
+                    mc_fetched = True
+                    r1["cap_label"] = _cap_label(mc_val)
+                    yield f"data: {json.dumps(r1)}\n\n"
+                    emitted += 1
+
+                # S2: VCP Breakout
+                r2 = score_from_df_s2(ticker, df, bench_ret_3m=bench)
+                if (r2.get("ok") and r2.get("stage2")
+                        and r2.get("score", 0) >= 60):
+                    r2["strategy"] = "s2"
+                    r2["total"] = total
+                    r2["name"] = get_ticker_name(ticker)
+                    if not mc_fetched:
+                        mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
+                    r2["cap_label"] = _cap_label(mc_val)
+                    yield f"data: {json.dumps(r2)}\n\n"
+                    emitted += 1
 
         yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
 
