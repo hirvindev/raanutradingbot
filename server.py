@@ -624,7 +624,7 @@ async def portfolio():
             "ppl":           float(p.get("unrealized_pl", 0)),
             "fxPpl":         0,
             "initialFill":   p.get("asset_id"),
-            "strategy":      strat_map.get(sym, ""),
+            "strategy":      strat_map.get(sym, "s1"),
             "_raw":          p,
         })
     return out
