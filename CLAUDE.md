@@ -174,8 +174,26 @@ than on the thesis failing.
 | Stop-loss | `STOP_ATR_MULT_S1=2.5`, `STOP_ATR_MULT_S2=3.0` | Distance = multiple × ATR(14) at entry, frozen for the life of the trade |
 | Stop floor / ceiling | 1.5% / 25% | `STOP_MIN_PCT` stops quiet ETFs exiting inside the spread; `STOP_MAX_PCT` caps extreme-ATR names |
 | Trailing stop | arms at +2.0×ATR, trails 1.5×ATR | `TRAIL_ACTIVATE_ATR` / `TRAIL_ATR_MULT` |
+| Trail floors | give-back ≥3%, arm ≥2.5% | `TRAIL_MIN_PCT` / `TRAIL_ACTIVATE_MIN_PCT` — **required**, see below |
+| Profit ladder | `5:2,10:6,15:11,20:15,30:24` | Once PEAK gain hits X%, never give back below +Y% (`PROFIT_LADDER`) |
 | Hard take-profit | disabled (0) | Optional ceiling backstop (`HARD_TAKE_PROFIT_PCT`) |
 | Daily crash | -8% | Single-session drop from previous close (`DAILY_CRASH_PCT`) |
+
+**The trail floors are not optional.** Without them a 0.10%-ATR instrument
+(ARB, a merger-arb ETF) arms its trail at +0.20% and exits on a 0.15%
+give-back — it closed a live position on noise for +0.49%. Floors apply to the
+trail for exactly the same reason `STOP_MIN_PCT` applies to the stop.
+
+**Profit ladder** ratchets a floor upward as the trade runs: peak +10% locks in
+at least +6%, peak +20% locks +15%, and the floor never falls. Backtested on S2
+it improved return +13.26% → **+15.55%** and win rate 62.8% → 65.7%. It must run
+*alongside* the trailing stop — ladder-only (trail off) tested at **-9.35%**.
+
+**Exits only run while the market is open.** When closed, `current_price` is the
+last close, so a trail can fire on a move that already happened; the resulting
+order queues instead of filling, leaving the position open so the next poll
+fires again. Five-minute polling would submit close orders all weekend.
+`_symbols_with_pending_sell()` is a second guard against stacking exit orders.
 
 Set `STOP_MODE=pct` / `TRAIL_MODE=pct` to restore fixed-percentage behaviour.
 The multiple is per-strategy — breakouts (S2) need more room to hold a retest

@@ -76,9 +76,16 @@ class ExitConfig:
     trail_pct: float = 2.5
     trail_atr_mult: float = 1.5
 
+    trail_min_pct: float = 3.0          # floor on the give-back distance
+    trail_activate_min_pct: float = 2.5 # floor on the arm threshold
+
     hard_take_profit_pct: float = 0.0   # 0 = disabled
     daily_crash_pct: float = 8.0        # 0 = disabled
     max_hold_days: int = 0              # 0 = no time stop
+
+    # Profit ladder: once PEAK gain reaches X%, never give back below Y%.
+    # [(5,2),(10,6),...]. Empty list disables it.
+    profit_ladder: list = field(default_factory=list)
 
     def label(self) -> str:
         s = f"{self.stop_atr_mult:.1f}xATR" if self.stop_mode == "atr" else f"{self.stop_pct:.1f}%"
@@ -276,13 +283,29 @@ def simulate(sig: dict, prices: dict[str, pd.DataFrame],
 
             if exit_price is None and exits.trail_mode != "off":
                 if exits.trail_mode == "atr":
-                    armed = pos["peak"] >= entry + exits.trail_activate_atr * atr
-                    trail_stop = pos["peak"] - exits.trail_atr_mult * atr
+                    arm_dist  = max(exits.trail_activate_atr * atr,
+                                    entry * exits.trail_activate_min_pct / 100)
+                    give_dist = max(exits.trail_atr_mult * atr,
+                                    entry * exits.trail_min_pct / 100)
+                    armed = pos["peak"] >= entry + arm_dist
+                    trail_stop = pos["peak"] - give_dist
                 else:
                     armed = pos["peak"] >= entry * (1 + exits.trail_activate_pct / 100)
                     trail_stop = pos["peak"] * (1 - exits.trail_pct / 100)
                 if armed and low <= trail_stop:
                     exit_price, exit_reason = trail_stop, "trail"
+
+            # Profit ladder — ratchets a floor up as the peak gain grows.
+            if exit_price is None and exits.profit_ladder:
+                peak_pct = (pos["peak"] - entry) / entry * 100
+                floor = None
+                for threshold, lock in sorted(exits.profit_ladder):
+                    if peak_pct >= threshold:
+                        floor = lock
+                if floor is not None:
+                    floor_price = entry * (1 + floor / 100)
+                    if low <= floor_price:
+                        exit_price, exit_reason = floor_price, "ladder"
 
             if exit_price is None and exits.daily_crash_pct > 0 and pos["prev_close"]:
                 drop = (pos["prev_close"] - low) / pos["prev_close"] * 100
@@ -536,6 +559,8 @@ def main() -> None:
     ap.add_argument("--max-atr-pct", type=float, default=0.0)
     ap.add_argument("--sweep-atr", action="store_true", help="compare stop rules")
     ap.add_argument("--sweep-risk", action="store_true", help="compare sizing models")
+    ap.add_argument("--sweep-ladder", action="store_true",
+                    help="compare profit-ladder variants")
     ap.add_argument("--robustness", action="store_true",
                     help="split each config into first/second half to test stability")
     ap.add_argument("--no-cache", action="store_true")
@@ -583,6 +608,30 @@ def main() -> None:
         print(f"stop-rule sweep (sizing={pf.sizing_mode}, risk={pf.risk_pct}%):")
         for label, ex in configs:
             print_stats(label, stats(simulate(sig, prices, ex, pf), pf))
+
+    elif args.sweep_ladder:
+        bh = benchmark_buy_hold(args.years)
+        if bh:
+            print(f"CONTROL — SPY buy & hold: ret {bh['total_return_pct']:+.2f}%  "
+                  f"maxDD {bh['max_drawdown_pct']:.2f}%\n")
+        base = dict(stop_mode="atr", stop_atr_mult=3.0 if args.strategy == "s2" else 2.5,
+                    trail_mode="atr", trail_activate_atr=2.0, trail_atr_mult=1.5)
+        LADDER = [(5, 2), (10, 6), (15, 11), (20, 15), (30, 24)]
+        variants = [
+            ("no ladder, 1.5% trail floor", ExitConfig(**base, trail_min_pct=1.5)),
+            ("no ladder, 3% trail floor",   ExitConfig(**base, trail_min_pct=3.0)),
+            ("LADDER + 3% trail floor",     ExitConfig(**base, trail_min_pct=3.0,
+                                                       profit_ladder=LADDER)),
+            ("LADDER only (trail off)",     ExitConfig(**{**base, "trail_mode": "off"},
+                                                       profit_ladder=LADDER)),
+        ]
+        print("profit-ladder comparison:")
+        for lbl, ex in variants:
+            res = simulate(sig, prices, ex, pf)
+            s = stats(res, pf)
+            print_stats(lbl, s)
+            print(f"      exits: {s.get('exit_reasons')}")
+        print()
 
     elif args.robustness:
         bh = benchmark_buy_hold(args.years)

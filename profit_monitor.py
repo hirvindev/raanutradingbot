@@ -47,6 +47,11 @@ _exit_config = {
     "trail_mode":          os.getenv("TRAIL_MODE", "atr").strip().lower(),
     "trail_activate_atr":  float(os.getenv("TRAIL_ACTIVATE_ATR", "2.0")),
     "trail_atr_mult":      float(os.getenv("TRAIL_ATR_MULT", "1.5")),
+    # Floors, for the same reason the stop has one. On a very quiet instrument
+    # (ARB: 0.10% ATR) an unfloored trail arms at +0.20% and exits on a 0.15%
+    # give-back — closing a position on noise for a rounding-error gain.
+    "trail_min_pct":          float(os.getenv("TRAIL_MIN_PCT", "3.0")),
+    "trail_activate_min_pct": float(os.getenv("TRAIL_ACTIVATE_MIN_PCT", "2.5")),
     "trail_activate_pct":  float(os.getenv("TRAIL_ACTIVATE_PCT", os.getenv("TAKE_PROFIT_PCT", "5.0"))),
     "trail_pct":           float(os.getenv("TRAIL_PCT", "2.5")),
     "hard_take_profit_pct": float(os.getenv("HARD_TAKE_PROFIT_PCT", "0")),
@@ -54,7 +59,41 @@ _exit_config = {
     "check_interval":      int(os.getenv("PROFIT_CHECK_SEC", "300")),
 }
 
-_STR_KEYS = {"stop_mode", "trail_mode"}
+_STR_KEYS = {"stop_mode", "trail_mode", "profit_ladder"}
+
+# ── Profit ladder (ratchet) ──────────────────────────────────────────────────
+# "book progressively more as the trade goes higher": each rung says once the
+# position's PEAK gain reaches X%, never give back below a locked Y% profit.
+# The floor only ever ratchets up — it cannot fall as the price falls.
+#
+#   "5:2,10:6,15:11,20:15,30:24"  ->  peak +10% locks in at least +6%
+#
+# This runs alongside the trailing stop; whichever triggers first exits.
+_exit_config["profit_ladder"] = os.getenv("PROFIT_LADDER", "5:2,10:6,15:11,20:15,30:24")
+
+
+def parse_ladder(spec: str) -> list[tuple[float, float]]:
+    """Parse "peak:lock,peak:lock" into rungs sorted by peak threshold."""
+    rungs: list[tuple[float, float]] = []
+    for part in (spec or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            peak, lock = part.split(":")
+            rungs.append((float(peak), float(lock)))
+        except ValueError:
+            log.warning(f"Ignoring malformed profit-ladder rung: {part!r}")
+    return sorted(rungs)
+
+
+def locked_floor(peak_pct: float, rungs: list[tuple[float, float]]) -> Optional[float]:
+    """Highest profit level locked in, given how far the position has run."""
+    floor = None
+    for threshold, lock in rungs:
+        if peak_pct >= threshold:
+            floor = lock
+    return floor
 
 STOP_MODE           = _exit_config["stop_mode"]
 STOP_ATR_MULT       = _exit_config["stop_atr_mult"]
@@ -64,18 +103,21 @@ STOP_MIN_PCT        = _exit_config["stop_min_pct"]
 TRAIL_MODE          = _exit_config["trail_mode"]
 TRAIL_ACTIVATE_ATR  = _exit_config["trail_activate_atr"]
 TRAIL_ATR_MULT      = _exit_config["trail_atr_mult"]
+TRAIL_MIN_PCT       = _exit_config["trail_min_pct"]
+TRAIL_ACTIVATE_MIN_PCT = _exit_config["trail_activate_min_pct"]
 TRAIL_ACTIVATE_PCT  = _exit_config["trail_activate_pct"]
 TRAIL_PCT           = _exit_config["trail_pct"]
 HARD_TAKE_PROFIT_PCT = _exit_config["hard_take_profit_pct"]
 DAILY_CRASH_PCT     = _exit_config["daily_crash_pct"]
 CHECK_INTERVAL      = _exit_config["check_interval"]
+PROFIT_LADDER       = parse_ladder(_exit_config["profit_ladder"])
 
 
 def _refresh_globals() -> None:
     global STOP_MODE, STOP_ATR_MULT, STOP_LOSS_PCT, STOP_MAX_PCT, STOP_MIN_PCT
-    global TRAIL_MODE, TRAIL_ACTIVATE_ATR, TRAIL_ATR_MULT
+    global TRAIL_MODE, TRAIL_ACTIVATE_ATR, TRAIL_ATR_MULT, TRAIL_MIN_PCT, TRAIL_ACTIVATE_MIN_PCT
     global TRAIL_ACTIVATE_PCT, TRAIL_PCT, HARD_TAKE_PROFIT_PCT
-    global DAILY_CRASH_PCT, CHECK_INTERVAL
+    global DAILY_CRASH_PCT, CHECK_INTERVAL, PROFIT_LADDER
     STOP_MODE           = _exit_config["stop_mode"]
     STOP_ATR_MULT       = _exit_config["stop_atr_mult"]
     STOP_LOSS_PCT       = _exit_config["stop_loss_pct"]
@@ -84,11 +126,14 @@ def _refresh_globals() -> None:
     TRAIL_MODE          = _exit_config["trail_mode"]
     TRAIL_ACTIVATE_ATR  = _exit_config["trail_activate_atr"]
     TRAIL_ATR_MULT      = _exit_config["trail_atr_mult"]
+    TRAIL_MIN_PCT       = _exit_config["trail_min_pct"]
+    TRAIL_ACTIVATE_MIN_PCT = _exit_config["trail_activate_min_pct"]
     TRAIL_ACTIVATE_PCT  = _exit_config["trail_activate_pct"]
     TRAIL_PCT           = _exit_config["trail_pct"]
     HARD_TAKE_PROFIT_PCT = _exit_config["hard_take_profit_pct"]
     DAILY_CRASH_PCT     = _exit_config["daily_crash_pct"]
     CHECK_INTERVAL      = _exit_config["check_interval"]
+    PROFIT_LADDER       = parse_ladder(_exit_config["profit_ladder"])
 
 
 def get_exit_config() -> dict:
@@ -189,6 +234,40 @@ async def _get_positions() -> list[dict]:
         r = await c.get(f"{_base()}/positions", headers=_headers())
         r.raise_for_status()
         return r.json()
+
+
+async def _market_is_open() -> bool:
+    """
+    Exit rules must not be evaluated against a stale close price.
+
+    When the market is shut, `current_price` is the last close, so a trailing
+    stop can 'fire' on a move that already happened days ago — and the resulting
+    order queues rather than filling, leaving the position open so the next poll
+    fires again. Five-minute polling would submit a close order all weekend.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{_base()}/clock", headers=_headers())
+        return bool(r.json().get("is_open")) if r.status_code == 200 else False
+    except Exception as e:
+        log.warning(f"Clock check failed, assuming market closed: {e}")
+        return False
+
+
+async def _symbols_with_pending_sell() -> set[str]:
+    """Positions already being closed — never submit a second exit order."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{_base()}/orders", headers=_headers(),
+                            params={"status": "open", "limit": 500})
+        if r.status_code != 200:
+            return set()
+        return {
+            (o.get("symbol") or "").upper()
+            for o in r.json() if o.get("side") == "sell"
+        }
+    except Exception:
+        return set()
 
 
 async def _close_position(symbol: str) -> dict:
@@ -319,12 +398,18 @@ async def monitor_loop():
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
+
+        if not await _market_is_open():
+            log.debug("Profit monitor: market closed — skipping exit checks")
+            continue
+
         try:
             positions = await _get_positions()
         except Exception as e:
             log.warning(f"Profit monitor: failed to fetch positions: {e}")
             continue
 
+        pending_sells = await _symbols_with_pending_sell()
         peaks = _load_peaks()
         open_symbols = set()
 
@@ -339,6 +424,12 @@ async def monitor_loop():
                 continue
 
             open_symbols.add(symbol)
+
+            # A close order is already working — the position stays open until
+            # it fills, so re-evaluating would stack duplicate exit orders.
+            if symbol.upper() in pending_sells:
+                log.info(f"{symbol}: close order already pending — skipping")
+                continue
             pct = (current - entry) / entry * 100
             pnl = (current - entry) * qty
 
@@ -372,8 +463,11 @@ async def monitor_loop():
             else:
                 # ── trailing stop, also ATR-scaled ───────────────────────────
                 if TRAIL_MODE == "atr" and atr_pct:
-                    arm_pct   = TRAIL_ACTIVATE_ATR * atr_pct
-                    give_pct  = TRAIL_ATR_MULT * atr_pct
+                    # Floors matter as much here as on the stop: without them a
+                    # 0.10%-ATR instrument arms at +0.20% and exits on a 0.15%
+                    # give-back, closing on noise for a rounding-error gain.
+                    arm_pct  = max(TRAIL_ACTIVATE_ATR * atr_pct, TRAIL_ACTIVATE_MIN_PCT)
+                    give_pct = max(TRAIL_ATR_MULT * atr_pct, TRAIL_MIN_PCT)
                     trail_desc = f"{TRAIL_ATR_MULT}xATR ({give_pct:.1f}%)"
                 else:
                     arm_pct   = TRAIL_ACTIVATE_PCT
@@ -384,6 +478,15 @@ async def monitor_loop():
                         f"Trailing stop {trail_desc} — locked +{pct:.2f}% "
                         f"(peak +{peak_pct:.2f}%, gave back {drop_from_peak:.2f}%)"
                     )
+
+                # Profit ladder — books progressively more the higher it ran.
+                if not reason:
+                    floor = locked_floor(peak_pct, PROFIT_LADDER)
+                    if floor is not None and pct <= floor:
+                        reason = (
+                            f"Profit ladder — banking +{pct:.2f}% "
+                            f"(peak +{peak_pct:.2f}% locked in +{floor:.1f}%)"
+                        )
 
             if not reason and DAILY_CRASH_PCT > 0:
                 prev_close = await _get_prev_close(symbol)
