@@ -25,6 +25,7 @@
 ├── notifier.py            ← Twilio WhatsApp alerts (pre-trade + post-trade)
 ├── profit_monitor.py      ← Exit engine (ATR-scaled stop / trailing stop)
 ├── strategy2.py           ← S2 breakout engine (Minervini stage-2 / VCP)
+├── strategy3.py           ← S3 leader-dip engine (Bollinger + MACD mean reversion)
 ├── backtest.py            ← Walk-forward backtester (signal cache + fast sim)
 ├── kelly.py               ← Kelly Criterion position sizing (Quarter Kelly)
 ├── RaanuTradingBot.html   ← Main dashboard (single-file, served at localhost:8000)
@@ -156,6 +157,53 @@ Each result dict now also carries: `uptrend` (bool), `mom_1m`, `mom_3m`,
 
 ---
 
+## 🎯 Strategy 3 — strategy3.py ("Market Leader Dip")
+
+Mean reversion inside an uptrend: buys a pullback to the **lower Bollinger
+Band** in a name **beating SPY**, confirmed by the **MACD histogram turning
+up**. Where S1 buys pullbacks to a rising 20-EMA and S2 buys breakouts to new
+highs, S3 buys temporary weakness in leaders.
+
+Three conditions must all hold (`leader_dip == true`):
+
+| Gate | Test | Why |
+|------|------|-----|
+| LEADER | beating SPY 3M, and price > EMA200 **and** > SMA200 | mean reversion outside an uptrend is catching a falling knife |
+| STRETCHED | %B ≤ 0.20 (lower fifth of the band) | unusually large deviation from its own 20-day mean |
+| TURNING | MACD histogram rising | without it, price "walks the band" all the way down |
+
+Score components: trend integrity 20, leadership/RS 22, Bollinger stretch 26,
+MACD turn 24, oversold quality 12, capitulation volume 6. A name below its
+200-day trend is hard-capped at `TREND_SCORE_CAP` (45) so it can never qualify.
+
+### Backtest (3y, 472 tickers) — the best-validated strategy in the project
+
+```
+CONTROL — SPY buy & hold: +78.82%   maxDD 18.76%
+
+  2.5x ATR stop   n=278  win 59.4%  b=0.93  ret +33.89%  maxDD 10.28%  f*=+15.8%
+  3.0x ATR stop   n=269  win 63.2%  b=0.87  ret +42.23%  maxDD 11.14%  f*=+21.1%
+  3% fixed stop   n=330  win 40.3%  b=1.47  ret  -1.02%  maxDD 12.96%  f*= -0.4%
+```
+
+**S3 is the only configuration that stays profitable in BOTH halves** of the
+window (+23.74% then +15.10%). S1 and S2 both collapse in the second half. Its
+drawdown (11.14%) is well under the index's (18.76%), though its absolute
+return is not — it has never beaten buy & hold in any test.
+
+The 8%-fixed-stop variant still fails the second half (-5.32%), so the ATR stop
+is doing the work, not the Bollinger entry.
+
+**Do not enable the profit ladder on S3** — see the Exit Engine section.
+
+**Deliberately NOT intraday.** Every result above is from daily bars with a
+median 11-day hold. Converting S3 to intraday would not tune this result, it
+would discard it: %B and MACD on 5-minute bars are different signals, yfinance
+only serves ~60 days of 1-minute data (so the both-halves test is impossible),
+and the 300s exit poll is far too slow for minute-scale holds.
+
+---
+
 ## 🚪 Exit Engine — profit_monitor.py
 
 Polls open Alpaca positions every `PROFIT_CHECK_SEC` (default 300s) and closes
@@ -175,7 +223,7 @@ than on the thesis failing.
 | Stop floor / ceiling | 1.5% / 25% | `STOP_MIN_PCT` stops quiet ETFs exiting inside the spread; `STOP_MAX_PCT` caps extreme-ATR names |
 | Trailing stop | arms at +2.0×ATR, trails 1.5×ATR | `TRAIL_ACTIVATE_ATR` / `TRAIL_ATR_MULT` |
 | Trail floors | give-back ≥3%, arm ≥2.5% | `TRAIL_MIN_PCT` / `TRAIL_ACTIVATE_MIN_PCT` — **required**, see below |
-| Profit ladder | `5:2,10:6,15:11,20:15,30:24` | Once PEAK gain hits X%, never give back below +Y% (`PROFIT_LADDER`) |
+| Profit ladder | **per strategy** — on for S1/S2, **off for S3** | Once PEAK gain hits X%, never give back below +Y% (`PROFIT_LADDER_S1/S2/S3`) |
 | Hard take-profit | disabled (0) | Optional ceiling backstop (`HARD_TAKE_PROFIT_PCT`) |
 | Daily crash | -8% | Single-session drop from previous close (`DAILY_CRASH_PCT`) |
 
@@ -185,9 +233,23 @@ give-back — it closed a live position on noise for +0.49%. Floors apply to the
 trail for exactly the same reason `STOP_MIN_PCT` applies to the stop.
 
 **Profit ladder** ratchets a floor upward as the trade runs: peak +10% locks in
-at least +6%, peak +20% locks +15%, and the floor never falls. Backtested on S2
-it improved return +13.26% → **+15.55%** and win rate 62.8% → 65.7%. It must run
+at least +6%, peak +20% locks +15%, and the floor never falls. It must run
 *alongside* the trailing stop — ladder-only (trail off) tested at **-9.35%**.
+
+⚠️ **The ladder is not universally good — that is why it is per-strategy:**
+
+| | without ladder | with ladder |
+|---|---|---|
+| S2 breakout | +13.26% | **+15.55%** (helps) |
+| S3 leader dip | **+33.89%** | +22.34% (hurts) |
+
+On S3 the ladder lifts win rate 59.4% → 68.7% while payoff collapses
+0.93 → 0.58 — it books winners before they mature. This is the clearest example
+in the project of why **win rate is a misleading target**: it is trivially
+raised by taking profits earlier, and you pay for every point. Expectancy
+(`p × avgWin − q × avgLoss`) is the number that decides profitability. The
+highest-win-rate configuration ever tested here (68.0%, 4.0×ATR on S2) *lost
+money*.
 
 **Exits only run while the market is open.** When closed, `current_price` is the
 last close, so a trail can fire on a move that already happened; the resulting
@@ -456,9 +518,11 @@ git push
 - [x] Walk-forward backtester with stop-rule sweeps and a both-halves stability check
 
 ## 🔲 Pending / Next Steps
-- [ ] **Find an edge.** No strategy currently beats SPY buy & hold in backtest,
-      and the apparent S2 edge does not survive the first/second-half split.
-      Everything else is secondary to this.
+- [ ] **Beat the benchmark.** S3 is the first strategy to survive the
+      first/second-half split, but still returns +42% against SPY's +79%.
+      No strategy has yet beaten buy & hold in any test.
+- [ ] Dashboard has no S3 tab — Live Signals and the strategy filter still
+      only know about S1/S2. `/api/strategy/compare` also only reports s1/s2.
 - [ ] `PER_TRADE_MAX_USD=2500` still binds on every candidate, so per-trade risk
       is compressed but not equalised — needs ~$10k for `MAX_POSITION_PCT` to
       become the real limit
