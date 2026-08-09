@@ -642,12 +642,25 @@ def get_config():
 @app.get("/api/health")
 def health():
     from notifier import is_configured as tg_configured
+    # Surfaced because a non-persistent state dir silently breaks strategy
+    # attribution, the weekly trade limit and Kelly's sample.
+    _persistent = bool(os.getenv("DATA_DIR", "").strip()) or (HERE / ".env").exists()
+    try:
+        _trade_count = len(trader.tradelog.data.get("trades", []))
+    except Exception:
+        _trade_count = None
+
     return {
         "status":         "ok",
         "broker":         "alpaca",
         "mode":           ALPACA_MODE,
         "key_configured": bool(ALPACA_API_KEY),
         "telegram_configured": tg_configured(),
+        "state": {
+            "data_dir":       str(_DATA_DIR),
+            "persistent":     _persistent,
+            "trade_log_entries": _trade_count,
+        },
         "config": {
             "stop_loss_pct":       os.getenv("STOP_LOSS_PCT", "3.0"),
             "trail_activate_pct":  os.getenv("TRAIL_ACTIVATE_PCT", os.getenv("TAKE_PROFIT_PCT", "5.0")),
