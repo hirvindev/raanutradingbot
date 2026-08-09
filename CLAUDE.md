@@ -28,6 +28,7 @@
 ├── strategy3.py           ← S3 leader-dip engine (Bollinger + MACD mean reversion)
 ├── backtest.py            ← Walk-forward backtester (signal cache + fast sim)
 ├── kelly.py               ← Kelly Criterion position sizing (Quarter Kelly)
+├── datadir.py             ← Resolves the persistent state dir (volume / local / tmp)
 ├── RaanuTradingBot.html   ← Main dashboard (single-file, served at localhost:8000)
 ├── start.sh               ← Start server on Mac
 ├── setup.sh               ← One-time Mac setup
@@ -529,6 +530,27 @@ git push
 - [ ] Dashboard sell button for open positions
 - [ ] News sentiment scoring (currently no real data source)
 - [ ] Mobile responsive layout
+
+---
+
+## 💾 Persistent State — datadir.py
+
+`trades_log.json`, `position_peaks.json` and the picks caches must survive a
+restart. Three things break silently if they don't:
+
+- **strategy attribution** — round-trips are tagged from the ticker's BUY entry,
+  so an empty log reports every closed trade as `s1`
+- **`WEEKLY_TRADE_LIMIT`** — a wiped log re-arms the bot to trade again
+- **`kelly.py` `MIN_SAMPLE`** — the 30-trade gate never graduates off the
+  fallback risk if the sample keeps resetting
+
+Resolution order: `$DATA_DIR` → project dir (local dev, detected by `.env`) →
+`/tmp` with a warning. **On Railway a 5GB volume is mounted at `/data` with
+`DATA_DIR=/data`.** Before this, all three modules independently fell back to
+`/tmp`, which Railway wipes on every redeploy.
+
+Check it with `GET /api/health` → `state.data_dir` / `state.persistent`.
+If `data_dir` reads `/tmp`, the write test failed and state is ephemeral.
 
 ---
 
