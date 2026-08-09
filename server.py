@@ -30,10 +30,11 @@ US_EAST = ZoneInfo("US/Eastern")
 # ---------- CONFIG ----------
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env", override=False)  # no-op on Railway; env vars come from dashboard
-_DATA_DIR = Path("/tmp") if Path("/tmp").exists() and not (HERE / ".env").exists() else HERE
-PICKS_CACHE = _DATA_DIR / "last_picks.json"
-PICKS_CACHE_S2 = _DATA_DIR / "last_picks_s2.json"
-PICKS_CACHE_S3 = _DATA_DIR / "last_picks_s3.json"
+from datadir import state_path, data_dir
+_DATA_DIR = data_dir()
+PICKS_CACHE = state_path("last_picks.json")
+PICKS_CACHE_S2 = state_path("last_picks_s2.json")
+PICKS_CACHE_S3 = state_path("last_picks_s3.json")
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "").strip()
 ALPACA_SECRET  = os.getenv("ALPACA_SECRET_KEY", "").strip()

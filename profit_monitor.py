@@ -170,8 +170,8 @@ def update_exit_config(updates: dict) -> dict:
 # Peak-price store — survives restarts so the trailing stop keeps its high-water
 # mark. Uses /tmp on Railway (no local .env), else the project dir.
 _HERE = Path(__file__).parent
-_DATA_DIR = Path("/tmp") if Path("/tmp").exists() and not (_HERE / ".env").exists() else _HERE
-_PEAKS_FILE = _DATA_DIR / "position_peaks.json"
+from datadir import state_path
+_PEAKS_FILE = state_path("position_peaks.json")
 
 
 def _load_peaks() -> dict:

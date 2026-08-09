@@ -27,9 +27,8 @@ STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Di
 log = logging.getLogger("raanu.auto")
 
 HERE = Path(__file__).parent
-# Use /tmp on cloud (Railway) so writes always succeed; fall back to local dir
-_DATA_DIR = Path("/tmp") if Path("/tmp").exists() and not (HERE / ".env").exists() else HERE
-LOG_PATH = _DATA_DIR / "trades_log.json"
+from datadir import state_path
+LOG_PATH = state_path("trades_log.json")
 
 
 # ---------- LIMITS (configurable via .env) ----------
