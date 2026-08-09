@@ -1491,7 +1491,7 @@ async def strategy_compare():
 
         return {
             "strategy": strat,
-            "label": "S1 Pullback" if strat == "s1" else "S2 Breakout",
+            "label": {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Dip"}[strat],
             "total_trades":   len(trades),
             "closed_trades":  len(rts),
             "profitable":     len(wins),
@@ -1507,13 +1507,17 @@ async def strategy_compare():
     s1_picks = _load_picks()
     s2_picks = _load_picks_s2()
 
+    s3_picks = _load_picks_s3()
     return {
         "s1": _strategy_stats("s1"),
         "s2": _strategy_stats("s2"),
+        "s3": _strategy_stats("s3"),
         "s1_picks": s1_picks.get("picks", []) if s1_picks else [],
         "s2_picks": s2_picks.get("picks", []) if s2_picks else [],
+        "s3_picks": s3_picks.get("picks", []) if s3_picks else [],
         "s1_scanned_at": s1_picks.get("scanned_at") if s1_picks else None,
         "s2_scanned_at": s2_picks.get("scanned_at") if s2_picks else None,
+        "s3_scanned_at": s3_picks.get("scanned_at") if s3_picks else None,
     }
 
 

@@ -249,7 +249,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div>Auto-trade: <strong id="sbNext" style="color:var(--muted)">OFF</strong></div>
     <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
       Stop Loss: <strong style="color:var(--red)" id="sbSL">3%</strong><br>
-      Trail: <strong style="color:var(--green)">+5% arm / 2.5%</strong><br>
+      Trail: <strong style="color:var(--green)" id="sbTrail">+5% arm / 2.5%</strong><br>
       Positions: <strong id="sbPos">0</strong> open
     </div>
   </div>
@@ -425,6 +425,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <span style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-right:4px">FILTER</span>
       <button class="btn b-acc b-xs closedStratFilter on" onclick="filterClosedByStrat('all',this)">All</button>
       <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s1',this)" style="border-color:rgba(0,200,150,.3);color:var(--accent)">S1 Pullback</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s3',this)" style="border-color:rgba(96,165,250,.3);color:var(--accent2)">S3 Leader Dip</button>
       <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s2',this)" style="border-color:rgba(245,158,11,.3);color:var(--warn)">S2 Breakout</button>
     </div>
     <div class="card">
@@ -527,6 +528,34 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div style="margin-top:10px">
           <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S2 picks</div>
           <div id="s2PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
+        </div>
+      </div>
+
+      <!-- S3 card -->
+      <div class="card" style="border-left:3px solid var(--accent2)">
+        <div class="card-title" style="color:var(--accent2)">S3 — Market Leader Dip</div>
+        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys pullbacks to the lower Bollinger Band in names beating SPY, with MACD turning up</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
+            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3Trades">0</div>
+          </div>
+          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
+            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3WinRate">—</div>
+          </div>
+          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Payoff</div>
+            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3Payoff">—</div>
+          </div>
+          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
+            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
+            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3PnL">—</div>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S3 picks</div>
+          <div id="s3PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
         </div>
       </div>
     </div>
@@ -665,6 +694,43 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
     </div>
   </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="card-title" style="color:var(--accent2)">S3 Scoring — Market Leader Dip (Bollinger + MACD)</div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--accent2)">leader_dip = true</span> AND <span style="color:var(--accent2)">score &ge; 60</span> become actionable BUY signals. Mean reversion: buys temporary weakness in names beating the market.</div>
+      <table>
+        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--accent2)">Bollinger stretch (%B)</td><td style="text-align:right;color:var(--green)">26</td><td style="color:var(--muted2)">%B &le; 0.20 = lower fifth of band; below band = max</td></tr>
+          <tr><td style="color:var(--accent2)">MACD histogram turn</td><td style="text-align:right;color:var(--green)">24</td><td style="color:var(--muted2)">Rising off its low — stops us catching a falling band</td></tr>
+          <tr><td style="color:var(--accent2)">Leadership vs SPY</td><td style="text-align:right;color:var(--green)">22</td><td style="color:var(--muted2)">3-month outperformance; &gt;20% = market leader</td></tr>
+          <tr><td style="color:var(--accent2)">Trend integrity</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Above EMA200/SMA200; bonus if still above EMA50</td></tr>
+          <tr><td style="color:var(--accent2)">Oversold quality (RSI)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">RSI 30–45 ideal; &lt;30 = deeply oversold, riskier</td></tr>
+          <tr><td style="color:var(--accent2)">Capitulation volume</td><td style="text-align:right;color:var(--green)">6</td><td style="color:var(--muted2)">&gt;1.5x average — a flush often marks the low</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--accent2)">
+        Hard gate: price &gt; EMA200 AND &gt; SMA200 — otherwise score capped at 45. Mean reversion outside an uptrend is catching a falling knife.
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Backtest — 3 years, 472 tickers</div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Walk-forward, next-open fills, ATR-scaled stops with risk-based sizing. <span style="color:var(--warn)">Benchmark: SPY buy &amp; hold returned +78.82% (max drawdown 18.76%).</span></div>
+      <table>
+        <thead><tr><th>Strategy</th><th style="text-align:right">Return</th><th style="text-align:right">Max DD</th><th style="text-align:right">Win rate</th><th>Both halves?</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--accent2)">S3 Leader Dip (3.0×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+42.23%</td><td style="text-align:right;font-family:var(--mono)">11.14%</td><td style="text-align:right;font-family:var(--mono)">63.2%</td><td style="color:var(--green)">✓ +23.7% / +15.1%</td></tr>
+          <tr><td style="color:var(--warn)">S2 Breakout (8% fixed)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+39.46%</td><td style="text-align:right;font-family:var(--mono)">9.73%</td><td style="text-align:right;font-family:var(--mono)">57.3%</td><td style="color:var(--red)">✗ +42.8% / −1.8%</td></tr>
+          <tr><td style="color:var(--accent)">S1 Pullback (2.5×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+6.38%</td><td style="text-align:right;font-family:var(--mono)">26.89%</td><td style="text-align:right;font-family:var(--mono)">53.8%</td><td style="color:var(--red)">✗ collapses</td></tr>
+          <tr><td style="color:var(--muted2)">S1 with old 3% stop</td><td style="text-align:right;font-family:var(--mono);color:var(--red)">−32.10%</td><td style="text-align:right;font-family:var(--mono)">38.03%</td><td style="text-align:right;font-family:var(--mono)">34.8%</td><td style="color:var(--red)">✗</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;color:var(--muted2)">
+        <span style="color:var(--warn)">Win rate is not the target.</span> The highest win rate tested here (68.0%) <em>lost money</em> — payoff 0.46 meant average wins were smaller than average losses. What matters is expectancy: <span style="font-family:var(--mono)">p × avgWin − q × avgLoss</span>. No strategy has yet beaten buy &amp; hold.
+      </div>
+    </div>
+  </div>
   <div class="g2">
     <div class="card">
       <div class="card-hdr">
@@ -673,7 +739,16 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
       <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Polls positions every <span id="stratProfitSec" style="color:var(--accent)">300s</span>. First rule to fire closes the position. Changes apply immediately — no restart needed.</div>
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+        <div id="atrModeBanner" style="padding:8px 10px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;font-size:.68rem;color:var(--muted2);display:none">
+          <span style="color:var(--accent2);font-weight:600">ATR mode active.</span>
+          Stops scale to each stock's own daily range, so the fixed % fields below are <em>inactive</em>.
+          Live: S1 <span style="font-family:var(--mono);color:var(--accent)" id="atrS1">—</span> ·
+          S2 <span style="font-family:var(--mono);color:var(--warn)" id="atrS2">—</span> ·
+          S3 <span style="font-family:var(--mono);color:var(--accent2)" id="atrS3">—</span>,
+          floor <span style="font-family:var(--mono)" id="atrFloor">—</span> / cap <span style="font-family:var(--mono)" id="atrCap">—</span>.
+          <br><span style="color:var(--muted)">A fixed 3% stop sat inside the daily range of most names — 70% of all exits were noise stop-outs at a 2.1-day median hold. Set STOP_MODE=pct to re-enable these fields.</span>
+        </div>
+        <div id="fixedStopRow" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
           <span style="color:var(--red);font-size:.75rem;font-weight:600;min-width:120px">Hard stop-loss</span>
           <div style="display:flex;align-items:center;gap:4px;flex:1">
             <span style="color:var(--red);font-size:.72rem">-</span>
@@ -729,7 +804,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <table>
         <thead><tr><th>Setting</th><th style="text-align:right">Value</th></tr></thead>
         <tbody>
-          <tr><td style="color:var(--muted2)">Universe</td><td style="text-align:right;font-family:var(--mono);color:var(--accent)" id="stratUniverse">~400 curated</td></tr>
+          <tr><td style="color:var(--muted2)">Universe</td><td style="text-align:right;font-family:var(--mono);color:var(--accent)" id="stratUniverse">472 curated</td></tr>
           <tr><td style="color:var(--muted2)">Scan interval</td><td style="text-align:right;font-family:var(--mono)" id="stratScanInt">30 min</td></tr>
           <tr><td style="color:var(--muted2)">Min signal score</td><td style="text-align:right;font-family:var(--mono);color:var(--green)" id="stratMinScore">70</td></tr>
           <tr><td style="color:var(--muted2)">Weekly trade limit</td><td style="text-align:right;font-family:var(--mono)" id="stratWeeklyLimit">2 per strategy</td></tr>
@@ -1167,6 +1242,7 @@ function filterClosedByStrat(strat, btn){
 function _stratBadge(s){
   if(s==='s1') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>';
   if(s==='s2') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--warn)">S2</span>';
+  if(s==='s3') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);color:var(--accent2)">S3</span>';
   return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:var(--bg3);color:var(--muted2)">${(s||'?').toUpperCase()}</span>`;
 }
 
@@ -2016,6 +2092,35 @@ async function loadExitConfig(){
     document.getElementById('exitTrailPct').value=d.trail_pct||2.5;
     document.getElementById('exitHardTP').value=d.hard_take_profit_pct||0;
     document.getElementById('exitDailyCrash').value=d.daily_crash_pct||8;
+
+    // When STOP_MODE=atr the fixed-% inputs control nothing. Say so rather
+    // than showing an editable "3%" that silently does nothing.
+    const atr = (d.stop_mode==='atr');
+    const banner=document.getElementById('atrModeBanner');
+    if(banner){
+      banner.style.display = atr?'block':'none';
+      if(atr){
+        setEl('atrS1',(d.stop_atr_mult_s1??'—')+'×ATR');
+        setEl('atrS2',(d.stop_atr_mult_s2??'—')+'×ATR');
+        setEl('atrS3',(d.stop_atr_mult_s3??'—')+'×ATR');
+        setEl('atrFloor',(d.stop_min_pct??'—')+'%');
+        setEl('atrCap',(d.stop_max_pct??'—')+'%');
+      }
+    }
+    ['fixedStopRow'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.style.opacity = atr?'0.4':'1'; }
+    });
+    const sl=document.getElementById('exitSL');
+    if(sl){ sl.disabled = atr; sl.title = atr?'Inactive while STOP_MODE=atr':''; }
+
+    // Sidebar was showing the stale fixed values too.
+    const sbSL=document.getElementById('sbSL');
+    if(sbSL) sbSL.textContent = atr ? `${d.stop_atr_mult_s1}–${d.stop_atr_mult_s2}×ATR` : (d.stop_loss_pct+'%');
+    const sbTrail=document.getElementById('sbTrail');
+    if(sbTrail) sbTrail.textContent = (d.trail_mode==='atr')
+      ? `${d.trail_atr_mult}×ATR (min ${d.trail_min_pct}%)`
+      : `+${d.trail_activate_pct}% arm / ${d.trail_pct}%`;
   }catch(e){}
 }
 async function saveExitConfig(){
@@ -2224,41 +2329,51 @@ function renderStratComparison(){
   if(!_stratData)return;
   const d=_stratData;
 
-  // Render S1 stats
-  const s1t=d.s1.trades||[];
-  setEl('s1Trades',s1t.length);
+  // Real stats now come from the backend's FIFO round-trip matching — these
+  // used to be hardcoded "tracking..." placeholders.
+  const STRATS = [
+    {k:'s1', colour:'var(--accent)'},
+    {k:'s2', colour:'var(--warn)'},
+    {k:'s3', colour:'var(--accent2)'},
+  ];
 
-  // Render S2 stats
-  const s2t=d.s2.trades||[];
-  setEl('s2Trades',s2t.length);
+  STRATS.forEach(({k, colour})=>{
+    const s = d[k] || {};
+    setEl(k+'Trades', s.total_trades ?? 0);
 
-  // Win rate placeholders — real P&L comes from closed Alpaca orders
-  // For now show trade counts; P&L tracking builds over time
-  setEl('s1WinRate',s1t.length?'tracking...':'—');
-  setEl('s1Wins','—');
-  setEl('s1PnL','tracking');
-  setEl('s2WinRate',s2t.length?'tracking...':'—');
-  setEl('s2Wins','—');
-  setEl('s2PnL','tracking');
+    const closed = s.closed_trades ?? 0;
+    if(closed){
+      setEl(k+'WinRate', fn(s.win_rate,1)+'%');
+      const wrEl=document.getElementById(k+'WinRate');
+      if(wrEl) wrEl.style.color = s.win_rate>=50?'var(--green)':'var(--red)';
 
-  // S1 picks
-  const s1p=d.s1_picks||[];
-  const s1el=document.getElementById('s1PicksList');
-  if(s1p.length){
-    s1el.innerHTML=s1p.map(p=>`<span style="color:${p.score>=75?'var(--green)':'var(--accent)'}">` +
-      `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
-  }else{s1el.textContent='No picks above threshold';}
+      setEl(k+'Wins', s.profitable ?? 0);
+      // Payoff matters as much as win rate: below 1.00 the average win is
+      // smaller than the average loss, so a high win rate still loses.
+      setEl(k+'Payoff', fn(s.avg_return_pct,2)+'%');
 
-  // S2 picks
-  const s2p=d.s2_picks||[];
-  const s2el=document.getElementById('s2PicksList');
-  if(s2p.length){
-    s2el.innerHTML=s2p.map(p=>`<span style="color:${p.score>=75?'var(--green)':'var(--warn)'}">` +
-      `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
-  }else{s2el.textContent='No picks above threshold';}
+      setEl(k+'PnL', (s.net_pnl>=0?'+':'')+fmtCur(s.net_pnl));
+      const pl=document.getElementById(k+'PnL');
+      if(pl) pl.style.color = s.net_pnl>=0?'var(--green)':'var(--red)';
+    }else{
+      setEl(k+'WinRate','—'); setEl(k+'Wins','0');
+      setEl(k+'Payoff','—');  setEl(k+'PnL','—');
+    }
+
+    const picks = d[k+'_picks']||[];
+    const el = document.getElementById(k+'PicksList');
+    if(!el) return;
+    if(picks.length){
+      el.innerHTML = picks.map(p=>`<span style="color:${p.score>=75?'var(--green)':colour}">`+
+        `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
+    }else{ el.textContent='No picks above threshold'; }
+  });
+
+  const s1t=d.s1.trades||[], s2t=d.s2.trades||[], s3t=(d.s3&&d.s3.trades)||[];
 
   // Trade history table
-  const all=[...s1t.map(t=>({...t,_strat:'s1'})),...s2t.map(t=>({...t,_strat:'s2'}))];
+  const all=[...s1t.map(t=>({...t,_strat:'s1'})),...s2t.map(t=>({...t,_strat:'s2'})),
+             ...s3t.map(t=>({...t,_strat:'s3'}))];
   all.sort((a,b)=>(b.timestamp||'').localeCompare(a.timestamp||''));
 
   // Apply time filter
@@ -2277,7 +2392,10 @@ function renderStratComparison(){
   }
   tbody.innerHTML=filtered.map(t=>{
     const dt=t.timestamp?new Date(t.timestamp).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—';
-    const strat=t._strat==='s1'?'<span style="color:var(--accent)">S1 Pullback</span>':'<span style="color:var(--warn)">S2 Breakout</span>';
+    const STRAT_HTML={s1:'<span style="color:var(--accent)">S1 Pullback</span>',
+                      s2:'<span style="color:var(--warn)">S2 Breakout</span>',
+                      s3:'<span style="color:var(--accent2)">S3 Leader Dip</span>'};
+    const strat=STRAT_HTML[t._strat]||t._strat;
     const sig=(t.reasons||[]).slice(0,2).join(' | ');
     return `<tr>
       <td style="font-family:var(--mono);font-size:.68rem">${dt}</td>
