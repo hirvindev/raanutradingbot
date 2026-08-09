@@ -344,7 +344,7 @@ Single-file HTML dashboard. No build step required.
 ## 🔑 Environment Variables — .env
 ```
 # Alpaca paper trading
-ALPACA_API_KEY=PK5V3WKKLEQUUPQQ6YBZHTCYMM
+ALPACA_API_KEY=<your-alpaca-key-id>
 ALPACA_SECRET_KEY=<secret>
 ALPACA_MODE=paper
 
