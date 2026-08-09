@@ -554,6 +554,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_premarket_loop()),
         asyncio.create_task(_scheduled_trade_loop()),
         asyncio.create_task(monitor_loop()),
+        asyncio.create_task(_monthly_report_loop()),
     ]
     yield
     for t in tasks:
@@ -1300,6 +1301,160 @@ def match_closed_trades(orders: list[dict]) -> list[dict]:
             if lot["qty"] <= 1e-9:
                 queue.pop(0)
     return closed
+
+
+STRATEGY_LABELS = {"s1": "📊 S1 Pullback", "s2": "🚀 S2 Breakout", "s3": "🎯 S3 Leader Dip"}
+
+
+async def build_monthly_report(year: Optional[int] = None,
+                               month: Optional[int] = None) -> dict:
+    """
+    Per-strategy performance for one calendar month, from actual Alpaca fills.
+
+    Ranked by NET P&L, not win rate. Win rate alone is misleading — it is
+    trivially raised by booking winners earlier, at the cost of payoff and
+    total return (see the profit-ladder note in CLAUDE.md), so the report
+    always shows win rate next to payoff and expectancy.
+    """
+    now = datetime.now(BERLIN)
+    year = year or now.year
+    month = month or now.month
+    prefix = f"{year:04d}-{month:02d}"
+
+    try:
+        orders = await alpaca_get("/orders", params={
+            "status": "closed", "limit": "500", "direction": "desc"
+        })
+    except Exception as e:
+        log.error(f"Monthly report: could not fetch orders: {e}")
+        orders = []
+
+    strat_map = {}
+    for t in trader.tradelog.data.get("trades", []):
+        if t.get("action") == "BUY" and t.get("ticker"):
+            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    for o in orders:
+        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "s1")
+
+    # Match across ALL history, then keep the round-trips that CLOSED this month
+    # — a trade opened in June and sold in July belongs to July.
+    round_trips = [r for r in match_closed_trades(orders)
+                   if (r.get("sell_date") or "").startswith(prefix)]
+
+    per_strategy = []
+    for strat in ("s1", "s2", "s3"):
+        rts = [r for r in round_trips if r["strategy"] == strat]
+        wins = [r for r in rts if r["pnl"] > 0]
+        losses = [r for r in rts if r["pnl"] <= 0]
+        avg_win = (sum(r["pnl"] for r in wins) / len(wins)) if wins else 0.0
+        avg_loss = abs(sum(r["pnl"] for r in losses) / len(losses)) if losses else 0.0
+        net = sum(r["pnl"] for r in rts)
+        per_strategy.append({
+            "strategy": strat,
+            "label": STRATEGY_LABELS[strat],
+            "trades": len(rts),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / len(rts) * 100, 1) if rts else 0.0,
+            "net_pnl": round(net, 2),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "payoff_b": round(avg_win / avg_loss, 2) if avg_loss else 0.0,
+            "expectancy": round(net / len(rts), 2) if rts else 0.0,
+            "best": max((r["pct"] for r in rts), default=0.0),
+            "worst": min((r["pct"] for r in rts), default=0.0),
+        })
+
+    traded = [s for s in per_strategy if s["trades"] > 0]
+    traded.sort(key=lambda s: s["net_pnl"], reverse=True)
+
+    return {
+        "period": prefix,
+        "month_name": datetime(year, month, 1).strftime("%B %Y"),
+        "total_trades": len(round_trips),
+        "total_pnl": round(sum(r["pnl"] for r in round_trips), 2),
+        "strategies": per_strategy,
+        "ranked": traded,
+        "winner": traded[0] if traded else None,
+    }
+
+
+def format_monthly_report(rep: dict) -> str:
+    """Telegram-formatted month-on-month strategy comparison."""
+    lines = [f"📅 *Monthly Report — {rep['month_name']}*", ""]
+
+    if not rep["ranked"]:
+        lines.append("_No positions were closed this month._")
+        return "\n".join(lines)
+
+    w = rep["winner"]
+    lines.append(f"🏆 *Best strategy: {w['label']}*")
+    lines.append(f"   Net P&L *${w['net_pnl']:+,.2f}* over {w['trades']} closed trade(s)")
+    lines.append(f"   Win rate *{w['win_rate']:.1f}%*  ({w['wins']}W / {w['losses']}L)")
+    lines.append("")
+
+    for s in rep["ranked"]:
+        lines.append(f"{s['label']}")
+        lines.append(f"   Win rate: *{s['win_rate']:.1f}%*  ({s['wins']}W / {s['losses']}L of {s['trades']})")
+        lines.append(f"   Net P&L:  ${s['net_pnl']:+,.2f}   (avg ${s['expectancy']:+,.2f}/trade)")
+        lines.append(f"   Payoff:   {s['payoff_b']:.2f}  (avg win ${s['avg_win']:,.2f} vs avg loss ${s['avg_loss']:,.2f})")
+        lines.append(f"   Best {s['best']:+.1f}%  |  Worst {s['worst']:+.1f}%")
+        lines.append("")
+
+    idle = [s["label"] for s in rep["strategies"] if s["trades"] == 0]
+    if idle:
+        lines.append(f"_No closed trades: {', '.join(idle)}_")
+
+    lines.append(f"*Total: {rep['total_trades']} trades, ${rep['total_pnl']:+,.2f}*")
+    lines.append("")
+    lines.append(
+        "_Ranked by net P&L, not win rate — a high win rate with a low payoff "
+        "loses money. Payoff below 1.00 means the average win is smaller than "
+        "the average loss._"
+    )
+    return "\n".join(lines)
+
+
+@app.get("/api/report/monthly")
+async def monthly_report(year: Optional[int] = None, month: Optional[int] = None):
+    """Monthly per-strategy comparison as JSON (used by the dashboard)."""
+    return await build_monthly_report(year, month)
+
+
+@app.post("/api/report/monthly/send")
+async def monthly_report_send(year: Optional[int] = None, month: Optional[int] = None):
+    """Build and push the monthly report to Telegram now."""
+    from notifier import send_telegram
+    rep = await build_monthly_report(year, month)
+    ok = send_telegram(format_monthly_report(rep), strategy="s1")
+    return {"sent": ok, "period": rep["period"], "trades": rep["total_trades"]}
+
+
+async def _monthly_report_loop():
+    """
+    Fires at 09:00 Berlin on the 1st of each month, reporting the month that
+    just ended.
+    """
+    from notifier import send_telegram
+    log.info("Monthly report loop started — 09:00 Berlin on the 1st")
+    while True:
+        now = datetime.now(BERLIN)
+        # First of next month at 09:00
+        nxt = (now.replace(day=1, hour=9, minute=0, second=0, microsecond=0)
+               + timedelta(days=32)).replace(day=1)
+        if now.day == 1 and now.hour < 9:
+            nxt = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        sleep_sec = (nxt - now).total_seconds()
+        log.info(f"Next monthly report: {nxt:%Y-%m-%d %H:%M %Z} (in {sleep_sec/86400:.1f}d)")
+        await asyncio.sleep(sleep_sec)
+
+        try:
+            prev = datetime.now(BERLIN).replace(day=1) - timedelta(days=1)
+            rep = await build_monthly_report(prev.year, prev.month)
+            send_telegram(format_monthly_report(rep), strategy="s1")
+            log.info(f"Monthly report sent for {rep['period']}")
+        except Exception as e:
+            log.exception(f"Monthly report failed: {e}")
 
 
 @app.get("/api/strategy/compare")
