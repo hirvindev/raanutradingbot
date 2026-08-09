@@ -39,6 +39,7 @@ _exit_config = {
     "stop_atr_mult":       float(os.getenv("STOP_ATR_MULT", "2.5")),
     "stop_atr_mult_s1":    float(os.getenv("STOP_ATR_MULT_S1", "2.5")),
     "stop_atr_mult_s2":    float(os.getenv("STOP_ATR_MULT_S2", "3.0")),
+    "stop_atr_mult_s3":    float(os.getenv("STOP_ATR_MULT_S3", "3.0")),
     "stop_loss_pct":       float(os.getenv("STOP_LOSS_PCT", "3.0")),   # used when stop_mode="pct"
     "stop_max_pct":        float(os.getenv("STOP_MAX_PCT", "25.0")),   # ceiling on an ATR stop
     # Floor: very quiet instruments (min-vol ETFs, merger-arb funds) compute an
@@ -59,17 +60,29 @@ _exit_config = {
     "check_interval":      int(os.getenv("PROFIT_CHECK_SEC", "300")),
 }
 
-_STR_KEYS = {"stop_mode", "trail_mode", "profit_ladder"}
+_STR_KEYS = {"stop_mode", "trail_mode",
+             "profit_ladder", "profit_ladder_s1", "profit_ladder_s2", "profit_ladder_s3"}
 
-# ── Profit ladder (ratchet) ──────────────────────────────────────────────────
+# ── Profit ladder (ratchet), per strategy ────────────────────────────────────
 # "book progressively more as the trade goes higher": each rung says once the
 # position's PEAK gain reaches X%, never give back below a locked Y% profit.
 # The floor only ever ratchets up — it cannot fall as the price falls.
 #
 #   "5:2,10:6,15:11,20:15,30:24"  ->  peak +10% locks in at least +6%
 #
-# This runs alongside the trailing stop; whichever triggers first exits.
-_exit_config["profit_ladder"] = os.getenv("PROFIT_LADDER", "5:2,10:6,15:11,20:15,30:24")
+# It runs alongside the trailing stop; whichever triggers first exits.
+#
+# The ladder is NOT universally good, which is why it is per-strategy:
+#   S2 breakouts  — helped:  +13.26% -> +15.55%
+#   S3 leader dip — HURT:    +33.89% -> +22.34%, because it lifts win rate
+#                            59.4% -> 68.7% while payoff collapses 0.93 -> 0.58.
+#                            It books winners before they mature.
+# An empty string disables it for that strategy.
+_DEFAULT_LADDER = "5:2,10:6,15:11,20:15,30:24"
+_exit_config["profit_ladder"]    = os.getenv("PROFIT_LADDER", _DEFAULT_LADDER)
+_exit_config["profit_ladder_s1"] = os.getenv("PROFIT_LADDER_S1", _DEFAULT_LADDER)
+_exit_config["profit_ladder_s2"] = os.getenv("PROFIT_LADDER_S2", _DEFAULT_LADDER)
+_exit_config["profit_ladder_s3"] = os.getenv("PROFIT_LADDER_S3", "")  # off — backtest says it costs return
 
 
 def parse_ladder(spec: str) -> list[tuple[float, float]]:
@@ -345,6 +358,16 @@ def stop_atr_mult_for(strategy: str) -> float:
     return _exit_config.get(f"stop_atr_mult_{strategy}") or _exit_config["stop_atr_mult"]
 
 
+def ladder_for(strategy: str) -> list[tuple[float, float]]:
+    """
+    Per-strategy profit ladder. An explicitly empty setting means "no ladder"
+    and must NOT fall through to the shared default — S3 is deliberately off.
+    """
+    key = f"profit_ladder_{strategy}"
+    spec = _exit_config[key] if key in _exit_config else _exit_config["profit_ladder"]
+    return parse_ladder(spec)
+
+
 def _record_exit(symbol: str, entry: float, exit_price: float,
                  qty: float, pnl: float, pct: float, reason: str) -> None:
     """
@@ -433,6 +456,7 @@ async def monitor_loop():
             pct = (current - entry) / entry * 100
             pnl = (current - entry) * qty
 
+            strategy = strategy_for(symbol)
             state = peaks.get(symbol) or {}
             # Capture ATR once, the first time we see the position, and freeze
             # it — the stop distance must not drift with changing volatility.
@@ -448,7 +472,7 @@ async def monitor_loop():
 
             # ── stop distance ────────────────────────────────────────────────
             if STOP_MODE == "atr" and atr_pct:
-                mult = stop_atr_mult_for(strategy_for(symbol))
+                mult = stop_atr_mult_for(strategy)
                 stop_pct = min(max(mult * atr_pct, STOP_MIN_PCT), STOP_MAX_PCT)
                 stop_desc = f"{mult}xATR ({stop_pct:.1f}%)"
             else:
@@ -481,7 +505,7 @@ async def monitor_loop():
 
                 # Profit ladder — books progressively more the higher it ran.
                 if not reason:
-                    floor = locked_floor(peak_pct, PROFIT_LADDER)
+                    floor = locked_floor(peak_pct, ladder_for(strategy))
                     if floor is not None and pct <= floor:
                         reason = (
                             f"Profit ladder — banking +{pct:.2f}% "

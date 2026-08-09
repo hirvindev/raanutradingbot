@@ -428,5 +428,34 @@ def find_top_picks_s2(n: int = 3, max_stocks: Optional[int] = None) -> list[dict
     return results[:n]
 
 
+def find_top_picks_s3(n: int = 3, max_stocks: Optional[int] = None) -> list[dict]:
+    """Strategy 3 scan — market-leader dip to the lower Bollinger Band."""
+    from strategy3 import score_from_df_s3
+
+    universe = TEST_UNIVERSE[:max_stocks] if max_stocks else FALLBACK_UNIVERSE
+    log.info(f"[S3] Scanning {len(universe)} stocks for leader dips...")
+
+    bench = benchmark_return_3m()
+    log.info(f"[S3] Benchmark (SPY 3M) = {bench * 100:.1f}%" if bench is not None else "[S3] Benchmark unavailable")
+
+    results = []
+    for i in range(0, len(universe), CHUNK_SIZE):
+        chunk = universe[i:i + CHUNK_SIZE]
+        data = batch_download(chunk)
+        log.info(f"[S3] Chunk {i//CHUNK_SIZE + 1}: {len(data)}/{len(chunk)} tickers returned data")
+        for ticker in chunk:
+            try:
+                r = score_from_df_s3(ticker, data.get(ticker), bench_ret_3m=bench)
+                if r.get("ok") and r.get("leader_dip") and r.get("score", 0) >= 60:
+                    r["name"] = get_ticker_name(ticker)
+                    results.append(r)
+            except Exception as e:
+                log.debug(f"[S3] Score error {ticker}: {e}")
+
+    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    log.info(f"[S3] Scan done — {len(results)} leader dips above threshold, returning top {n}")
+    return results[:n]
+
+
 def get_universe_summary() -> dict:
     return {"exchange": "US", "total_stocks": len(FALLBACK_UNIVERSE)}

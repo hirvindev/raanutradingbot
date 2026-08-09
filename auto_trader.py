@@ -20,7 +20,9 @@ from typing import Optional
 import httpx
 
 from strategy import scan, score_ticker
-from scanner import find_top_picks, find_top_picks_s2
+from scanner import find_top_picks, find_top_picks_s2, find_top_picks_s3
+
+STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Dip"}
 
 log = logging.getLogger("raanu.auto")
 
@@ -85,7 +87,7 @@ class TradeLog:
 
     def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
         recent = self.trades_in_last_7_days(strategy=strategy)
-        label = "S1 Pullback" if strategy == "s1" else "S2 Breakout"
+        label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
         if len(recent) >= WEEKLY_TRADE_LIMIT:
             oldest = min(recent, key=lambda x: x["timestamp"])
             return False, f"[{label}] Weekly limit reached ({len(recent)}/{WEEKLY_TRADE_LIMIT}). Oldest expires {oldest['timestamp']}"
@@ -270,12 +272,12 @@ class AutoTrader:
         Check signals and maybe place a trade.
         strategy: "s1" (pullback) or "s2" (breakout)
         """
-        label = "S1 Pullback" if strategy == "s1" else "S2 Breakout"
-        uptrend_key = "uptrend" if strategy == "s1" else "stage2"
+        label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
+        uptrend_key = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
 
         if picks is None:
             self.event("scan", f"[{label}] Running scan...")
-            picks = find_top_picks(3) if strategy == "s1" else find_top_picks_s2(3)
+            picks = {"s2": find_top_picks_s2, "s3": find_top_picks_s3}.get(strategy, find_top_picks)(3)
         else:
             self.event("scan", f"[{label}] Using pre-scanned picks ({len(picks)} candidates)")
 

@@ -33,6 +33,7 @@ load_dotenv(HERE / ".env", override=False)  # no-op on Railway; env vars come fr
 _DATA_DIR = Path("/tmp") if Path("/tmp").exists() and not (HERE / ".env").exists() else HERE
 PICKS_CACHE = _DATA_DIR / "last_picks.json"
 PICKS_CACHE_S2 = _DATA_DIR / "last_picks_s2.json"
+PICKS_CACHE_S3 = _DATA_DIR / "last_picks_s3.json"
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "").strip()
 ALPACA_SECRET  = os.getenv("ALPACA_SECRET_KEY", "").strip()
@@ -101,6 +102,23 @@ def _load_picks_s2() -> Optional[dict]:
     return None
 
 
+def _save_picks_s3(picks: list):
+    data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
+    try:
+        PICKS_CACHE_S3.write_text(json.dumps(data, indent=2, default=str))
+    except Exception as e:
+        log.warning(f"Could not write S3 picks cache: {e}")
+
+
+def _load_picks_s3() -> Optional[dict]:
+    if PICKS_CACHE_S3.exists():
+        try:
+            return json.loads(PICKS_CACHE_S3.read_text())
+        except Exception:
+            pass
+    return None
+
+
 # ---------- BACKGROUND SCAN ----------
 
 async def _run_scan_and_cache() -> list:
@@ -149,7 +167,7 @@ _CONFIDENT_BUY_THRESHOLD = 75
 def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
     """Send Telegram alert for high-conviction picks, tagged by strategy."""
     from notifier import send_telegram, _strat_tag
-    gate_key = "uptrend" if strategy == "s1" else "stage2"
+    gate_key = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
     confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get(gate_key)]
     if not confident:
         return
@@ -184,13 +202,33 @@ def _is_trade_day() -> bool:
     return datetime.now(BERLIN).toordinal() % 2 == 0
 
 
+async def _run_scan_and_cache_s3() -> list:
+    """Run S3 scanner in a thread pool (non-blocking), cache results."""
+    from scanner import find_top_picks_s3
+    log.info("[S3] Running leader-dip scan...")
+    loop  = asyncio.get_event_loop()
+    picks = await loop.run_in_executor(None, lambda: find_top_picks_s3(3))
+    _save_picks_s3(picks)
+    log.info(f"[S3] Scan done — {len(picks)} picks cached")
+
+    _send_confident_buy_alerts(picks, strategy="s3")
+
+    try:
+        await trader.run_one_cycle(picks=picks, strategy="s3")
+    except Exception as e:
+        log.exception(f"[S3] Trader cycle error: {e}")
+        trader.event("error", f"[S3] Trader cycle crashed: {e}")
+
+    return picks
+
+
 async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "s1"):
     """
     Scan and place up to n_orders market buys for a scheduled slot.
     Respects score threshold, position sizing, and already-held check.
     Sends Telegram alerts before and after each order, tagged by strategy.
     """
-    from scanner import find_top_picks, find_top_picks_s2
+    from scanner import find_top_picks, find_top_picks_s2, find_top_picks_s3
     from auto_trader import (
         get_free_cash, get_held_symbols, alpaca_buy_notional, market_is_open,
         MIN_SIGNAL_SCORE, PER_TRADE_MAX_USD,
@@ -206,7 +244,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     is_open, clock_msg = await market_is_open()
     if not is_open:
         log.info(f"[{label}][{strategy.upper()}] {clock_msg} — scanning only, no orders")
-        await (_run_scan_and_cache_s2() if strategy == "s2" else _run_scan_and_cache())
+        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
         return
 
     # ── Gate: rolling weekly trade limit (per strategy) ───────────────────
@@ -216,7 +254,11 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{why}", strategy=strategy)
         return
 
-    if strategy == "s2":
+    if strategy == "s3":
+        picks = find_top_picks_s3(n=n_orders + 3)
+        _save_picks_s3(picks)
+        gate_key = "leader_dip"
+    elif strategy == "s2":
         picks = find_top_picks_s2(n=n_orders + 3)
         _save_picks_s2(picks)
         gate_key = "stage2"
@@ -495,10 +537,12 @@ async def _scheduled_trade_loop():
                 log.info(f"[{next_label}] Trade day ✓ — executing both strategies")
                 await _execute_scheduled_trades(next_n, next_label, strategy="s1")
                 await _execute_scheduled_trades(next_n, next_label, strategy="s2")
+                await _execute_scheduled_trades(next_n, next_label, strategy="s3")
             else:
                 log.info(f"[{next_label}] Rest day — scanning only, no orders")
                 await _run_scan_and_cache()
                 await _run_scan_and_cache_s2()
+                await _run_scan_and_cache_s3()
         except Exception as e:
             log.exception(f"Scheduled slot error [{next_label}]: {e}")
 

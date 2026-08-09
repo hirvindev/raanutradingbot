@@ -101,6 +101,8 @@ def _strat_tag(strategy: str) -> str:
         return "📊 S1 Pullback"
     if strategy == "s2":
         return "🚀 S2 Breakout"
+    if strategy == "s3":
+        return "🎯 S3 Leader Dip"
     return ""
 
 
