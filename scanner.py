@@ -214,9 +214,49 @@ TICKER_NAMES = {
 }
 
 
+def _load_asset_names() -> dict[str, str]:
+    """
+    Bulk-fetch symbol → company name from Alpaca, cached for the process.
+
+    Name lookup used to be a side effect of get_universe(), but scanning moved
+    to the curated FALLBACK_UNIVERSE and get_universe() is no longer called —
+    so _universe_names stayed empty and every ticker outside the hand-written
+    TICKER_NAMES dict rendered as its bare symbol.
+    """
+    global _universe_names
+    if _universe_names:
+        return _universe_names
+
+    api_key    = os.getenv("ALPACA_API_KEY", "")
+    secret_key = os.getenv("ALPACA_SECRET_KEY", "")
+    if not api_key or not secret_key:
+        return {}
+
+    mode     = os.getenv("ALPACA_MODE", "paper").lower()
+    base_url = "https://paper-api.alpaca.markets" if mode == "paper" else "https://api.alpaca.markets"
+    try:
+        resp = httpx.get(
+            f"{base_url}/v2/assets",
+            headers={"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": secret_key},
+            params={"asset_class": "us_equity", "status": "active"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        _universe_names = {a["symbol"]: a.get("name") or a["symbol"] for a in resp.json()}
+        log.info(f"Loaded {len(_universe_names)} asset names from Alpaca")
+    except Exception as e:
+        log.warning(f"Could not load asset names: {e}")
+        return {}
+    return _universe_names
+
+
 def get_ticker_name(ticker: str) -> str:
     """Return the company name for a ticker, or the ticker itself if unknown."""
-    return _universe_names.get(ticker) or TICKER_NAMES.get(ticker, ticker)
+    return (
+        TICKER_NAMES.get(ticker)
+        or _load_asset_names().get(ticker)
+        or ticker
+    )
 
 
 def reset_universe_cache():
@@ -291,11 +331,39 @@ FALLBACK_UNIVERSE = [
     "MELI", "SE", "SHOP", "SPOT", "NTNX", "FIVN", "APPF", "PCTY",
     "MNDY", "BILL", "BRZE", "GTLB",
     # Mid-cap Healthcare
-    "JAZZ", "INCY", "TECH", "PRGO", "SUPN", "HALO", "IRTC", "MMSI", "NVCR",
+    "JAZZ", "TECH", "PRGO", "SUPN", "HALO", "IRTC", "MMSI", "NVCR",
     # ETFs
     "SPY", "QQQ", "IWM", "GLD", "SLV",
     "XLE", "XLF", "XLV", "XLI", "XLK", "XLC", "XLY", "XLP", "XLRE", "XLB", "XLU",
     "ARKK",
+
+    # ── High-beta / momentum expansion ───────────────────────────────────────
+    # Every symbol below was verified tradable AND fractionable on Alpaca.
+    # These run a median daily ATR of ~6.5% vs ~4.7% for the names above, and
+    # 53 of the 77 exceed 5%. They are only safe to trade with ATR-scaled stops
+    # and risk-based position sizing — a fixed % stop sits far inside their
+    # normal daily range, and equal-dollar sizing would risk many multiples of
+    # a quiet name's position. See backtest.py PortfolioConfig.sizing_mode.
+    # Top-100 gaps
+    "INTU", "TMO", "DHR", "PGR", "TJX", "UNP", "CB", "ANET", "APH",
+    "MCK", "ADSK", "ORLY", "CTAS", "MSI", "NSC", "CSX", "AON", "SHW",
+    # Crypto miners / digital assets (highest ATR in the universe)
+    "HIVE", "MARA", "RIOT", "CLSK", "CIFR", "WULF", "IREN", "CORZ", "BTDR",
+    "MSTR", "GLXY",
+    # AI / quantum / data
+    "BBAI", "IONQ", "RGTI", "QBTS", "SOUN", "AI", "TEM", "NBIS", "CRWV", "APP",
+    # Space / eVTOL
+    "RKLB", "ASTS", "LUNR", "ACHR", "JOBY", "RDW",
+    # Fintech / consumer momentum
+    "CVNA", "TOST", "DAVE", "LMND",
+    # Nuclear / power
+    "OKLO", "SMR", "VST", "TLN", "NRG", "CEG", "GEV",
+    # Semis / hardware
+    "SMCI", "ARM", "ALAB", "CRDO", "NVTS", "AEHR", "INDI", "AMKR", "POWL",
+    # Software / internet
+    "PATH", "MDB", "ASAN", "DKNG",
+    # EV / clean energy
+    "NIO", "XPEV", "LI", "QS", "CHPT", "ENPH", "FSLR", "RUN",
 ]
 
 

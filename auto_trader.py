@@ -131,28 +131,79 @@ async def market_is_open() -> tuple[bool, str]:
         return False, f"Clock check failed: {e}"
 
 
+async def get_open_orders() -> list[dict]:
+    """Return orders that are submitted but not yet filled (queued/accepted/new)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{_broker_base()}/orders",
+                headers=_alpaca_headers(),
+                params={"status": "open", "limit": 500},
+            )
+        if r.status_code != 200:
+            return []
+        return r.json()
+    except Exception:
+        return []
+
+
+def _order_cash_committed(order: dict) -> float:
+    """Dollar value an unfilled buy order will consume when it fills."""
+    notional = order.get("notional")
+    if notional:
+        return float(notional)
+    qty   = float(order.get("qty") or 0) - float(order.get("filled_qty") or 0)
+    price = float(order.get("limit_price") or 0)
+    return qty * price
+
+
 async def get_free_cash() -> Optional[float]:
-    """Return available buying power, or None on error."""
+    """
+    Cash genuinely available to deploy, or None on error.
+
+    Alpaca only debits `cash` when an order *fills*. Orders queued outside
+    market hours sit in `accepted` for hours, so raw `cash` overstates what is
+    actually free — subtract everything already committed to open buys.
+    """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{_broker_base()}/account", headers=_alpaca_headers())
         if r.status_code != 200:
             return None
-        return float(r.json().get("cash", 0))
+        cash = float(r.json().get("cash", 0))
     except Exception:
         return None
 
+    committed = sum(
+        _order_cash_committed(o)
+        for o in await get_open_orders()
+        if o.get("side") == "buy"
+    )
+    return max(0.0, cash - committed)
+
 
 async def get_held_symbols() -> set[str]:
-    """Return set of ticker symbols currently held as open positions."""
+    """
+    Symbols we must not buy again — open positions *plus* symbols with an
+    unfilled buy order already working.
+
+    Position-only checking was the source of duplicate orders: an order queued
+    while the market is closed creates no position, so every later scan saw the
+    ticker as un-held and submitted another buy for it.
+    """
+    held: set[str] = set()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{_broker_base()}/positions", headers=_alpaca_headers())
-        if r.status_code != 200:
-            return set()
-        return {p["symbol"].upper() for p in r.json()}
+        if r.status_code == 200:
+            held = {p["symbol"].upper() for p in r.json()}
     except Exception:
-        return set()
+        pass
+
+    for o in await get_open_orders():
+        if o.get("side") == "buy" and o.get("symbol"):
+            held.add(o["symbol"].upper())
+    return held
 
 
 async def alpaca_buy_notional(symbol: str, notional: float) -> dict:

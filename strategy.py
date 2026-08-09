@@ -410,7 +410,14 @@ def batch_download(tickers: list[str], period: str = "1y") -> dict[str, pd.DataF
         if not raw.empty:
             df = raw.copy()
             if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+                # With group_by="ticker" the ticker is level 0 and the OHLCV
+                # field is the last level — flattening to level 0 would name
+                # every column after the ticker and lose "Close" entirely.
+                levels = [
+                    i for i in range(df.columns.nlevels)
+                    if "Close" in df.columns.get_level_values(i)
+                ]
+                df.columns = df.columns.get_level_values(levels[0] if levels else -1)
             result[t] = df
         return result
 

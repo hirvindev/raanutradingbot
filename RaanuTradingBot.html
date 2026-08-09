@@ -996,7 +996,9 @@ function renderPositions(){
 
 // ── FETCH ORDERS & DERIVE WIN RATE ──────────────────────
 async function fetchOrders(){
-  const d = await api('/api/history/orders');
+  // Pull deep history — FIFO matching needs the opening buy, which may be far
+  // older than the last 50 orders.
+  const d = await api('/api/history/orders?limit=500');
   if(!d) return;
   S.orders = Array.isArray(d) ? d : (d.data || []);
   deriveStats();
@@ -1010,25 +1012,41 @@ function deriveStats(){
   const buys   = filled.filter(o=>o.side==='buy');
   const sells  = filled.filter(o=>o.side==='sell');
 
+  // FIFO lot matching. Alpaca returns orders newest-first and the bot can buy
+  // the same ticker more than once, so pair oldest buy lot to each sell and
+  // draw lots down share by share — one-sell-to-one-buy loses half the P&L on
+  // a doubled position.
+  const byTime = (a,b)=> new Date(a.filled_at||a.created_at) - new Date(b.filled_at||b.created_at);
+  const lots = {};
+  buys.slice().sort(byTime).forEach(b=>{
+    const qty = parseFloat(b.filled_qty||b.qty||0);
+    const px  = parseFloat(b.filled_avg_price||0);
+    if(qty>0 && px>0) (lots[b.symbol] = lots[b.symbol]||[]).push({qty, px, date:new Date(b.filled_at||b.created_at), strategy:b.strategy||'s1'});
+  });
+
   const tradeResults = [];
   const closedTrades = [];
-  const usedBuys = new Set();
-  sells.forEach(sell=>{
-    const matchBuy = buys.find((b,i)=>!usedBuys.has(i) && b.symbol===sell.symbol && new Date(b.created_at)<new Date(sell.created_at));
-    if(matchBuy){
-      usedBuys.add(buys.indexOf(matchBuy));
-      const sellPrice = parseFloat(sell.filled_avg_price||0);
-      const buyPrice  = parseFloat(matchBuy.filled_avg_price||0);
-      const qty = Math.min(parseFloat(sell.filled_qty||sell.qty||0), parseFloat(matchBuy.filled_qty||matchBuy.qty||0));
+  sells.slice().sort(byTime).forEach(sell=>{
+    let remaining    = parseFloat(sell.filled_qty||sell.qty||0);
+    const sellPrice  = parseFloat(sell.filled_avg_price||0);
+    const sellDate   = new Date(sell.filled_at||sell.created_at);
+    const queue      = lots[sell.symbol] || [];
+    if(!(remaining>0) || !(sellPrice>0)) return;
+
+    while(remaining > 1e-9 && queue.length){
+      const lot = queue[0];
+      const qty = Math.min(remaining, lot.qty);
+      const buyPrice = lot.px;
       const pnl = (sellPrice - buyPrice) * qty;
       const pct = buyPrice ? ((sellPrice - buyPrice) / buyPrice * 100) : 0;
-      const buyDate = new Date(matchBuy.created_at);
-      const sellDate = new Date(sell.created_at);
-      const heldMs = sellDate - buyDate;
+      const heldMs = sellDate - lot.date;
       const heldDays = Math.floor(heldMs / 86400000);
       const heldHrs = Math.floor((heldMs % 86400000) / 3600000);
       tradeResults.push(pnl);
-      closedTrades.push({ symbol: sell.symbol, strategy: matchBuy.strategy||'s1', qty, buyPrice, sellPrice, pnl, pct, buyDate, sellDate, heldDays, heldHrs });
+      closedTrades.push({ symbol: sell.symbol, strategy: lot.strategy, qty, buyPrice, sellPrice, pnl, pct, buyDate: lot.date, sellDate, heldDays, heldHrs });
+      lot.qty   -= qty;
+      remaining -= qty;
+      if(lot.qty <= 1e-9) queue.shift();
     }
   });
   S.closedTrades = closedTrades;
@@ -1039,15 +1057,13 @@ function deriveStats(){
   const avgPnl = total ? (tradeResults.reduce((a,b)=>a+b,0)/total) : null;
 
   // Stop loss hits: closed trades with loss >= SL%
-  const slPct = parseInt(document.getElementById('slR')?.value||5)/100;
-  const slHits = tradeResults.filter(p=>p<0).length; // simplified: any loss = possible SL hit
-  // More accurate: compare against buy price
+  // Losing exits this month, counted off the matched round-trips. The old
+  // filter read Trade212 order fields (type/dateCreated/_isSL) that Alpaca
+  // never returns, so it was always 0 and fell back to an all-time count.
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  S.slHitsThisMonth = S.orders.filter(o=>{
-    if(!o.dateCreated) return false;
-    return new Date(o.dateCreated)>=monthStart && o.type?.includes('SELL') && o.status==='FILLED' && o._isSL;
-  }).length;
+  const slHits = closedTrades.filter(t => t.pnl < 0 && t.sellDate >= monthStart).length;
+  S.slHitsThisMonth = slHits;
 
   // ── Update metric cards ──
   if(winRate!==null){
@@ -1068,7 +1084,7 @@ function deriveStats(){
     document.getElementById('m-avg').className='mval nu';
   }
 
-  setEl('m-sl', S.slHitsThisMonth || slHits);
+  setEl('m-sl', slHits);
   setEl('m-sl-sub', 'Losses this month');
   document.getElementById('m-sl').className='mval '+(slHits>3?'down':'nu');
 
@@ -1082,7 +1098,11 @@ function deriveStats(){
   if(S.account){
     const totalVal = S.account.total ?? 0;
     const openPnl = S.account.ppl ?? 0;
-    const monthlyEst = openPnl;
+    // MTD = unrealised on open positions + everything banked this month.
+    const realizedMTD = closedTrades
+      .filter(t => t.sellDate >= monthStart)
+      .reduce((a,t) => a + t.pnl, 0);
+    const monthlyEst = openPnl + realizedMTD;
     const pct = totalVal ? (monthlyEst/totalVal*100) : 0;
     setEl('mtdR', (pct>=0?'+':'')+fn(pct,2)+'% MTD (est.)');
     document.getElementById('mtdBar').style.width = Math.min(Math.max(pct/10*100,0),100)+'%';

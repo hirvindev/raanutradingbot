@@ -192,13 +192,29 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     """
     from scanner import find_top_picks, find_top_picks_s2
     from auto_trader import (
-        get_free_cash, get_held_symbols, alpaca_buy_notional,
+        get_free_cash, get_held_symbols, alpaca_buy_notional, market_is_open,
         MIN_SIGNAL_SCORE, PER_TRADE_MAX_USD,
     )
     from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm, _strat_tag
 
     stag = _strat_tag(strategy)
     log.info(f"[{label}][{strategy.upper()}] Scheduled run — targeting {n_orders} order(s)")
+
+    # ── Gate: market hours ────────────────────────────────────────────────
+    # Market orders submitted while closed sit in `accepted` until the next
+    # session and fill at an unknown price — never place them blind.
+    is_open, clock_msg = await market_is_open()
+    if not is_open:
+        log.info(f"[{label}][{strategy.upper()}] {clock_msg} — scanning only, no orders")
+        await (_run_scan_and_cache_s2() if strategy == "s2" else _run_scan_and_cache())
+        return
+
+    # ── Gate: rolling weekly trade limit (per strategy) ───────────────────
+    ok, why = trader.tradelog.can_trade_now(strategy=strategy)
+    if not ok:
+        log.info(f"[{label}][{strategy.upper()}] {why} — no orders")
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{why}", strategy=strategy)
+        return
 
     if strategy == "s2":
         picks = find_top_picks_s2(n=n_orders + 3)
@@ -232,19 +248,89 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         log.error(f"[{label}][{strategy.upper()}] Could not fetch account balance — aborting")
         return
 
+    # Never place more orders than the weekly budget still allows.
+    from auto_trader import WEEKLY_TRADE_LIMIT
+    remaining = WEEKLY_TRADE_LIMIT - len(trader.tradelog.trades_in_last_7_days(strategy=strategy))
+    n_orders  = min(n_orders, max(0, remaining))
+
+    # ── Position sizing: Kelly-scaled risk budget ────────────────────────────
+    # Equal-dollar sizing is incoherent once stops are ATR-scaled — a wide-stop
+    # name would risk many times what a quiet one does. Instead, size so the
+    # loss AT THE STOP is a fixed share of equity, with that share set by
+    # Quarter Kelly on this strategy's own realized history.
+    from kelly import from_trade_log, shares_for
+    from profit_monitor import _get_atr, stop_atr_mult_for, STOP_MODE, STOP_MIN_PCT, STOP_MAX_PCT
+
+    k = from_trade_log(strategy=strategy)
+    log.info(f"[{label}][{strategy.upper()}] sizing: {k.reason}")
+    if not k.tradeable:
+        send_whatsapp(
+            f"📊 *RaanuBot — {label}*\n{stag}\n"
+            f"No orders — {k.reason}\n"
+            f"_{k.sample} closed trades, win rate {k.win_rate*100:.0f}%, payoff {k.payoff_b:.2f}_",
+            strategy=strategy,
+        )
+        log.info(f"[{label}][{strategy.upper()}] Kelly says stand aside — no orders")
+        return
+
+    try:
+        equity = float((await alpaca_get("/account")).get("equity", free_cash))
+    except Exception:
+        equity = free_cash
+
     placed = 0
     for pick in actionable:
         if placed >= n_orders:
             break
         ticker = pick["ticker"].upper()
         if ticker in held:
-            log.info(f"[{label}][{strategy.upper()}] {ticker} already held — skipping")
+            log.info(f"[{label}][{strategy.upper()}] {ticker} held or already on order — skipping")
             continue
 
-        notional = min(float(PER_TRADE_MAX_USD), round(free_cash * 0.05, 2))
+        entry_px = float(pick.get("price") or 0)
+        atr = await _get_atr(ticker) if STOP_MODE == "atr" else None
+        if entry_px <= 0:
+            log.info(f"[{label}][{strategy.upper()}] {ticker} has no price — skipping")
+            continue
+
+        if atr and atr > 0:
+            mult = stop_atr_mult_for(strategy)
+            stop_pct = min(max(mult * atr / entry_px * 100, STOP_MIN_PCT), STOP_MAX_PCT)
+        else:
+            # No ATR available — fall back to the fixed stop so sizing stays
+            # consistent with whatever the exit engine will actually use.
+            stop_pct = float(os.getenv("STOP_LOSS_PCT", "3.0"))
+            log.warning(f"[{label}][{strategy.upper()}] {ticker}: no ATR, sizing off {stop_pct}% stop")
+
+        try:
+            max_pos_pct = float(os.getenv("MAX_POSITION_PCT", "10.0"))
+        except ValueError:
+            max_pos_pct = 10.0
+        qty = shares_for(equity, k.risk_pct, entry_px,
+                         entry_px * (1 - stop_pct / 100),
+                         max_position_pct=max_pos_pct)
+        risk_sized = qty * entry_px
+        notional = round(min(risk_sized, float(PER_TRADE_MAX_USD), free_cash), 2)
         if notional < 1.0:
-            log.info(f"[{label}][{strategy.upper()}] Insufficient cash (${free_cash:.2f}) — stopping")
-            break
+            log.info(
+                f"[{label}][{strategy.upper()}] {ticker} sized to ${notional} "
+                f"(risk {k.risk_pct}%, stop {stop_pct:.1f}%) — skipping"
+            )
+            continue
+
+        # If PER_TRADE_MAX_USD binds, sizing is flat again and the ATR stop no
+        # longer equalises risk across names — worth saying out loud.
+        if risk_sized > float(PER_TRADE_MAX_USD) * 1.05:
+            log.warning(
+                f"[{label}][{strategy.upper()}] {ticker}: risk sizing wanted "
+                f"${risk_sized:,.0f} but PER_TRADE_MAX_USD caps at ${PER_TRADE_MAX_USD:,.0f} "
+                f"— per-trade risk is NOT equalised while this cap binds"
+            )
+
+        log.info(
+            f"[{label}][{strategy.upper()}] {ticker} @ ${entry_px:.2f} stop {stop_pct:.1f}% "
+            f"risk {k.risk_pct}% -> ${notional}"
+        )
 
         try:
             send_whatsapp(format_pre_trade_alert(
@@ -263,6 +349,10 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 "reasons":      pick.get("reasons", []),
                 "strategy":     strategy,
                 "scheduled":    label,
+                "entry_price":  entry_px,
+                "stop_pct":     round(stop_pct, 2),
+                "risk_pct":     k.risk_pct,
+                "atr_pct":      round(atr / entry_px * 100, 2) if atr else None,
                 "alpaca_response": result,
             })
             trader.event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
@@ -385,6 +475,9 @@ async def _scheduled_trade_loop():
         for h, m, n_orders, label in _BERLIN_SLOTS:
             t = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if now >= t:
+                t += timedelta(days=1)
+            # Skip weekends (Sat=5, Sun=6) — the market is shut.
+            while t.weekday() >= 5:
                 t += timedelta(days=1)
             targets.append((t, n_orders, label))
 
@@ -558,6 +651,15 @@ async def account_cash():
     acct = await alpaca_get("/account")
     total = float(acct.get("portfolio_value", 0))
 
+    # Alpaca's /account has NO unrealized_pl field — it only exists per position.
+    # Sum it across open positions, otherwise the dashboard shows a flat $0.00.
+    open_pnl = 0.0
+    try:
+        for p in await alpaca_get("/positions"):
+            open_pnl += float(p.get("unrealized_pl", 0) or 0)
+    except Exception:
+        log.warning("Could not fetch positions for open P&L")
+
     # Use portfolio history for daily P&L — includes realized gains from sells today.
     # last_equity comparison is unreliable on paper accounts (often returns 0).
     daily_ppl = 0.0
@@ -573,13 +675,21 @@ async def account_cash():
         last_eq   = float(acct.get("last_equity", total))
         daily_ppl = total - last_eq
 
+    # Cash still sitting in unfilled buy orders is spoken for, not free.
+    from auto_trader import get_free_cash
+    cash      = float(acct.get("cash", 0))
+    free      = await get_free_cash()
+    if free is None:
+        free = cash
+    committed = max(0.0, cash - free)
+
     return {
         "total":     total,
-        "free":      float(acct.get("cash", 0)),
-        "invested":  total - float(acct.get("cash", 0)),
-        "ppl":       float(acct.get("unrealized_pl", 0)),
+        "free":      free,
+        "invested":  total - cash,
+        "ppl":       open_pnl,
         "daily_ppl": daily_ppl,
-        "blocked":   0,
+        "blocked":   committed,
         "currency":  acct.get("currency", "USD"),
         "_raw":      acct,
     }
@@ -1090,44 +1200,108 @@ async def scan_stream():
 
 # ---------- STRATEGY COMPARISON ----------
 
+def match_closed_trades(orders: list[dict]) -> list[dict]:
+    """
+    Pair filled buys and sells into closed round-trips using FIFO lot matching.
+
+    A single sell can consume several buy lots (the bot has bought the same
+    ticker more than once), and a partial sell leaves the rest of the lot open —
+    so lots are drawn down share by share rather than one-buy-per-sell.
+    """
+    lots: dict[str, list[dict]] = {}
+    for o in sorted(orders, key=lambda x: x.get("filled_at") or x.get("created_at") or ""):
+        if o.get("status") != "filled":
+            continue
+        sym = (o.get("symbol") or "").upper()
+        qty = float(o.get("filled_qty") or 0)
+        px  = float(o.get("filled_avg_price") or 0)
+        if qty <= 0 or px <= 0:
+            continue
+        if o.get("side") == "buy":
+            lots.setdefault(sym, []).append({
+                "qty": qty, "price": px,
+                "date": o.get("filled_at") or o.get("created_at"),
+                "strategy": o.get("strategy", "s1"),
+            })
+
+    closed: list[dict] = []
+    for o in sorted(orders, key=lambda x: x.get("filled_at") or x.get("created_at") or ""):
+        if o.get("status") != "filled" or o.get("side") != "sell":
+            continue
+        sym = (o.get("symbol") or "").upper()
+        remaining = float(o.get("filled_qty") or 0)
+        sell_px   = float(o.get("filled_avg_price") or 0)
+        sell_date = o.get("filled_at") or o.get("created_at")
+        if remaining <= 0 or sell_px <= 0:
+            continue
+
+        queue = lots.get(sym, [])
+        while remaining > 1e-9 and queue:
+            lot   = queue[0]
+            take  = min(remaining, lot["qty"])
+            pnl   = (sell_px - lot["price"]) * take
+            closed.append({
+                "symbol":     sym,
+                "strategy":   lot["strategy"],
+                "qty":        take,
+                "buy_price":  lot["price"],
+                "sell_price": sell_px,
+                "pnl":        round(pnl, 2),
+                "pct":        round((sell_px - lot["price"]) / lot["price"] * 100, 2),
+                "buy_date":   lot["date"],
+                "sell_date":  sell_date,
+            })
+            lot["qty"] -= take
+            remaining  -= take
+            if lot["qty"] <= 1e-9:
+                queue.pop(0)
+    return closed
+
+
 @app.get("/api/strategy/compare")
 async def strategy_compare():
     """Return trade performance split by strategy for the dashboard Strategy tab."""
     from auto_trader import trader as _trader
     all_trades = _trader.tradelog.data.get("trades", [])
 
-    # Also pull closed orders from Alpaca for real P&L
+    # Real P&L comes from Alpaca fills, not from our own buy log.
     try:
-        closed = await alpaca_get("/orders", params={
-            "status": "closed", "limit": "200", "direction": "desc"
+        closed_orders = await alpaca_get("/orders", params={
+            "status": "closed", "limit": "500", "direction": "desc"
         })
     except Exception:
-        closed = []
+        closed_orders = []
 
-    # Build a map of filled orders by symbol+side for P&L lookup
-    order_map = {}
-    for o in closed:
-        sym = o.get("symbol", "")
-        side = o.get("side", "")
-        key = f"{sym}_{side}_{(o.get('filled_at') or '')[:10]}"
-        order_map[key] = o
+    # Tag each order with the strategy that opened the position.
+    strat_map = {}
+    for t in all_trades:
+        if t.get("action") == "BUY" and t.get("ticker"):
+            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    for o in closed_orders:
+        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "s1")
+
+    round_trips = match_closed_trades(closed_orders)
 
     def _strategy_stats(strat: str) -> dict:
         trades = [t for t in all_trades if t.get("strategy") == strat]
-        if not trades:
-            return {
-                "strategy": strat,
-                "label": "S1 Pullback" if strat == "s1" else "S2 Breakout",
-                "total_trades": 0, "profitable": 0, "loss_making": 0,
-                "win_rate": 0, "net_pnl": 0, "avg_return_pct": 0,
-                "trades": [],
-            }
+        rts    = [r for r in round_trips if r["strategy"] == strat]
+
+        wins    = [r for r in rts if r["pnl"] > 0]
+        losses  = [r for r in rts if r["pnl"] <= 0]
+        net_pnl = sum(r["pnl"] for r in rts)
 
         return {
             "strategy": strat,
             "label": "S1 Pullback" if strat == "s1" else "S2 Breakout",
-            "total_trades": len(trades),
-            "trades": trades[-50:],
+            "total_trades":   len(trades),
+            "closed_trades":  len(rts),
+            "profitable":     len(wins),
+            "loss_making":    len(losses),
+            "win_rate":       round(len(wins) / len(rts) * 100, 1) if rts else 0,
+            "net_pnl":        round(net_pnl, 2),
+            "avg_return_pct": round(sum(r["pct"] for r in rts) / len(rts), 2) if rts else 0,
+            "trades":         trades[-50:],
+            "closed":         rts[-50:],
         }
 
     # Picks caches
