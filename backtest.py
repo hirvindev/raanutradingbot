@@ -46,6 +46,7 @@ import pandas as pd
 
 from strategy import batch_download, score_from_df, ema
 from strategy2 import score_from_df_s2
+from strategy3 import score_from_df_s3
 
 log = logging.getLogger("raanu.backtest")
 
@@ -185,8 +186,8 @@ def build_signals(strategy: str, universe: list[str], years: int,
     start_i = max(WARMUP_BARS, len(calendar) - years * 252)
     scan_dates = calendar[start_i::scan_every]
 
-    scorer = score_from_df_s2 if strategy == "s2" else score_from_df
-    gate = "stage2" if strategy == "s2" else "uptrend"
+    scorer = {"s2": score_from_df_s2, "s3": score_from_df_s3}.get(strategy, score_from_df)
+    gate   = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
 
     signals: dict[str, list] = {}
     for n, date in enumerate(scan_dates):
@@ -547,7 +548,7 @@ def print_stats(label: str, s: dict) -> None:
 # ──────────────────────────────── CLI ────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="RaanuTradingBot backtester")
-    ap.add_argument("--strategy", default="s1", choices=["s1", "s2"])
+    ap.add_argument("--strategy", default="s1", choices=["s1", "s2", "s3"])
     ap.add_argument("--years", type=int, default=3)
     ap.add_argument("--min-score", type=int, default=60)
     ap.add_argument("--scan-every", type=int, default=1)
