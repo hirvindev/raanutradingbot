@@ -418,8 +418,18 @@ TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 USER_WHATSAPP=whatsapp:+919176911755
 
 # Trading parameters
-WEEKLY_TRADE_LIMIT=2
+# Trade budget — PER STRATEGY (capital and attempts follow conviction).
+# S3 is the only strategy profitable in both halves of the backtest, so it gets
+# the most of both; S2 is throttled to token size purely to keep its live
+# sample growing. Blank/absent falls back to the global value below.
+WEEKLY_TRADE_LIMIT=2        # global fallback for untagged paths
+WEEKLY_TRADE_LIMIT_S1=2
+WEEKLY_TRADE_LIMIT_S2=1
+WEEKLY_TRADE_LIMIT_S3=3
 PER_TRADE_MAX_USD=2500      # hard cap; overrides Kelly risk sizing when it binds
+PER_TRADE_MAX_USD_S1=1000
+PER_TRADE_MAX_USD_S2=100
+PER_TRADE_MAX_USD_S3=5000
 MIN_SIGNAL_SCORE=60
 SCAN_INTERVAL_SEC=1800
 PROFIT_CHECK_SEC=300

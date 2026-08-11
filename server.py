@@ -232,8 +232,10 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     from scanner import find_top_picks, find_top_picks_s2, find_top_picks_s3
     from auto_trader import (
         get_free_cash, get_held_symbols, alpaca_buy_notional, market_is_open,
-        MIN_SIGNAL_SCORE, PER_TRADE_MAX_USD,
+        MIN_SIGNAL_SCORE, per_trade_max_for,
     )
+    # The cap is per strategy — see auto_trader.per_trade_max_for().
+    per_trade_cap = per_trade_max_for(strategy)
     from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm, _strat_tag
 
     stag = _strat_tag(strategy)
@@ -291,9 +293,10 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         log.error(f"[{label}][{strategy.upper()}] Could not fetch account balance — aborting")
         return
 
-    # Never place more orders than the weekly budget still allows.
-    from auto_trader import WEEKLY_TRADE_LIMIT
-    remaining = WEEKLY_TRADE_LIMIT - len(trader.tradelog.trades_in_last_7_days(strategy=strategy))
+    # Never place more orders than the weekly budget still allows — the budget
+    # is per strategy, so this must not read the global WEEKLY_TRADE_LIMIT.
+    from auto_trader import weekly_limit_for
+    remaining = weekly_limit_for(strategy) - len(trader.tradelog.trades_in_last_7_days(strategy=strategy))
     n_orders  = min(n_orders, max(0, remaining))
 
     # ── Position sizing: Kelly-scaled risk budget ────────────────────────────
@@ -353,7 +356,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                          entry_px * (1 - stop_pct / 100),
                          max_position_pct=max_pos_pct)
         risk_sized = qty * entry_px
-        notional = round(min(risk_sized, float(PER_TRADE_MAX_USD), free_cash), 2)
+        notional = round(min(risk_sized, per_trade_cap, free_cash), 2)
         if notional < 1.0:
             log.info(
                 f"[{label}][{strategy.upper()}] {ticker} sized to ${notional} "
@@ -361,13 +364,13 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             )
             continue
 
-        # If PER_TRADE_MAX_USD binds, sizing is flat again and the ATR stop no
-        # longer equalises risk across names — worth saying out loud.
-        if risk_sized > float(PER_TRADE_MAX_USD) * 1.05:
+        # If the per-strategy cap binds, sizing is flat again and the ATR stop
+        # no longer equalises risk across names — worth saying out loud.
+        if risk_sized > per_trade_cap * 1.05:
             log.warning(
                 f"[{label}][{strategy.upper()}] {ticker}: risk sizing wanted "
-                f"${risk_sized:,.0f} but PER_TRADE_MAX_USD caps at ${PER_TRADE_MAX_USD:,.0f} "
-                f"— per-trade risk is NOT equalised while this cap binds"
+                f"${risk_sized:,.0f} but PER_TRADE_MAX_USD_{strategy.upper()} caps at "
+                f"${per_trade_cap:,.0f} — per-trade risk is NOT equalised while this cap binds"
             )
 
         log.info(
@@ -642,6 +645,8 @@ def get_config():
 @app.get("/api/health")
 def health():
     from notifier import is_configured as tg_configured
+    from auto_trader import (per_trade_max_for as _per_trade_max_for,
+                             weekly_limit_for as _weekly_limit_for)
     # Surfaced because a non-persistent state dir silently breaks strategy
     # attribution, the weekly trade limit and Kelly's sample.
     _persistent = bool(os.getenv("DATA_DIR", "").strip()) or (HERE / ".env").exists()
@@ -670,6 +675,12 @@ def health():
             "min_signal_score":    os.getenv("MIN_SIGNAL_SCORE", "60"),
             "weekly_trade_limit":  os.getenv("WEEKLY_TRADE_LIMIT", "2"),
             "per_trade_max_usd":   os.getenv("PER_TRADE_MAX_USD", "500"),
+            "per_trade_max_by_strategy": {
+                s: _per_trade_max_for(s) for s in ("s1", "s2", "s3")
+            },
+            "weekly_limit_by_strategy": {
+                s: _weekly_limit_for(s) for s in ("s1", "s2", "s3")
+            },
             "profit_check_sec":    os.getenv("PROFIT_CHECK_SEC", "300"),
         },
     }
@@ -793,7 +804,9 @@ async def portfolio():
             "ppl":           float(p.get("unrealized_pl", 0)),
             "fxPpl":         0,
             "initialFill":   p.get("asset_id"),
-            "strategy":      strat_map.get(sym, "s1"),
+            # "" (not "s1") when the log has no BUY for this symbol — an
+            # unattributed position is unknown, not an S1 trade.
+            "strategy":      strat_map.get(sym, ""),
             "_raw":          p,
         })
     return out
@@ -815,7 +828,7 @@ async def history_orders(limit: int = 50):
             strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
     for o in orders:
         sym = (o.get("symbol") or "").upper()
-        o["strategy"] = strat_map.get(sym, "s1")
+        o["strategy"] = strat_map.get(sym, "")   # "" = unattributed, see /api/portfolio
     return orders
 
 
@@ -1280,7 +1293,7 @@ def match_closed_trades(orders: list[dict]) -> list[dict]:
             lots.setdefault(sym, []).append({
                 "qty": qty, "price": px,
                 "date": o.get("filled_at") or o.get("created_at"),
-                "strategy": o.get("strategy", "s1"),
+                "strategy": o.get("strategy", ""),
             })
 
     closed: list[dict] = []
@@ -1348,7 +1361,7 @@ async def build_monthly_report(year: Optional[int] = None,
         if t.get("action") == "BUY" and t.get("ticker"):
             strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
     for o in orders:
-        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "s1")
+        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "")
 
     # Match across ALL history, then keep the round-trips that CLOSED this month
     # — a trade opened in June and sold in July belongs to July.
@@ -1491,7 +1504,7 @@ async def strategy_compare():
         if t.get("action") == "BUY" and t.get("ticker"):
             strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
     for o in closed_orders:
-        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "s1")
+        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "")
 
     round_trips = match_closed_trades(closed_orders)
 
@@ -1604,7 +1617,7 @@ def root():
 # ---------- MAIN ----------
 if __name__ == "__main__":
     import uvicorn
-    from auto_trader import WEEKLY_TRADE_LIMIT, PER_TRADE_MAX_USD, MIN_SIGNAL_SCORE
+    from auto_trader import MIN_SIGNAL_SCORE, per_trade_max_for, weekly_limit_for
 
     print("=" * 60)
     print("  RaanuTradingBot — Alpaca Backend")
@@ -1616,7 +1629,10 @@ if __name__ == "__main__":
     print(f"  Pre-market:    03:30 ET daily — scan + Telegram alert (no orders)")
     print(f"  Trade slots:   07:00 Berlin — top 2 orders | 14:30 Berlin — top 1 order")
     print(f"                 Alternating days (trade / rest / trade / rest...)")
-    print(f"  Weekly limit:  {WEEKLY_TRADE_LIMIT} trades / ${PER_TRADE_MAX_USD} max each")
+    print(f"  Weekly limit:  S1 {weekly_limit_for('s1')} | "
+          f"S2 {weekly_limit_for('s2')} | S3 {weekly_limit_for('s3')} trades/week")
+    print(f"  Per-trade cap: S1 ${per_trade_max_for('s1'):,.0f} | "
+          f"S2 ${per_trade_max_for('s2'):,.0f} | S3 ${per_trade_max_for('s3'):,.0f}")
     print(f"  Min score:     {MIN_SIGNAL_SCORE}/100")
     print("=" * 60)
 

@@ -44,6 +44,42 @@ def _float_env(name, default):
 WEEKLY_TRADE_LIMIT = _int_env("WEEKLY_TRADE_LIMIT", 2)
 PER_TRADE_MAX_USD  = _float_env("PER_TRADE_MAX_USD", 1000.0)
 MIN_SIGNAL_SCORE   = _int_env("MIN_SIGNAL_SCORE", 70)
+
+# The per-trade cap is PER STRATEGY. Capital follows conviction: S3 is the only
+# strategy that has ever stayed profitable across both halves of the backtest
+# window, S1 and S2 both collapse in the second half. S2 is kept alive at token
+# size purely to keep collecting a live sample — a $0 cap would stop the data.
+# A blank/absent value falls back to the global PER_TRADE_MAX_USD.
+def per_trade_max_for(strategy: str) -> float:
+    """Per-trade USD cap for this strategy, falling back to the global cap."""
+    raw = os.getenv(f"PER_TRADE_MAX_USD_{(strategy or 's1').upper()}", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return {"s1": 1000.0, "s2": 100.0, "s3": 5000.0}.get(
+        (strategy or "s1").lower(), float(PER_TRADE_MAX_USD)
+    )
+
+
+# The weekly trade limit is PER STRATEGY too, and for the same reason as the
+# per-trade cap: S3 is the only strategy profitable in both halves of the
+# backtest, so it gets the most attempts; S2 gets one, purely to keep its live
+# sample growing. A blank/absent value falls back to the global limit.
+def weekly_limit_for(strategy: str) -> int:
+    """Weekly trade limit for this strategy, falling back to the global limit."""
+    raw = os.getenv(f"WEEKLY_TRADE_LIMIT_{(strategy or 's1').upper()}", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return {"s1": 2, "s2": 1, "s3": 3}.get(
+        (strategy or "s1").lower(), int(WEEKLY_TRADE_LIMIT)
+    )
+
+
 SCAN_INTERVAL_SEC  = _int_env("SCAN_INTERVAL_SEC", 1800)  # 30 min default
 WATCHLIST = [t.strip().upper() for t in os.getenv("WATCHLIST", "AAPL,MSFT,NVDA,GOOGL,AMZN").split(",") if t.strip()]
 
@@ -87,10 +123,11 @@ class TradeLog:
     def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
         recent = self.trades_in_last_7_days(strategy=strategy)
         label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
-        if len(recent) >= WEEKLY_TRADE_LIMIT:
+        limit = weekly_limit_for(strategy)   # per strategy, not the global cap
+        if len(recent) >= limit:
             oldest = min(recent, key=lambda x: x["timestamp"])
-            return False, f"[{label}] Weekly limit reached ({len(recent)}/{WEEKLY_TRADE_LIMIT}). Oldest expires {oldest['timestamp']}"
-        return True, f"[{label}] OK ({len(recent)}/{WEEKLY_TRADE_LIMIT} this week)"
+            return False, f"[{label}] Weekly limit reached ({len(recent)}/{limit}). Oldest expires {oldest['timestamp']}"
+        return True, f"[{label}] OK ({len(recent)}/{limit} this week)"
 
     def record(self, payload: dict):
         payload["timestamp"] = datetime.now(timezone.utc).isoformat()
@@ -252,6 +289,12 @@ class AutoTrader:
             "config": {
                 "weekly_limit":       WEEKLY_TRADE_LIMIT,
                 "per_trade_max_usd":  PER_TRADE_MAX_USD,
+                "per_trade_max_by_strategy": {
+                    s: per_trade_max_for(s) for s in ("s1", "s2", "s3")
+                },
+                "weekly_limit_by_strategy": {
+                    s: weekly_limit_for(s) for s in ("s1", "s2", "s3")
+                },
                 "min_score":          MIN_SIGNAL_SCORE,
                 "scan_interval_sec":  SCAN_INTERVAL_SEC,
                 "watchlist":          WATCHLIST,
@@ -341,8 +384,9 @@ class AutoTrader:
         sym = best["ticker"]
 
         # ── Gate 5: position sizing (min of cap and 10% of free cash) ────
+        strat_cap   = per_trade_max_for(strategy)
         max_by_cash = round(free_cash * 0.10, 2)   # never risk >10% of cash
-        notional    = min(float(PER_TRADE_MAX_USD), max_by_cash)
+        notional    = min(strat_cap, max_by_cash)
 
         if notional < 1.0:
             msg = f"Insufficient free cash (${free_cash:.2f}) to open a position"
@@ -353,7 +397,8 @@ class AutoTrader:
         self.event(
             "buy",
             f"BUY ${notional} of {sym} "
-            f"score {best['score']} — cash ${free_cash:.0f}, 5% cap ${max_by_cash:.0f} — "
+            f"score {best['score']} — cash ${free_cash:.0f}, {label} cap ${strat_cap:.0f}, "
+            f"10%-of-cash cap ${max_by_cash:.0f} — "
             f"{' | '.join(best['reasons'][:2])}",
             {"score": best["score"], "ticker": sym, "usd": notional},
         )

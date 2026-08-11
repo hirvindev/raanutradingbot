@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 last_picks.json
 last_picks_s2.json
+last_picks_s3.json
 trades_log.json
 .DS_Store
 

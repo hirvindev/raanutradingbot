@@ -12,6 +12,13 @@
   --text:#dde3ef;--muted:#5e6878;--muted2:#8a96a8;
   --accent:#00c896;--accent2:#3b82f6;
   --green:#22c55e;--red:#f43f5e;--warn:#f59e0b;--purple:#a78bfa;
+  /* One colour per strategy, used for every S1/S2/S3 badge, block header,
+     card and filter. S3 is violet, NOT --accent2 blue: that blue is already
+     the "pending" order badge and the info-alert colour, so an S3 badge next
+     to a pending badge read as the same thing. */
+  --s1:#00c896;--s1-bg:rgba(0,200,150,.12);--s1-bd:rgba(0,200,150,.3);
+  --s2:#f59e0b;--s2-bg:rgba(245,158,11,.12);--s2-bd:rgba(245,158,11,.3);
+  --s3:#a855f7;--s3-bg:rgba(168,85,247,.14);--s3-bd:rgba(168,85,247,.35);
   --mono:'IBM Plex Mono',monospace;--sans:'Inter',sans-serif;
   --nav-h:52px;--sb-w:200px;
 }
@@ -391,6 +398,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="card-hdr">
       <div class="card-title" style="margin:0">Order History</div>
       <div style="display:flex;gap:7px">
+        <select id="ordGroup" style="width:auto" onchange="renderOrders()">
+          <option value="strategy">Group by Strategy</option>
+          <option value="date">Group by Date</option>
+        </select>
         <select id="ordFilt" style="width:auto" onchange="renderOrders()">
           <option value="all">All Orders</option>
           <option value="BUY">Buys Only</option>
@@ -402,8 +413,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
     </div>
     <table>
-      <thead><tr><th>Date/Time</th><th>Symbol</th><th>Type</th><th>Qty</th><th>Fill Price</th><th>Total</th><th>Status</th><th>Notes</th></tr></thead>
-      <tbody id="ordBody"><tr><td class="te" colspan="8">No orders loaded</td></tr></tbody>
+      <thead><tr><th>Date/Time</th><th>Symbol</th><th>Strategy</th><th>Type</th><th>Qty</th><th>Fill Price</th><th>Total</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody id="ordBody"><tr><td class="te" colspan="9">No orders loaded</td></tr></tbody>
     </table>
   </div>
 
@@ -424,9 +435,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center">
       <span style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-right:4px">FILTER</span>
       <button class="btn b-acc b-xs closedStratFilter on" onclick="filterClosedByStrat('all',this)">All</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s1',this)" style="border-color:rgba(0,200,150,.3);color:var(--accent)">S1 Pullback</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s3',this)" style="border-color:rgba(96,165,250,.3);color:var(--accent2)">S3 Leader Dip</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s2',this)" style="border-color:rgba(245,158,11,.3);color:var(--warn)">S2 Breakout</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s1',this)" style="border-color:var(--s1-bd);color:var(--s1)">S1 Pullback</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s3',this)" style="border-color:var(--s3-bd);color:var(--s3)">S3 Leader Dip</button>
+      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s2',this)" style="border-color:var(--s2-bd);color:var(--s2)">S2 Breakout</button>
     </div>
     <div class="card">
       <div class="card-hdr">
@@ -478,8 +489,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     <div class="g2" style="margin-bottom:16px">
       <!-- S1 card -->
       <div class="card" style="border-left:3px solid var(--accent)">
-        <div class="card-title" style="color:var(--accent)">S1 — Pullback-in-Uptrend</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys healthy pullbacks to rising EMA20 in confirmed uptrends</div>
+        <div class="card-title" style="color:var(--s1)">S1 — Pullback-in-Uptrend</div>
+        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys healthy pullbacks to rising EMA20 in confirmed uptrends</div>
+        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s1);font-weight:700" id="s1Cap">—</span> · <span style="color:var(--s1);font-weight:700" id="s1Limit">—</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
             <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
@@ -505,8 +517,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
       <!-- S2 card -->
       <div class="card" style="border-left:3px solid var(--warn)">
-        <div class="card-title" style="color:var(--warn)">S2 — VCP Breakout</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys breakouts above tight consolidation near 52-week highs on volume surge</div>
+        <div class="card-title" style="color:var(--s2)">S2 — VCP Breakout</div>
+        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys breakouts above tight consolidation near 52-week highs on volume surge</div>
+        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s2);font-weight:700" id="s2Cap">—</span> · <span style="color:var(--s2);font-weight:700" id="s2Limit">—</span> <span style="color:var(--muted2)">— throttled, kept alive to collect a live sample</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
             <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
@@ -532,9 +545,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
 
       <!-- S3 card -->
-      <div class="card" style="border-left:3px solid var(--accent2)">
-        <div class="card-title" style="color:var(--accent2)">S3 — Market Leader Dip</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:10px">Buys pullbacks to the lower Bollinger Band in names beating SPY, with MACD turning up</div>
+      <div class="card" style="border-left:3px solid var(--s3)">
+        <div class="card-title" style="color:var(--s3)">S3 — Market Leader Dip</div>
+        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys pullbacks to the lower Bollinger Band in names beating SPY, with MACD turning up</div>
+        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s3);font-weight:700" id="s3Cap">—</span> · <span style="color:var(--s3);font-weight:700" id="s3Limit">—</span> <span style="color:var(--muted2)">— only strategy profitable in both halves</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
             <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
@@ -655,7 +669,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <!-- ── SCORING ENGINE DETAILS ── -->
   <div class="g2">
     <div class="card">
-      <div class="card-title">S1 Scoring — Trend + Momentum (Pullback-in-Uptrend)</div>
+      <div class="card-title" style="color:var(--s1)">S1 Scoring — Trend + Momentum (Pullback-in-Uptrend)</div>
       <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--green)">uptrend = true</span> AND <span style="color:var(--green)">score &ge; 60</span> become actionable BUY signals.</div>
       <table>
         <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
@@ -675,7 +689,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       </div>
     </div>
     <div class="card">
-      <div class="card-title" style="color:var(--warn)">S2 Scoring — VCP Breakout (Minervini Template)</div>
+      <div class="card-title" style="color:var(--s2)">S2 Scoring — VCP Breakout (Minervini Template)</div>
       <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--warn)">stage2 = true</span> AND <span style="color:var(--warn)">score &ge; 60</span> become actionable BUY signals.</div>
       <table>
         <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
@@ -697,20 +711,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
   <div class="g2">
     <div class="card">
-      <div class="card-title" style="color:var(--accent2)">S3 Scoring — Market Leader Dip (Bollinger + MACD)</div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--accent2)">leader_dip = true</span> AND <span style="color:var(--accent2)">score &ge; 60</span> become actionable BUY signals. Mean reversion: buys temporary weakness in names beating the market.</div>
+      <div class="card-title" style="color:var(--s3)">S3 Scoring — Market Leader Dip (Bollinger + MACD)</div>
+      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--s3)">leader_dip = true</span> AND <span style="color:var(--s3)">score &ge; 60</span> become actionable BUY signals. Mean reversion: buys temporary weakness in names beating the market.</div>
       <table>
         <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
         <tbody>
-          <tr><td style="color:var(--accent2)">Bollinger stretch (%B)</td><td style="text-align:right;color:var(--green)">26</td><td style="color:var(--muted2)">%B &le; 0.20 = lower fifth of band; below band = max</td></tr>
-          <tr><td style="color:var(--accent2)">MACD histogram turn</td><td style="text-align:right;color:var(--green)">24</td><td style="color:var(--muted2)">Rising off its low — stops us catching a falling band</td></tr>
-          <tr><td style="color:var(--accent2)">Leadership vs SPY</td><td style="text-align:right;color:var(--green)">22</td><td style="color:var(--muted2)">3-month outperformance; &gt;20% = market leader</td></tr>
-          <tr><td style="color:var(--accent2)">Trend integrity</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Above EMA200/SMA200; bonus if still above EMA50</td></tr>
-          <tr><td style="color:var(--accent2)">Oversold quality (RSI)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">RSI 30–45 ideal; &lt;30 = deeply oversold, riskier</td></tr>
-          <tr><td style="color:var(--accent2)">Capitulation volume</td><td style="text-align:right;color:var(--green)">6</td><td style="color:var(--muted2)">&gt;1.5x average — a flush often marks the low</td></tr>
+          <tr><td style="color:var(--s3)">Bollinger stretch (%B)</td><td style="text-align:right;color:var(--green)">26</td><td style="color:var(--muted2)">%B &le; 0.20 = lower fifth of band; below band = max</td></tr>
+          <tr><td style="color:var(--s3)">MACD histogram turn</td><td style="text-align:right;color:var(--green)">24</td><td style="color:var(--muted2)">Rising off its low — stops us catching a falling band</td></tr>
+          <tr><td style="color:var(--s3)">Leadership vs SPY</td><td style="text-align:right;color:var(--green)">22</td><td style="color:var(--muted2)">3-month outperformance; &gt;20% = market leader</td></tr>
+          <tr><td style="color:var(--s3)">Trend integrity</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Above EMA200/SMA200; bonus if still above EMA50</td></tr>
+          <tr><td style="color:var(--s3)">Oversold quality (RSI)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">RSI 30–45 ideal; &lt;30 = deeply oversold, riskier</td></tr>
+          <tr><td style="color:var(--s3)">Capitulation volume</td><td style="text-align:right;color:var(--green)">6</td><td style="color:var(--muted2)">&gt;1.5x average — a flush often marks the low</td></tr>
         </tbody>
       </table>
-      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--accent2)">
+      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--s3)">
         Hard gate: price &gt; EMA200 AND &gt; SMA200 — otherwise score capped at 45. Mean reversion outside an uptrend is catching a falling knife.
       </div>
     </div>
@@ -720,9 +734,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <table>
         <thead><tr><th>Strategy</th><th style="text-align:right">Return</th><th style="text-align:right">Max DD</th><th style="text-align:right">Win rate</th><th>Both halves?</th></tr></thead>
         <tbody>
-          <tr><td style="color:var(--accent2)">S3 Leader Dip (3.0×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+42.23%</td><td style="text-align:right;font-family:var(--mono)">11.14%</td><td style="text-align:right;font-family:var(--mono)">63.2%</td><td style="color:var(--green)">✓ +23.7% / +15.1%</td></tr>
-          <tr><td style="color:var(--warn)">S2 Breakout (8% fixed)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+39.46%</td><td style="text-align:right;font-family:var(--mono)">9.73%</td><td style="text-align:right;font-family:var(--mono)">57.3%</td><td style="color:var(--red)">✗ +42.8% / −1.8%</td></tr>
-          <tr><td style="color:var(--accent)">S1 Pullback (2.5×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+6.38%</td><td style="text-align:right;font-family:var(--mono)">26.89%</td><td style="text-align:right;font-family:var(--mono)">53.8%</td><td style="color:var(--red)">✗ collapses</td></tr>
+          <tr><td style="color:var(--s3)">S3 Leader Dip (3.0×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+42.23%</td><td style="text-align:right;font-family:var(--mono)">11.14%</td><td style="text-align:right;font-family:var(--mono)">63.2%</td><td style="color:var(--green)">✓ +23.7% / +15.1%</td></tr>
+          <tr><td style="color:var(--s2)">S2 Breakout (8% fixed)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+39.46%</td><td style="text-align:right;font-family:var(--mono)">9.73%</td><td style="text-align:right;font-family:var(--mono)">57.3%</td><td style="color:var(--red)">✗ +42.8% / −1.8%</td></tr>
+          <tr><td style="color:var(--s1)">S1 Pullback (2.5×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+6.38%</td><td style="text-align:right;font-family:var(--mono)">26.89%</td><td style="text-align:right;font-family:var(--mono)">53.8%</td><td style="color:var(--red)">✗ collapses</td></tr>
           <tr><td style="color:var(--muted2)">S1 with old 3% stop</td><td style="text-align:right;font-family:var(--mono);color:var(--red)">−32.10%</td><td style="text-align:right;font-family:var(--mono)">38.03%</td><td style="text-align:right;font-family:var(--mono)">34.8%</td><td style="color:var(--red)">✗</td></tr>
         </tbody>
       </table>
@@ -742,9 +756,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <div id="atrModeBanner" style="padding:8px 10px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;font-size:.68rem;color:var(--muted2);display:none">
           <span style="color:var(--accent2);font-weight:600">ATR mode active.</span>
           Stops scale to each stock's own daily range, so the fixed % fields below are <em>inactive</em>.
-          Live: S1 <span style="font-family:var(--mono);color:var(--accent)" id="atrS1">—</span> ·
-          S2 <span style="font-family:var(--mono);color:var(--warn)" id="atrS2">—</span> ·
-          S3 <span style="font-family:var(--mono);color:var(--accent2)" id="atrS3">—</span>,
+          Live: S1 <span style="font-family:var(--mono);color:var(--s1)" id="atrS1">—</span> ·
+          S2 <span style="font-family:var(--mono);color:var(--s2)" id="atrS2">—</span> ·
+          S3 <span style="font-family:var(--mono);color:var(--s3)" id="atrS3">—</span>,
           floor <span style="font-family:var(--mono)" id="atrFloor">—</span> / cap <span style="font-family:var(--mono)" id="atrCap">—</span>.
           <br><span style="color:var(--muted)">A fixed 3% stop sat inside the daily range of most names — 70% of all exits were noise stop-outs at a 2.1-day median hold. Set STOP_MODE=pct to re-enable these fields.</span>
         </div>
@@ -807,9 +821,16 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
           <tr><td style="color:var(--muted2)">Universe</td><td style="text-align:right;font-family:var(--mono);color:var(--accent)" id="stratUniverse">472 curated</td></tr>
           <tr><td style="color:var(--muted2)">Scan interval</td><td style="text-align:right;font-family:var(--mono)" id="stratScanInt">30 min</td></tr>
           <tr><td style="color:var(--muted2)">Min signal score</td><td style="text-align:right;font-family:var(--mono);color:var(--green)" id="stratMinScore">70</td></tr>
-          <tr><td style="color:var(--muted2)">Weekly trade limit</td><td style="text-align:right;font-family:var(--mono)" id="stratWeeklyLimit">2 per strategy</td></tr>
-          <tr><td style="color:var(--muted2)">Per trade max</td><td style="text-align:right;font-family:var(--mono)" id="stratPerTrade">$1,000</td></tr>
-          <tr><td style="color:var(--muted2)">Position sizing</td><td style="text-align:right;font-family:var(--mono);color:var(--muted2)">min($1,000, 10% free cash)</td></tr>
+          <!-- Both the weekly limit and the per-trade cap are PER STRATEGY —
+               capital and attempts follow conviction. Single rows hid the fact
+               that S2 is deliberately throttled while S3 gets the most of both. -->
+          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s1)">S1</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s1)" id="stratWeeklyS1">—</td></tr>
+          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s2)">S2</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s2)" id="stratWeeklyS2">—</td></tr>
+          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s3)">S3</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s3)" id="stratWeeklyS3">—</td></tr>
+          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s1)">S1</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s1)" id="stratPerTradeS1">—</td></tr>
+          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s2)">S2</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s2)" id="stratPerTradeS2">—</td></tr>
+          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s3)">S3</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s3)" id="stratPerTradeS3">—</td></tr>
+          <tr><td style="color:var(--muted2)">Position sizing</td><td style="text-align:right;font-family:var(--mono);color:var(--muted2)">min(strategy cap, 10% free cash)</td></tr>
         </tbody>
       </table>
     </div>
@@ -1057,31 +1078,60 @@ function renderPositions(){
     if(!S.positions.length){
       ovBody.innerHTML = '<tr><td class="te" colspan="9">No open positions</td></tr>';
     } else {
-      ovBody.innerHTML = S.positions.map(p=>{
-        const cur  = p.currentPrice ?? p.averagePrice;
-        const pnl  = p.ppl ?? (cur - p.averagePrice) * p.quantity;
-        const pct  = ((cur - p.averagePrice) / p.averagePrice) * 100;
-        const mval = cur * p.quantity;
-        const strat = p.strategy === 's2'
-          ? '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.62rem;font-weight:600;font-family:var(--mono);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--warn)">S2</span>'
-          : p.strategy === 's1'
-          ? '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.62rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>'
-          : '<span style="font-size:.62rem;color:var(--muted)">—</span>';
-        const nameStr = p.name && p.name !== p.ticker ? `<div style="font-size:.6rem;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${p.name}</div>` : '';
-        return `<tr style="background:${pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
-          <td><div style="font-weight:700">${p.ticker}</div>${nameStr}</td>
-          <td style="text-align:center">${strat}</td>
-          <td style="font-family:var(--mono)">${fn(p.quantity,2)}</td>
-          <td style="font-family:var(--mono)">${fmtCur(p.averagePrice)}</td>
-          <td style="font-family:var(--mono)">${fmtCur(cur)}</td>
-          <td style="font-family:var(--mono)">${fmtCur(mval)}</td>
-          <td style="font-weight:700" class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}${fmtCur(pnl)}</td>
-          <td style="font-weight:700" class="${pct>=0?'up':'down'}">${pct>=0?'+':''}${fn(pct,2)}%</td>
-          <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
-        </tr>`;
-      }).join('');
+      // Grouped into the same S1/S2/S3/Untagged blocks as Order History, so
+      // open exposure can be read per strategy against its per-trade cap.
+      const buckets = {s1:[],s2:[],s3:[],untagged:[]};
+      S.positions.forEach(p=>buckets[_stratOf(p)||'untagged'].push(p));
+      let html = '';
+      for(const {k,title,colour} of STRAT_BLOCKS){
+        const ps = buckets[k];
+        if(!ps.length) continue;   // unlike orders, an empty block here is just noise
+        const mv  = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
+        const pl  = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
+        const plc = pl>=0?'var(--green)':'var(--red)';
+        // Untagged positions are the ones opened before strategy attribution
+        // existed, so they belong to no strategy's risk budget — offer a bulk
+        // close. The click still goes through the PIN + confirm gate.
+        const bulk = k==='untagged'
+          ? `<button class="btn b-red b-xs" style="float:right;margin-left:10px" onclick="closeUntagged()">Close all untagged</button>`
+          : '';
+        html += `<tr><td colspan="9" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;`+
+          `color:${colour};border-bottom:2px solid var(--border2)">${title}${bulk}`+
+          `<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">`+
+          `${ps.length} position${ps.length===1?'':'s'} · ${fmtCur(mv)} value · `+
+          `<span style="color:${plc};font-weight:700">${pl>=0?'+':''}${fmtCur(pl)}</span></span></td></tr>`;
+        html += ps.map(_posRow).join('');
+      }
+      ovBody.innerHTML = html;
     }
   }
+}
+
+function _posRow(p){
+  const cur  = p.currentPrice ?? p.averagePrice;
+  const pnl  = p.ppl ?? (cur - p.averagePrice) * p.quantity;
+  const pct  = ((cur - p.averagePrice) / p.averagePrice) * 100;
+  const mval = cur * p.quantity;
+  // This used to be an inline copy that only knew s1/s2, so an S3
+  // position rendered as a bare dash. Share the one badge helper.
+  const sk = _stratOf(p);
+  const strat = _stratBadge(sk);
+  // Colour-band the row by strategy. The P&L tint stays as the row background
+  // (that is what the eye reads first); the strategy owns the left edge, so
+  // S1/S2/S3 stay distinguishable even when several are green at once.
+  const bandC = STRAT_STYLE[sk]?.colour || 'var(--muted)';
+  const nameStr = p.name && p.name !== p.ticker ? `<div style="font-size:.6rem;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${p.name}</div>` : '';
+  return `<tr style="background:${pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
+    <td style="border-left:3px solid ${bandC}"><div style="font-weight:700">${p.ticker}</div>${nameStr}</td>
+    <td style="text-align:center">${strat}</td>
+    <td style="font-family:var(--mono)">${fn(p.quantity,2)}</td>
+    <td style="font-family:var(--mono)">${fmtCur(p.averagePrice)}</td>
+    <td style="font-family:var(--mono)">${fmtCur(cur)}</td>
+    <td style="font-family:var(--mono)">${fmtCur(mval)}</td>
+    <td style="font-weight:700" class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}${fmtCur(pnl)}</td>
+    <td style="font-weight:700" class="${pct>=0?'up':'down'}">${pct>=0?'+':''}${fn(pct,2)}%</td>
+    <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
+  </tr>`;
 }
 
 // ── FETCH ORDERS & DERIVE WIN RATE ──────────────────────
@@ -1111,7 +1161,8 @@ function deriveStats(){
   buys.slice().sort(byTime).forEach(b=>{
     const qty = parseFloat(b.filled_qty||b.qty||0);
     const px  = parseFloat(b.filled_avg_price||0);
-    if(qty>0 && px>0) (lots[b.symbol] = lots[b.symbol]||[]).push({qty, px, date:new Date(b.filled_at||b.created_at), strategy:b.strategy||'s1'});
+    // No `||'s1'` fallback: an untagged buy is unknown, not an S1 trade.
+    if(qty>0 && px>0) (lots[b.symbol] = lots[b.symbol]||[]).push({qty, px, date:new Date(b.filled_at||b.created_at), strategy:_stratOf(b)});
   });
 
   const tradeResults = [];
@@ -1239,11 +1290,18 @@ function filterClosedByStrat(strat, btn){
   renderPerf();
 }
 
+// One source of truth for how a strategy looks anywhere in the dashboard.
+const STRAT_STYLE = {
+  s1: {name:'S1', title:'S1 — Pullback',     colour:'var(--s1)', bg:'var(--s1-bg)', bd:'var(--s1-bd)'},
+  s2: {name:'S2', title:'S2 — VCP Breakout', colour:'var(--s2)', bg:'var(--s2-bg)', bd:'var(--s2-bd)'},
+  s3: {name:'S3', title:'S3 — Leader Dip',   colour:'var(--s3)', bg:'var(--s3-bg)', bd:'var(--s3-bd)'},
+};
+
 function _stratBadge(s){
-  if(s==='s1') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(0,200,150,.1);border:1px solid rgba(0,200,150,.25);color:var(--accent)">S1</span>';
-  if(s==='s2') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--warn)">S2</span>';
-  if(s==='s3') return '<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);color:var(--accent2)">S3</span>';
-  return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:var(--bg3);color:var(--muted2)">${(s||'?').toUpperCase()}</span>`;
+  const st = STRAT_STYLE[s];
+  if(st) return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:${st.bg};border:1px solid ${st.bd};color:${st.colour}">${st.name}</span>`;
+  // No badge means the trade log could not attribute it — NOT that it was S1.
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:var(--bg3);color:var(--muted2)" title="Not attributed — no BUY entry in the trade log for this symbol">${(s||'—').toUpperCase()}</span>`;
 }
 
 function renderPerf(){
@@ -1280,44 +1338,96 @@ function renderPerf(){
   }).join('');
 }
 
+// Strategy blocks always render in this order. Order History keeps an empty
+// block so "S3 placed nothing" is visible rather than invisible; the positions
+// table drops empty ones. `untagged` catches rows the backend could not
+// attribute — see the note on _stratOf().
+const STRAT_BLOCKS = [
+  ...['s1','s2','s3'].map(k=>({k, title:STRAT_STYLE[k].title, colour:STRAT_STYLE[k].colour})),
+  {k:'untagged', title:'Untagged', colour:'var(--muted2)'},
+];
+
+// An order is only S1 if the trade log actually says so. The backend used to
+// default every unmatched symbol to "s1", which made positions opened before
+// the state volume existed look like S1 trades they were never part of.
+// Returns '' when the strategy is unknown, so the badge renders a dash.
+function _stratOf(o){
+  const s = (o.strategy||'').toLowerCase();
+  return ['s1','s2','s3'].includes(s) ? s : '';
+}
+
+function _ordRow(o, cols){
+  const sc = {filled:'bdg-ok',canceled:'bdg-err',pending_new:'bdg-pend'}[o.status]||'bdg-hold';
+  const tc = o.side==='buy'?'bdg-buy':'bdg-sell';
+  const qty = parseFloat(o.filled_qty||o.qty||0);
+  const price = parseFloat(o.filled_avg_price||o.limit_price||0);
+  const total = price * qty;
+  const when = o.created_at
+    ? (cols==='date'
+        ? new Date(o.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
+        : new Date(o.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})+' '+
+          new Date(o.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}))
+    : '—';
+  return `<tr>
+    <td style="color:var(--muted);font-size:.66rem">${when}</td>
+    <td style="font-weight:700">${o.symbol??'—'}</td>
+    <td style="text-align:center">${_stratBadge(_stratOf(o))}</td>
+    <td><span class="bdg ${tc}">${o.side?.toUpperCase()??'—'}</span></td>
+    <td>${fn(qty,2)}</td>
+    <td>${fmtCur(price)}</td>
+    <td>${total?fmtCur(total):'—'}</td>
+    <td><span class="bdg ${sc}">${o.status??'—'}</span></td>
+    <td style="font-size:.65rem;color:var(--muted)">${o._reason??'—'}</td>
+  </tr>`;
+}
+
+function _ordHeaderRow(label, right, colour){
+  return `<tr><td colspan="9" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;`+
+    `color:${colour||'var(--text)'};border-bottom:2px solid var(--border2)">${label}`+
+    `<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">${right}</span></td></tr>`;
+}
+
 function renderOrders(){
   const f = document.getElementById('ordFilt')?.value || 'all';
+  const g = document.getElementById('ordGroup')?.value || 'strategy';
   let orders = [...S.orders];
   if(f!=='all') orders=orders.filter(o=>o.type?.includes(f)||o.status===f||o.side?.toUpperCase()===f);
   orders.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
   const tbody = document.getElementById('ordBody');
-  if(!orders.length){ tbody.innerHTML='<tr><td class="te" colspan="8">No orders</td></tr>'; return; }
+  if(!orders.length){ tbody.innerHTML='<tr><td class="te" colspan="9">No orders</td></tr>'; return; }
+
+  let html = '';
+
+  if(g==='strategy'){
+    const buckets = {s1:[],s2:[],s3:[],untagged:[]};
+    orders.forEach(o=>buckets[_stratOf(o)||'untagged'].push(o));
+    for(const {k,title,colour} of STRAT_BLOCKS){
+      const ords = buckets[k];
+      // Bought capital in this block — what the per-strategy cap is spending.
+      const bought = ords.reduce((s,o)=>o.side==='buy'&&o.status==='filled'
+        ? s+parseFloat(o.filled_avg_price||0)*parseFloat(o.filled_qty||0) : s, 0);
+      const buys  = ords.filter(o=>o.side==='buy').length;
+      const sells = ords.filter(o=>o.side==='sell').length;
+      html += _ordHeaderRow(title,
+        ords.length ? `${buys} buy${buys===1?'':'s'} · ${sells} sell${sells===1?'':'s'} · ${fmtCur(bought)} bought`
+                    : 'no orders',
+        colour);
+      html += ords.length
+        ? ords.map(o=>_ordRow(o,'strategy')).join('')
+        : `<tr><td colspan="9" style="text-align:center;color:var(--muted2);font-size:.68rem;padding:12px">This strategy has not placed an order yet</td></tr>`;
+    }
+    tbody.innerHTML = html;
+    return;
+  }
+
   const groups = {};
   orders.forEach(o=>{
     const d = o.created_at ? new Date(o.created_at).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
     (groups[d]||(groups[d]=[])).push(o);
   });
-  let html = '';
   for(const [date, ords] of Object.entries(groups)){
-    const dayPnl = ords.reduce((s,o)=>{
-      if(o.side==='sell'&&o.status==='filled') return s-parseFloat(o.filled_avg_price||0)*parseFloat(o.filled_qty||0);
-      if(o.side==='buy'&&o.status==='filled') return s+parseFloat(o.filled_avg_price||0)*parseFloat(o.filled_qty||0);
-      return s;
-    },0);
-    html+=`<tr><td colspan="8" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;color:var(--text);border-bottom:2px solid var(--border2)">📅 ${date}<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">${ords.length} order${ords.length>1?'s':''}</span></td></tr>`;
-    html+=ords.map(o=>{
-      const sc = {filled:'bdg-ok',canceled:'bdg-err',pending_new:'bdg-pend'}[o.status]||'bdg-hold';
-      const tc = o.side==='buy'?'bdg-buy':'bdg-sell';
-      const qty = parseFloat(o.filled_qty||o.qty||0);
-      const price = parseFloat(o.filled_avg_price||o.limit_price||0);
-      const total = price * qty;
-      const time = o.created_at?new Date(o.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
-      return `<tr>
-        <td style="color:var(--muted);font-size:.66rem">${time}</td>
-        <td style="font-weight:700">${o.symbol??'—'}</td>
-        <td><span class="bdg ${tc}">${o.side?.toUpperCase()??'—'}</span></td>
-        <td>${fn(qty,2)}</td>
-        <td>${fmtCur(price)}</td>
-        <td>${total?fmtCur(total):'—'}</td>
-        <td><span class="bdg ${sc}">${o.status??'—'}</span></td>
-        <td style="font-size:.65rem;color:var(--muted)">${o._reason??'—'}</td>
-      </tr>`;
-    }).join('');
+    html += _ordHeaderRow(`📅 ${date}`, `${ords.length} order${ords.length>1?'s':''}`);
+    html += ords.map(o=>_ordRow(o,'date')).join('');
   }
   tbody.innerHTML = html;
 }
@@ -1372,6 +1482,30 @@ async function setStopLoss(ticker, qty, price){
   log(`Reminder: set a stop loss manually for ${ticker} at ${fmtCur(price)}`,'warn');
 }
 async function closePos(ticker,qty){ requirePin(()=>confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close'))); }
+
+// Bulk-close every position the trade log could not attribute to a strategy.
+// One PIN + one confirm listing every symbol, then the sells go in sequence so
+// a failure on one does not silently swallow the rest.
+async function closeUntagged(){
+  const ps = S.positions.filter(p=>!_stratOf(p));
+  if(!ps.length){ log('No untagged positions to close','warn'); return; }
+  const mv = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
+  const pl = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
+  const list = ps.map(p=>`  ${p.ticker} ×${fn(p.quantity,2)}`).join('\n');
+  requirePin(()=>confirm2(
+    `Close ALL ${ps.length} untagged positions?\n\n${list}\n\n`+
+    `Market value ${fmtCur(mv)} · open P&L ${pl>=0?'+':''}${fmtCur(pl)}\n\n`+
+    `This places ${ps.length} market SELL orders.`,
+    'Confirm Close All Untagged',
+    async ()=>{
+      for(const p of ps){
+        try{ await placeTrade(p.ticker,'SELL',p.quantity,'Bulk close — untagged'); }
+        catch(e){ log(`Close failed for ${p.ticker}: ${e.message||e}`,'err'); }
+      }
+      log(`Bulk close submitted for ${ps.length} untagged positions`,'ok');
+      fetchPositions?.();
+    }));
+}
 function manOrder(dir){
   const sym=document.getElementById('mSym').value.trim().toUpperCase();
   const qty=parseFloat(document.getElementById('mQty').value);
@@ -2068,19 +2202,40 @@ async function loadStrategyConfig(){
     if(!r.ok)return;
     const d=await r.json();
     const cfg=d.config||{};
+    // Null-safe: stratSL/stratTrail/stratHardTP were removed when the ATR
+    // banner replaced the fixed-% rows, and the old el(...).textContent calls
+    // threw on the first line — the bare catch below then swallowed it, so
+    // NOTHING on this card was ever populated. Never dereference el() directly.
     const el=id=>document.getElementById(id);
-    if(cfg.stop_loss_pct) el('stratSL').textContent='-'+cfg.stop_loss_pct+'%';
-    if(cfg.trail_activate_pct && cfg.trail_pct) el('stratTrail').textContent='+'+cfg.trail_activate_pct+'% arm, '+cfg.trail_pct+'% trail';
+    const set=(id,v)=>{const n=el(id); if(n) n.textContent=v;};
+    if(cfg.stop_loss_pct) set('stratSL','-'+cfg.stop_loss_pct+'%');
+    if(cfg.trail_activate_pct && cfg.trail_pct) set('stratTrail','+'+cfg.trail_activate_pct+'% arm, '+cfg.trail_pct+'% trail');
     const htp=parseFloat(cfg.hard_take_profit_pct||0);
-    el('stratHardTP').textContent=htp>0?'+'+htp+'%':'disabled';
-    if(cfg.scan_interval_sec) el('stratScanInt').textContent=(cfg.scan_interval_sec/60)+' min';
-    if(cfg.min_signal_score) el('stratMinScore').textContent=cfg.min_signal_score;
-    if(cfg.weekly_trade_limit) el('stratWeeklyLimit').textContent=cfg.weekly_trade_limit;
-    if(cfg.per_trade_max_usd) el('stratPerTrade').textContent='$'+cfg.per_trade_max_usd;
-    if(cfg.profit_check_sec) el('stratProfitSec').textContent=cfg.profit_check_sec+'s';
-    el('stratTgStatus').textContent=d.telegram_configured?'Connected':'Not configured — set TELEGRAM_BOT_TOKEN in .env';
-    el('stratTgStatus').style.color=d.telegram_configured?'var(--green)':'var(--warn)';
-  }catch(e){}
+    set('stratHardTP',htp>0?'+'+htp+'%':'disabled');
+    if(cfg.scan_interval_sec) set('stratScanInt',(cfg.scan_interval_sec/60)+' min');
+    if(cfg.min_signal_score) set('stratMinScore',cfg.min_signal_score);
+    // Per-strategy caps and weekly limits, each falling back to the global
+    // value when the backend predates the per-strategy breakdown.
+    const caps   = cfg.per_trade_max_by_strategy || {};
+    const limits = cfg.weekly_limit_by_strategy  || {};
+    ['s1','s2','s3'].forEach(k=>{
+      const K = k.toUpperCase();
+      const cap = caps[k] ?? cfg.per_trade_max_usd;
+      if(cap!=null){
+        // Config table row and the matching strategy card both show the cap.
+        [el('stratPerTrade'+K), el(k+'Cap')].forEach(n=>{ if(n) n.textContent=fmtCur(parseFloat(cap)); });
+      }
+      const lim = limits[k] ?? cfg.weekly_trade_limit;
+      if(lim!=null){
+        set('stratWeekly'+K, lim+'/week');
+        set(k+'Limit', lim+'/week');
+      }
+    });
+    if(cfg.profit_check_sec) set('stratProfitSec',cfg.profit_check_sec+'s');
+    set('stratTgStatus',d.telegram_configured?'Connected':'Not configured — set TELEGRAM_BOT_TOKEN in .env');
+    const tg=el('stratTgStatus');
+    if(tg) tg.style.color=d.telegram_configured?'var(--green)':'var(--warn)';
+  }catch(e){ console.warn('loadStrategyConfig failed:', e); }
 }
 async function loadExitConfig(){
   try{
@@ -2332,9 +2487,9 @@ function renderStratComparison(){
   // Real stats now come from the backend's FIFO round-trip matching — these
   // used to be hardcoded "tracking..." placeholders.
   const STRATS = [
-    {k:'s1', colour:'var(--accent)'},
-    {k:'s2', colour:'var(--warn)'},
-    {k:'s3', colour:'var(--accent2)'},
+    {k:'s1', colour:'var(--s1)'},
+    {k:'s2', colour:'var(--s2)'},
+    {k:'s3', colour:'var(--s3)'},
   ];
 
   STRATS.forEach(({k, colour})=>{
@@ -2392,9 +2547,9 @@ function renderStratComparison(){
   }
   tbody.innerHTML=filtered.map(t=>{
     const dt=t.timestamp?new Date(t.timestamp).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—';
-    const STRAT_HTML={s1:'<span style="color:var(--accent)">S1 Pullback</span>',
-                      s2:'<span style="color:var(--warn)">S2 Breakout</span>',
-                      s3:'<span style="color:var(--accent2)">S3 Leader Dip</span>'};
+    const STRAT_HTML={s1:'<span style="color:var(--s1)">S1 Pullback</span>',
+                      s2:'<span style="color:var(--s2)">S2 Breakout</span>',
+                      s3:'<span style="color:var(--s3)">S3 Leader Dip</span>'};
     const strat=STRAT_HTML[t._strat]||t._strat;
     const sig=(t.reasons||[]).slice(0,2).join(' | ');
     return `<tr>
