@@ -336,6 +336,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
     </div>
   </div>
 
+  <!-- PER-STRATEGY SECTIONS — one block per strategy, live open exposure on
+       the left and realized closed-trade record on the right. Rendered by
+       renderStratSections(); each card is colour-keyed to its strategy. -->
+  <div class="card-hdr" style="margin-top:4px">
+    <div class="card-title" style="margin:0">By Strategy</div>
+    <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted)" id="stratSecNote"></span>
+  </div>
+  <div id="stratSections" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem">
+    <div class="card-sm" style="grid-column:1/-1;color:var(--muted)">Loading strategies…</div>
+  </div>
+
   <!-- OPEN POSITIONS -->
   <div class="card">
     <div class="card-hdr">
@@ -1045,6 +1056,7 @@ async function fetchPositions(){
 
   // Quick-close list
   renderQClose();
+  renderStratSections();   // open-position half of the per-strategy sections
   log(`Positions: ${S.positions.length} open — unrealised P&L: ${fmtCur(openPnl)}`,'ok');
 }
 
@@ -1080,7 +1092,7 @@ function renderPositions(){
     } else {
       // Grouped into the same S1/S2/S3/Untagged blocks as Order History, so
       // open exposure can be read per strategy against its per-trade cap.
-      const buckets = {s1:[],s2:[],s3:[],untagged:[]};
+      const buckets = {s1:[],s2:[],s3:[],manual:[],untagged:[]};
       S.positions.forEach(p=>buckets[_stratOf(p)||'untagged'].push(p));
       let html = '';
       for(const {k,title,colour} of STRAT_BLOCKS){
@@ -1105,6 +1117,75 @@ function renderPositions(){
       ovBody.innerHTML = html;
     }
   }
+}
+
+// ── PER-STRATEGY OVERVIEW SECTIONS ──────────────────────
+// Cached so the section can render on every positions refresh without
+// re-fetching config it already has.
+let _stratCfg = null;
+async function _loadStratCfg(){
+  if(_stratCfg) return _stratCfg;
+  try{
+    const r = await fetch(getBackendUrl()+'/api/health');
+    if(r.ok){ const d = await r.json(); _stratCfg = d.config || {}; }
+  }catch(e){ console.warn('strategy config fetch failed:', e); }
+  return _stratCfg || {};
+}
+
+async function renderStratSections(){
+  const host = document.getElementById('stratSections');
+  if(!host) return;
+  const cfg    = await _loadStratCfg();
+  const caps   = cfg.per_trade_max_by_strategy || {};
+  const limits = cfg.weekly_limit_by_strategy  || {};
+  const closed = S.closedTrades || [];
+
+  host.innerHTML = ['s1','s2','s3'].map(k=>{
+    const st = STRAT_STYLE[k];
+    const ps = (S.positions||[]).filter(p=>_stratOf(p)===k);
+    const mv = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
+    const op = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
+
+    const ct   = closed.filter(t=>t.strategy===k);
+    const wins = ct.filter(t=>t.pnl>0).length;
+    const net  = ct.reduce((s,t)=>s+t.pnl, 0);
+    const wr   = ct.length ? (wins/ct.length*100) : null;
+
+    const cap = caps[k] ?? cfg.per_trade_max_usd;
+    const lim = limits[k] ?? cfg.weekly_trade_limit;
+    const c = (v,pos)=>`color:${v>=0?'var(--green)':'var(--red)'}`;
+    const cell = (lbl,val,style='')=>
+      `<div style="padding:6px 8px;background:var(--bg3);border-radius:5px">
+         <div style="font-size:.55rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.4px">${lbl}</div>
+         <div style="font-size:.9rem;font-weight:700;font-family:var(--mono);${style}">${val}</div>
+       </div>`;
+
+    // An idle strategy says so explicitly rather than rendering as all-zeros,
+    // which reads like a bug (S3 has never traded — that is expected, not broken).
+    const idle = !ps.length && !ct.length
+      ? `<div style="margin-top:7px;font-size:.62rem;color:var(--muted2);font-family:var(--mono)">No positions or closed trades yet</div>`
+      : '';
+
+    return `<div class="card-sm" style="border-left:3px solid ${st.colour}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+        <span style="font-weight:700;font-size:.78rem;color:${st.colour}">${st.title}</span>
+        ${_stratBadge(k)}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+        ${cell('Open', ps.length ? `${ps.length} · ${fmtCur(mv)}` : '—')}
+        ${cell('Open P&L', ps.length ? `${op>=0?'+':''}${fmtCur(op)}` : '—', ps.length?c(op):'')}
+        ${cell('Closed', ct.length || '—')}
+        ${cell('Win rate', wr===null ? '—' : fn(wr,1)+'%')}
+        ${cell('Net P&L', ct.length ? `${net>=0?'+':''}${fmtCur(net)}` : '—', ct.length?c(net):'')}
+        ${cell('Budget', (cap!=null?fmtCur(parseFloat(cap)):'—')+(lim!=null?` · ${lim}/wk`:''), `color:${st.colour}`)}
+      </div>
+      ${idle}
+    </div>`;
+  }).join('');
+
+  const note = document.getElementById('stratSecNote');
+  const untagged = (S.positions||[]).filter(p=>!_stratOf(p)).length;
+  if(note) note.textContent = untagged ? `${untagged} untagged position${untagged===1?'':'s'} not shown above` : '';
 }
 
 function _posRow(p){
@@ -1191,6 +1272,7 @@ function deriveStats(){
     }
   });
   S.closedTrades = closedTrades;
+  renderStratSections();   // closed-trade half of the per-strategy sections
 
   const wins   = tradeResults.filter(p=>p>0).length;
   const total  = tradeResults.length;
@@ -1295,6 +1377,9 @@ const STRAT_STYLE = {
   s1: {name:'S1', title:'S1 — Pullback',     colour:'var(--s1)', bg:'var(--s1-bg)', bd:'var(--s1-bd)'},
   s2: {name:'S2', title:'S2 — VCP Breakout', colour:'var(--s2)', bg:'var(--s2-bg)', bd:'var(--s2-bd)'},
   s3: {name:'S3', title:'S3 — Leader Dip',   colour:'var(--s3)', bg:'var(--s3-bg)', bd:'var(--s3-bd)'},
+  // Hand-placed via the Execute button. Its own tag, not a strategy: it does
+  // not consume any strategy's weekly budget or Kelly sample.
+  manual: {name:'MAN', title:'Manual', colour:'var(--purple)', bg:'rgba(167,139,250,.12)', bd:'rgba(167,139,250,.3)'},
 };
 
 function _stratBadge(s){
@@ -1343,7 +1428,7 @@ function renderPerf(){
 // table drops empty ones. `untagged` catches rows the backend could not
 // attribute — see the note on _stratOf().
 const STRAT_BLOCKS = [
-  ...['s1','s2','s3'].map(k=>({k, title:STRAT_STYLE[k].title, colour:STRAT_STYLE[k].colour})),
+  ...['s1','s2','s3','manual'].map(k=>({k, title:STRAT_STYLE[k].title, colour:STRAT_STYLE[k].colour})),
   {k:'untagged', title:'Untagged', colour:'var(--muted2)'},
 ];
 
@@ -1353,7 +1438,7 @@ const STRAT_BLOCKS = [
 // Returns '' when the strategy is unknown, so the badge renders a dash.
 function _stratOf(o){
   const s = (o.strategy||'').toLowerCase();
-  return ['s1','s2','s3'].includes(s) ? s : '';
+  return STRAT_STYLE[s] ? s : '';
 }
 
 function _ordRow(o, cols){
@@ -1399,10 +1484,14 @@ function renderOrders(){
   let html = '';
 
   if(g==='strategy'){
-    const buckets = {s1:[],s2:[],s3:[],untagged:[]};
+    const buckets = {s1:[],s2:[],s3:[],manual:[],untagged:[]};
     orders.forEach(o=>buckets[_stratOf(o)||'untagged'].push(o));
     for(const {k,title,colour} of STRAT_BLOCKS){
       const ords = buckets[k];
+      // Keep an empty block for the three real strategies -- "S3 placed
+      // nothing" is a fact worth showing. Manual/Untagged are only meaningful
+      // when non-empty, so drop them rather than pad the table.
+      if(!ords.length && (k==='manual' || k==='untagged')) continue;
       // Bought capital in this block — what the per-strategy cap is spending.
       const bought = ords.reduce((s,o)=>o.side==='buy'&&o.status==='filled'
         ? s+parseFloat(o.filled_avg_price||0)*parseFloat(o.filled_qty||0) : s, 0);

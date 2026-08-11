@@ -7,11 +7,12 @@ Run with:  python server.py
 """
 
 import os
+import re
 import json
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -772,14 +773,81 @@ async def account_info():
 
 _asset_name_cache: dict[str, str] = {}
 
+
+_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$")
+
+
+def _parse_ts(v) -> Optional[datetime]:
+    """
+    Parse an ISO timestamp to an aware UTC datetime, or None.
+
+    Python 3.9's fromisoformat accepts fractional seconds only at exactly 3 or
+    6 digits, and rejects a trailing 'Z'. Alpaca sends both other widths (e.g.
+    '...T13:32:53.92223Z', 5 digits) and 'Z'. Parsing those raised, this
+    returned None, and the caller then silently fell back to "latest BUY" —
+    which is precisely the mis-attribution this function exists to prevent.
+    Normalise the fraction to 6 digits before parsing.
+    """
+    if not v:
+        return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    m = _TS_RE.match(str(v).strip())
+    if not m:
+        return None
+    head, frac, tail = m.group(1), m.group(2) or "0", m.group(3) or ""
+    tail = tail.replace("Z", "+00:00").replace("z", "+00:00")
+    try:
+        ts = datetime.fromisoformat(f"{head}.{frac[:6].ljust(6, '0')}{tail}")
+    except Exception:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _strategy_resolver():
+    """
+    Return `resolve(symbol, when=None) -> strategy`.
+
+    Attribution used to be a plain ticker -> strategy dict built by looping the
+    trade log, so the LAST BUY for a ticker overwrote every earlier one. A
+    ticker traded by two strategies at different times had its whole history —
+    including the older strategy's closed round-trips — relabelled with the
+    newer one. JAZZ is a live example: bought by S2 on 2026-07-23 and by S1 on
+    2026-07-29, so S2's round-trip was being counted as an S1 result.
+
+    Now each BUY keeps its own timestamp and an order is attributed to the most
+    recent BUY at or before it. `when=None` (an open position) still means "the
+    latest BUY", which is correct for the lot currently held.
+    """
+    buys: dict[str, list[tuple[Optional[datetime], str]]] = {}
+    for t in trader.tradelog.data.get("trades", []):
+        if t.get("action") == "BUY" and t.get("ticker"):
+            buys.setdefault(t["ticker"].upper(), []).append(
+                (_parse_ts(t.get("timestamp")), t.get("strategy", "s1"))
+            )
+    for sym in buys:
+        buys[sym].sort(key=lambda x: (x[0] is None, x[0]))
+
+    def resolve(symbol: str, when=None) -> str:
+        entries = buys.get((symbol or "").upper())
+        if not entries:
+            return ""            # unattributed — NOT s1
+        when = _parse_ts(when) if not isinstance(when, datetime) else when
+        if when is None:
+            return entries[-1][1]
+        prior = [s for ts, s in entries if ts is None or ts <= when]
+        # An order before any logged BUY belongs to the earliest known one
+        # (clock skew between Alpaca's fill time and our log write).
+        return prior[-1] if prior else entries[0][1]
+
+    return resolve
+
+
 @app.get("/api/portfolio")
 async def portfolio():
     """Open positions, tagged with strategy and company name."""
     positions = await alpaca_get("/positions")
-    strat_map = {}
-    for t in trader.tradelog.data.get("trades", []):
-        if t.get("action") == "BUY" and t.get("ticker"):
-            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    resolve_strat = _strategy_resolver()
 
     uncached = [p.get("symbol", "").upper() for p in positions if p.get("symbol", "").upper() not in _asset_name_cache]
     if uncached:
@@ -806,7 +874,7 @@ async def portfolio():
             "initialFill":   p.get("asset_id"),
             # "" (not "s1") when the log has no BUY for this symbol — an
             # unattributed position is unknown, not an S1 trade.
-            "strategy":      strat_map.get(sym, ""),
+            "strategy":      resolve_strat(sym),
             "_raw":          p,
         })
     return out
@@ -822,13 +890,11 @@ async def orders():
 async def history_orders(limit: int = 50):
     """Closed orders (filled, cancelled, expired), tagged with strategy."""
     orders = await alpaca_get("/orders", params={"status": "closed", "limit": min(limit, 500)})
-    strat_map = {}
-    for t in trader.tradelog.data.get("trades", []):
-        if t.get("action") == "BUY" and t.get("ticker"):
-            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    resolve_strat = _strategy_resolver()
     for o in orders:
-        sym = (o.get("symbol") or "").upper()
-        o["strategy"] = strat_map.get(sym, "")   # "" = unattributed, see /api/portfolio
+        # Attributed as of the order's own time — see _strategy_resolver().
+        o["strategy"] = resolve_strat(o.get("symbol"),
+                                      o.get("filled_at") or o.get("created_at"))
     return orders
 
 
@@ -836,6 +902,7 @@ class OrderRequest(BaseModel):
     ticker: str
     quantity: Optional[float] = None
     notional: Optional[float] = None  # dollar amount, alternative to qty
+    strategy: Optional[str] = None    # tags the trade log; see place_buy()
 
 
 @app.post("/api/orders/buy")
@@ -850,7 +917,32 @@ async def place_buy(order: OrderRequest):
         body["notional"] = str(round(order.notional, 2))
     else:
         body["qty"] = str(order.quantity)
-    return await alpaca_post("/orders", body)
+    result = await alpaca_post("/orders", body)
+
+    # Record the BUY, or the position is permanently unattributable. This
+    # endpoint backs the Live Signals "Execute" button and never wrote to the
+    # trade log, so every hand-placed buy showed as Untagged forever, was
+    # invisible to strategy stats, and never reached Kelly's sample.
+    #
+    # Manual buys are tagged "manual", NOT s1/s2/s3, deliberately: the weekly
+    # limit counts BUY entries per strategy, so tagging a hand-placed order as
+    # s1 would silently consume the auto-trader's budget for the week. Pass an
+    # explicit `strategy` to override.
+    try:
+        if isinstance(result, dict) and result.get("id"):
+            trader.tradelog.record({
+                "action":   "BUY",
+                "ticker":   order.ticker.upper(),
+                "strategy": (order.strategy or "manual").lower(),
+                "usd":      round(order.notional, 2) if order.notional else None,
+                "qty":      order.quantity,
+                "source":   "manual-api",
+                "order_id": result.get("id"),
+            })
+    except Exception as e:
+        log.error(f"Order placed but trade log write failed for {order.ticker}: {e}")
+
+    return result
 
 
 @app.post("/api/orders/sell")
@@ -1356,12 +1448,10 @@ async def build_monthly_report(year: Optional[int] = None,
         log.error(f"Monthly report: could not fetch orders: {e}")
         orders = []
 
-    strat_map = {}
-    for t in trader.tradelog.data.get("trades", []):
-        if t.get("action") == "BUY" and t.get("ticker"):
-            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    resolve_strat = _strategy_resolver()
     for o in orders:
-        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "")
+        o["strategy"] = resolve_strat(o.get("symbol"),
+                                      o.get("filled_at") or o.get("created_at"))
 
     # Match across ALL history, then keep the round-trips that CLOSED this month
     # — a trade opened in June and sold in July belongs to July.
@@ -1498,13 +1588,12 @@ async def strategy_compare():
     except Exception:
         closed_orders = []
 
-    # Tag each order with the strategy that opened the position.
-    strat_map = {}
-    for t in all_trades:
-        if t.get("action") == "BUY" and t.get("ticker"):
-            strat_map[t["ticker"].upper()] = t.get("strategy", "s1")
+    # Tag each order with the strategy that opened the position, as of the
+    # order's own time — see _strategy_resolver().
+    resolve_strat = _strategy_resolver()
     for o in closed_orders:
-        o["strategy"] = strat_map.get((o.get("symbol") or "").upper(), "")
+        o["strategy"] = resolve_strat(o.get("symbol"),
+                                      o.get("filled_at") or o.get("created_at"))
 
     round_trips = match_closed_trades(closed_orders)
 
