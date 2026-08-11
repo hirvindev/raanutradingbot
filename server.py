@@ -1171,7 +1171,27 @@ async def _handle_whatsapp_command(cmd: str):
                     if r.status_code >= 400:
                         send_whatsapp(f"❌ Order rejected: {r.text[:200]}")
                     else:
-                        send_whatsapp(format_trade_confirm("BUY", ticker, usd, r.json().get("status", "submitted")))
+                        resp = r.json()
+                        # Record it, or the position is unattributable forever.
+                        # This path posts straight to Alpaca and used to write
+                        # nothing to the trade log, so a chat-placed BUY showed
+                        # as Untagged, was missing from strategy stats, and
+                        # never reached Kelly's sample. Tagged "manual" for the
+                        # same reason as /api/orders/buy: the weekly limit
+                        # counts BUY entries per strategy, and a chat order
+                        # must not silently spend the auto-trader's budget.
+                        try:
+                            trader.tradelog.record({
+                                "action":   "BUY",
+                                "ticker":   ticker.upper(),
+                                "strategy": "manual",
+                                "usd":      usd,
+                                "source":   "telegram-cmd",
+                                "order_id": resp.get("id"),
+                            })
+                        except Exception as e:
+                            log.error(f"Chat BUY placed but trade log write failed for {ticker}: {e}")
+                        send_whatsapp(format_trade_confirm("BUY", ticker, usd, resp.get("status", "submitted")))
                 except Exception as e:
                     send_whatsapp(f"❌ Buy failed: {e}")
 
