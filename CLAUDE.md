@@ -94,12 +94,17 @@ Then open: **http://localhost:8000**
   old `SCAN_INTERVAL_SEC=1800` was reported by the API but no loop consumed it,
   so the dashboard advertised a 30-minute cadence that never ran. Removed.
 - **Starts:** DISABLED — must POST `/api/auto/start` or click ENABLE
-- **Only the 09:35/11:00 ET slots place orders.** The startup scan, the
-  pre-market scan and the alternating "rest day" branch all call
-  `run_one_cycle(execute=False)` and can never trade. Before this, the rest-day
-  branch logged "scanning only, no orders" while ordering, and restarting the
-  server during market hours could fire a trade immediately.
-- **Weekly trade limit:** 2 trades per 7 days (configurable via .env)
+- **Only the 09:35/11:00 ET slots place orders.** The startup scan and the
+  pre-market scan call `run_one_cycle(execute=False)` and can never trade.
+  Before this, restarting the server during market hours could fire a trade.
+- **Slots run every weekday.** The alternating trade/rest day rule was removed:
+  it alternated on calendar-day parity while slots only run Mon–Fri, giving 3
+  trade days one week and 2 the next. That silently capped the per-strategy
+  weekly budgets — `WEEKLY_TRADE_LIMIT_S3=3` could never be reached, so the
+  setting meant something other than what it said. **The per-strategy weekly
+  limit is now the single throttle.** Do not add a second one.
+- **Weekly trade limit:** per strategy — S1 2, S2 1, S3 3 per rolling 7 days
+  (configurable via .env). Counts BUYs only; exits do not consume the budget.
 - **Per trade max:** $500 USD (configurable via .env)
 - **Min signal score:** 60/100
 - **Position sizing:** min($500, 5% of free cash)

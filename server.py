@@ -211,13 +211,18 @@ def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
         log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score}")
 
 
-def _is_trade_day() -> bool:
-    """Alternates every calendar day in market time — True today means skip tomorrow.
-
-    Anchored to ET like the slots themselves; on a Berlin clock the alternation
-    would flip a day early for any slot that crossed midnight in Europe.
-    """
-    return datetime.now(US_EAST).toordinal() % 2 == 0
+# The alternating trade/rest day rule was REMOVED — do not reintroduce it.
+#
+# It alternated on calendar-day parity while the slots only run Mon–Fri, so the
+# weekday pattern shifted every week and produced 3 trade days one week and 2
+# the next: about 2.5 per week. That silently capped the per-strategy weekly
+# budgets, which are the throttle that is actually configured, documented and
+# enforced at two gates. WEEKLY_TRADE_LIMIT_S3=3 could never be reached, because
+# there were rarely three trade days in a rolling week — so the setting quietly
+# meant something other than what it said.
+#
+# One throttle now: the per-strategy weekly limit. Every weekday runs the slots,
+# and the budget decides whether an order follows.
 
 
 async def _run_scan_and_cache_s3(alert: bool = True) -> list:
@@ -275,6 +280,11 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     if not ok:
         log.info(f"[{label}][{strategy.upper()}] {why} — no orders")
         send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{why}", strategy=strategy)
+        # Still refresh the cache. The weekly budget is now the ONLY throttle, so
+        # a strategy that has spent it sits out the rest of the week — and with
+        # the alternating rest-day scan gone, returning bare here would leave the
+        # dashboard showing days-old picks for exactly those strategies.
+        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
         return
 
     if strategy == "s3":
@@ -502,8 +512,8 @@ async def _premarket_scan_and_notify():
 
 # Schedule slots:
 #   03:30 ET  — pre-market scan + Telegram alert (scan only, no orders)
-#   09:35 ET  — scan + execute top 2 orders  (alternating days)
-#   11:00 ET  — scan + execute top 1 order   (alternating days)
+#   09:35 ET  — scan + execute top 2 orders  (every weekday)
+#   11:00 ET  — scan + execute top 1 order   (every weekday)
 
 # Trade slots run in US/Eastern — the same clock the market keeps.
 #
@@ -556,10 +566,12 @@ async def _premarket_loop():
 
 async def _scheduled_trade_loop():
     """
-    Fires at 09:35 and 11:00 ET on alternating calendar days.
-    Non-trade days: scans and caches picks but places no orders.
+    Fires at 09:35 and 11:00 ET every weekday.
+
+    Whether an order actually follows is decided by the per-strategy weekly
+    limit inside _execute_scheduled_trades(), not by the calendar.
     """
-    log.info("Scheduled trade loop started — 9:35 AM and 11:00 AM ET on alternating days")
+    log.info("Scheduled trade loop started — 9:35 AM and 11:00 AM ET, every weekday")
     # Immediate startup scan: caches picks so the dashboard is not empty, but
     # stays silent. A restart is not a scheduled event — alerting here meant
     # every code change pushed a fresh round of buy notifications.
@@ -587,16 +599,9 @@ async def _scheduled_trade_loop():
         await asyncio.sleep(sleep_sec)
 
         try:
-            if _is_trade_day():
-                log.info(f"[{next_label}] Trade day ✓ — executing both strategies")
-                await _execute_scheduled_trades(next_n, next_label, strategy="s1")
-                await _execute_scheduled_trades(next_n, next_label, strategy="s2")
-                await _execute_scheduled_trades(next_n, next_label, strategy="s3")
-            else:
-                log.info(f"[{next_label}] Rest day — scanning only, no orders")
-                await _run_scan_and_cache()
-                await _run_scan_and_cache_s2()
-                await _run_scan_and_cache_s3()
+            log.info(f"[{next_label}] Running all three strategies")
+            for strat in ("s1", "s2", "s3"):
+                await _execute_scheduled_trades(next_n, next_label, strategy=strat)
         except Exception as e:
             log.exception(f"Scheduled slot error [{next_label}]: {e}")
 
@@ -1871,7 +1876,7 @@ if __name__ == "__main__":
     print(f"  Dashboard:     http://localhost:8000")
     print(f"  Pre-market:    03:30 ET daily — scan + Telegram alert (no orders)")
     print(f"  Trade slots:   09:35 ET — top 2 orders | 11:00 ET — top 1 order")
-    print(f"                 Alternating days (trade / rest / trade / rest...)")
+    print(f"                 Every weekday — per-strategy weekly limit decides if an order follows")
     print(f"  Weekly limit:  S1 {weekly_limit_for('s1')} | "
           f"S2 {weekly_limit_for('s2')} | S3 {weekly_limit_for('s3')} trades/week")
     print(f"  Per-trade cap: S1 ${per_trade_max_for('s1'):,.0f} | "
