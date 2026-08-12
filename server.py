@@ -552,9 +552,21 @@ async def _scheduled_trade_loop():
             log.exception(f"Scheduled slot error [{next_label}]: {e}")
 
 
+_seed_result: dict = {"seeded": 0, "reason": "startup not run"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from profit_monitor import monitor_loop
+    # Reconcile any seeded history BEFORE the loops start, so the weekly limit
+    # and Kelly see the full trade log on this instance's very first scan.
+    from auto_trader import seed_tradelog_from_env
+    global _seed_result
+    try:
+        _seed_result = seed_tradelog_from_env()
+    except Exception as e:
+        log.exception(f"Trade log seeding failed: {e}")
+        _seed_result = {"error": str(e)}
     tasks = [
         asyncio.create_task(_premarket_loop()),
         asyncio.create_task(_scheduled_trade_loop()),
@@ -662,6 +674,7 @@ def health():
         "mode":           ALPACA_MODE,
         "key_configured": bool(ALPACA_API_KEY),
         "telegram_configured": tg_configured(),
+        "tradelog_seed": _seed_result,
         "state": {
             "data_dir":       str(_DATA_DIR),
             "persistent":     _persistent,

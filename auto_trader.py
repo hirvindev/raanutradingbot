@@ -462,3 +462,49 @@ class AutoTrader:
 
 # Module-level singleton
 trader = AutoTrader()
+
+
+def seed_tradelog_from_env() -> dict:
+    """
+    One-shot reconciliation: merge TRADELOG_SEED (a JSON array of trade-log
+    entries) into the persistent log, skipping anything already present.
+
+    Exists because a local server and the deployed one traded the same Alpaca
+    account while keeping separate logs, so each instance's history was
+    invisible to the other — positions showed as untagged, strategy stats were
+    split, and Kelly's sample never grew. Idempotent by
+    (timestamp, ticker, action), so leaving the variable set is harmless; unset
+    it once the merge is confirmed.
+    """
+    raw = os.getenv("TRADELOG_SEED", "").strip()
+    if not raw:
+        return {"seeded": 0, "skipped": 0, "reason": "TRADELOG_SEED not set"}
+    try:
+        incoming = json.loads(raw)
+        if not isinstance(incoming, list):
+            raise ValueError("TRADELOG_SEED must be a JSON array")
+    except Exception as e:
+        log.error(f"TRADELOG_SEED ignored — could not parse: {e}")
+        return {"seeded": 0, "skipped": 0, "error": str(e)}
+
+    def _key(t):
+        return (t.get("timestamp"), (t.get("ticker") or "").upper(), t.get("action"))
+
+    existing = trader.tradelog.data.setdefault("trades", [])
+    seen = {_key(t) for t in existing}
+    added = 0
+    for t in incoming:
+        if not isinstance(t, dict) or not t.get("timestamp"):
+            continue
+        if _key(t) in seen:
+            continue
+        seen.add(_key(t))
+        existing.append(t)
+        added += 1
+
+    if added:
+        existing.sort(key=lambda t: t.get("timestamp") or "")
+        trader.tradelog.save()
+    log.info(f"TRADELOG_SEED: merged {added} new entries, "
+             f"{len(incoming) - added} already present, total now {len(existing)}")
+    return {"seeded": added, "skipped": len(incoming) - added, "total": len(existing)}
