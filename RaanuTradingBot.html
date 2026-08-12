@@ -71,8 +71,6 @@ tbody tr:hover{background:#fcfcfc}
 .sym{font-weight:500;color:var(--head)}
 .sub{font-size:11px;color:var(--muted);font-weight:400}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
-.lots{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:2px;
-       padding:1px 5px;margin-left:7px;vertical-align:1px;white-space:nowrap;cursor:help}
 .empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:12px}
 
 .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
@@ -193,8 +191,8 @@ details .inner{padding:0 18px 16px}
 
     <div class="card scroll" id="closedWrap">
       <table>
-        <thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>
-        <tbody id="closed"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
+        <thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th><th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>
+        <tbody id="closed"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
       </table>
     </div>
 
@@ -474,16 +472,17 @@ function renderOrders(){
     }
     el('closed').innerHTML = groups.length ? groups.map(r=>`<tr>
         <td class="mut">${r.sell_date?new Date(r.sell_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—'}</td>
-        <td><span class="sym">${r.symbol}</span>${r.n>1
-            ? `<span class="lots" title="${r.n} separate buy lots closed by one sell, all filled at the same price">×${r.n} lots</span>`
-            : ''}</td>
+        <td><span class="sym">${r.symbol}</span></td>
         <td>${tag(sof(r))}</td>
+        <td class="num${r.n>1?'':' mut'}"${r.n>1
+            ? ` title="${r.n} buy lots closed by one sell — quantity and P&L are their total, buy and sell are size-weighted"`
+            : ''}>${r.n}</td>
         <td class="num">${r.qty.toFixed(2)}</td>
         <td class="num">${money(r.buy_price||0)}</td>
         <td class="num">${money(r.sell_price||0)}</td>
         <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
         <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`).join('')
-      : `<tr><td class="empty" colspan="8">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
+      : `<tr><td class="empty" colspan="9">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
     // Say so when rows were merged, or the row count contradicts the strip.
     const merged = shown.length - groups.length;
     el('oTotS').textContent = (S.filt==='all'?'All strategies':STRAT[S.filt].n)
