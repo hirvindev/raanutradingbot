@@ -95,6 +95,12 @@ tbody tr:hover{background:var(--wash)}
 .dgroup td{background:var(--wash);border-bottom:1px solid var(--line);cursor:pointer;
            font-weight:500;color:var(--head);padding-top:9px;padding-bottom:9px;user-select:none}
 .dgroup:hover td{background:#f2ecfc}
+/* Strategy sits one level below the day: same affordance, quieter, indented so
+   the three levels read as a hierarchy rather than as three kinds of header. */
+.sgroup td{background:transparent;border-bottom:1px solid var(--line);cursor:pointer;
+           font-weight:500;color:var(--head);padding-top:7px;padding-bottom:7px;
+           user-select:none;padding-left:26px}
+.sgroup:hover td{background:var(--wash)}
 .dmeta{font-weight:400;font-size:11px;color:var(--muted);margin-left:9px}
 .chev{display:inline-block;width:9px;margin-right:8px;color:var(--muted);font-size:9px}
 .chev:before{content:"\25B8"}
@@ -237,12 +243,7 @@ details .inner{padding:0 18px 16px}
 
     <div id="closedWrap"><div class="card"><div class="empty">Loading…</div></div></div>
 
-    <div class="card scroll" id="ordWrap" style="display:none">
-      <table>
-        <thead><tr><th>Time</th><th>Instrument</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Status</th></tr></thead>
-        <tbody id="orders"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
-      </table>
-    </div>
+    <div id="ordWrap" style="display:none"><div class="card"><div class="empty">Loading…</div></div></div>
   </section>
 
   <!-- ─────────── SIGNALS ─────────── -->
@@ -300,8 +301,11 @@ details .inner{padding:0 18px 16px}
 <script>
 const API = location.origin;
 const S = {pos:[], orders:[], cfg:{}, cmp:{}, exit:{}, view:'closed', filt:'all',
-           // days the user has collapsed; survives the 30s refresh
-           closedDays:new Set(), closedMonths:new Set()};
+           // levels the user has collapsed; survives the 30s refresh
+           closedDays:new Set(), closedMonths:new Set(), closedStrats:new Set(),
+           // the order log groups on its own dates (placed, not closed), so it
+           // needs its own collapse state or the two views fight each other
+           ordDays:new Set(), ordMonths:new Set(), ordStrats:new Set()};
 
 const money  = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed = n => (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -313,6 +317,18 @@ const j = async p => { try{ const r = await fetch(API+p); return r.ok ? await r.
 const STRAT = {s1:{n:'S1 Pullback',s:'S1',c:'var(--s1)'}, s2:{n:'S2 Breakout',s:'S2',c:'var(--s2)'},
                s3:{n:'S3 Leader Dip',s:'S3',c:'var(--s3)'}, manual:{n:'Manual',s:'MAN',c:'var(--muted)'}};
 const sof = o => STRAT[(o.strategy||'').toLowerCase()] ? (o.strategy||'').toLowerCase() : '';
+// Strategy groups sort in strategy order, not alphabetically; anything
+// unrecognised (including untagged) sorts last. Used by both order views.
+const SORDER = ['s1','s2','s3'];
+// Instrument cell: company name leads, ticker underneath. get_ticker_name()
+// falls back to the symbol when Alpaca has no name for it, so guard against
+// rendering the ticker twice.
+const instrument = r => {
+  const sym = r.symbol || r.ticker || '—', name = r.name;
+  return name && name !== sym
+    ? `<span class="sym">${name}</span><div class="sub">${sym}</div>`
+    : `<span class="sym">${sym}</span>`;
+};
 function tag(k){
   const s = STRAT[k];
   // "Untagged" is written out rather than shown as a dash: an unattributed
@@ -467,24 +483,36 @@ el('ordTabs').addEventListener('click', e=>{
   document.querySelectorAll('#ordTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
   renderOrders();
 });
-// One delegated listener on the container: month boxes and their day rows are
+// Which collapse sets the active view is driving. Both views nest
+// month → day → strategy; they differ only in what they group and summarise.
+const collapseSets = () => S.view==='closed'
+  ? {m:S.closedMonths, d:S.closedDays, s:S.closedStrats}
+  : {m:S.ordMonths,    d:S.ordDays,    s:S.ordStrats};
+
+const toggle = (set, k) => { set.has(k) ? set.delete(k) : set.add(k); renderOrders(); };
+
+// One delegated listener per container: month boxes and their day rows are
 // re-rendered wholesale, so binding per element would leak handlers.
-el('closedWrap').addEventListener('click', e=>{
-  const mh = e.target.closest('.mhead');
-  if(mh){ const m = mh.dataset.month;
-    S.closedMonths.has(m) ? S.closedMonths.delete(m) : S.closedMonths.add(m);
-    return renderOrders(); }
-  const dh = e.target.closest('.dgroup');
-  if(dh){ const d = dh.dataset.day;
-    S.closedDays.has(d) ? S.closedDays.delete(d) : S.closedDays.add(d);
-    return renderOrders(); }
-});
+for(const id of ['closedWrap','ordWrap']){
+  el(id).addEventListener('click', e=>{
+    const C = collapseSets();
+    const mh = e.target.closest('.mhead');
+    if(mh) return toggle(C.m, mh.dataset.month);
+    const dh = e.target.closest('.dgroup');
+    if(dh) return toggle(C.d, dh.dataset.day);
+    const sh = e.target.closest('.sgroup');
+    // keyed day|strategy — the same strategy on two days collapses
+    // independently, so opening one day does not reopen another
+    if(sh) return toggle(C.s, sh.dataset.sg);
+  });
+}
 el('collapseAll').addEventListener('click', () => {
   const months = JSON.parse(el('collapseAll').dataset.months || '[]');
-  if(months.length && S.closedMonths.size >= months.length){
-    S.closedMonths.clear(); S.closedDays.clear();   // expanding means fully open
+  const C = collapseSets();
+  if(months.length && C.m.size >= months.length){
+    C.m.clear(); C.d.clear(); C.s.clear();   // expanding means fully open
   } else {
-    months.forEach(m=>S.closedMonths.add(m));
+    months.forEach(m=>C.m.add(m));
   }
   renderOrders();
 });
@@ -577,7 +605,7 @@ function renderOrders(){
 
     const tradeRow = r => `<tr>
         <td></td>
-        <td><span class="sym">${r.symbol}</span></td>
+        <td>${instrument(r)}</td>
         <td>${tag(sof(r))}</td>
         <td class="num${r.n>1?'':' mut'}"${r.n>1
             ? ` title="${r.n} buy lots closed by one sell — quantity and P&L are their total, buy and sell are size-weighted"`
@@ -590,6 +618,37 @@ function renderOrders(){
 
     const HEAD = `<thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th>
         <th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>`;
+
+    // Third level: strategy within the day. Skipped when the tabs already
+    // filter to one strategy — every group would carry the same label, which
+    // is a row of chrome that says nothing.
+    const dayBody = (d, rs) => {
+      if(S.filt !== 'all') return rs.map(tradeRow).join('');
+      const keys = [], by = new Map();
+      for(const r of rs){
+        const k = sof(r) || 'untagged';
+        if(!by.has(k)){ by.set(k, []); keys.push(k); }
+        by.get(k).push(r);
+      }
+      keys.sort((a,b)=>{
+        const ia = SORDER.indexOf(a), ib = SORDER.indexOf(b);
+        return (ia<0?99:ia) - (ib<0?99:ib) || a.localeCompare(b);
+      });
+      return keys.map(k=>{
+        const g    = by.get(k);
+        const key  = d+'|'+k;
+        const open = !S.closedStrats.has(key);
+        const net  = g.reduce((a,r)=>a+r.pnl, 0);
+        const wins = g.filter(r=>r.pnl>0).length;
+        const name = (STRAT[k]||{}).n || 'Untagged';
+        const head = `<tr class="sgroup" data-sg="${key}">
+          <td colspan="5"><span class="chev${open?' open':''}"></span><span
+              style="border-left:3px solid ${(STRAT[k]||{}).c||'var(--muted)'};padding-left:8px">${name}</span>
+            <span class="dmeta">${g.length} position${g.length===1?'':'s'} · ${wins}W/${g.length-wins}L</span></td>
+          <td colspan="4" class="num ${cls(net)}" style="font-weight:500">${signed(net)}</td></tr>`;
+        return head + (open ? g.map(tradeRow).join('') : '');
+      }).join('');
+    };
 
     el('closedWrap').innerHTML = months.length ? months.map(m=>{
       const M    = byMonth.get(m);
@@ -612,7 +671,7 @@ function renderOrders(){
           <td colspan="5"><span class="chev${open?' open':''}"></span>${label}
             <span class="dmeta">${rs.length} position${rs.length===1?'':'s'}${dlot>rs.length?` · ${dlot} lots`:''}</span></td>
           <td colspan="4" class="num ${cls(dnet)}" style="font-weight:500">${signed(dnet)}</td></tr>`;
-        return head + (open ? rs.map(tradeRow).join('') : '');
+        return head + (open ? dayBody(d, rs) : '');
       }).join('');
 
       return `<div class="mbox">
@@ -635,19 +694,156 @@ function renderOrders(){
     el('oTotS').textContent = (S.filt==='all'?'All strategies':STRAT[S.filt].n)
       + (merged>0 ? ` · ${groups.length} rows` : '');
   } else {
-    const o = S.filt==='all' ? S.orders : S.orders.filter(x=>(x.strategy||'')===S.filt);
-    el('orders').innerHTML = o.length ? o.slice(0,300).map(x=>{
+    // Same month → day → strategy nesting as the closed view. The order log
+    // groups on when the order was PLACED, not when a trade closed, so the two
+    // views bucket different dates and keep separate collapse state.
+    const o = (S.filt==='all' ? S.orders : S.orders.filter(x=>(x.strategy||'')===S.filt))
+      .slice(0, 300);
+
+    // Day derived in local time, because the Time column renders local — using
+    // the raw ISO date would file a late-evening order under the next day.
+    const dayOf = x => {
+      const d = x.created_at ? new Date(x.created_at) : null;
+      if(!d || isNaN(d)) return 'unknown';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+    // An order's value is its size, NOT a gain or a loss — a $2,500 buy is not
+    // a $2,500 loss. Signing it by side and colouring it green/red (an earlier
+    // attempt at this view) made every buy look like a loss and made the month
+    // totals disagree with the Closed P&L tab, because cash flow and profit are
+    // different quantities. Green and red on this page now mean exactly one
+    // thing, the same thing they mean everywhere else in the app: profit and
+    // loss. Order size is neutral.
+    const valOf = x => {
       const q=parseFloat(x.filled_qty||x.qty||0), p=parseFloat(x.filled_avg_price||x.limit_price||0);
+      return p&&q ? p*q : 0;
+    };
+    const meta = rs => {
+      const b = rs.filter(x=>x.side==='buy').length;
+      return `${rs.length} order${rs.length===1?'':'s'} · ${b} bought / ${rs.length-b} sold`;
+    };
+
+    // Capital deployed — BUYS ONLY. Adding sells too counts the same position
+    // twice: $500 into DLTR that came back as $983 is not $1,483 of trading,
+    // it is $500 of capital used once. The old "traded" total summed both sides
+    // and so ran to roughly double the money that was ever actually committed.
+    const deployed = rs => rs.reduce((a,x)=> x.side==='buy' ? a + valOf(x) : a, 0);
+
+    // Realised P&L for a month, read from the SAME matched round-trips the
+    // Closed P&L tab uses and keyed on the sell date, because that is when a
+    // result is booked. Computed this way the two tabs report the same number
+    // for the same month — which is the whole point of showing it here.
+    // Deliberately month-level only: an order log's day is the day the order
+    // was PLACED, and a position bought on one day and sold on another would
+    // make a day-level profit figure meaningless.
+    const closedRows = allClosed();
+    const realised = mprefix => closedRows.reduce((a,r)=>
+      String(r.sell_date||'').startsWith(mprefix)
+      && (S.filt==='all' || (r.strategy||'')===S.filt) ? a + (r.pnl||0) : a, 0);
+
+    const oMonths = [], oByMonth = new Map();
+    for(const x of o){
+      const d = dayOf(x), m = d==='unknown' ? 'unknown' : d.slice(0,7);
+      if(!oByMonth.has(m)){ oByMonth.set(m, {days:[], byDay:new Map()}); oMonths.push(m); }
+      const M = oByMonth.get(m);
+      if(!M.byDay.has(d)){ M.byDay.set(d, []); M.days.push(d); }
+      M.byDay.get(d).push(x);
+    }
+
+    const oRow = x => {
+      const q=parseFloat(x.filled_qty||x.qty||0), p=parseFloat(x.filled_avg_price||x.limit_price||0);
+      // Side is direction, not outcome — weight distinguishes it instead of
+      // colour, so nothing on this page competes with green-means-profit.
       return `<tr>
         <td class="mut">${x.created_at?new Date(x.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
-        <td><span class="sym">${x.symbol||'—'}</span></td>
+        <td>${instrument(x)}</td>
         <td>${tag(sof(x))}</td>
-        <td class="${x.side==='buy'?'':'mut'}">${(x.side||'').toUpperCase()}</td>
+        <td class="${x.side==='buy'?'':'mut'}" style="font-weight:${x.side==='buy'?600:400}">${(x.side||'').toUpperCase()}</td>
         <td class="num">${q.toFixed(2)}</td>
         <td class="num">${p?money(p):'—'}</td>
         <td class="num">${p&&q?money(p*q):'—'}</td>
         <td class="mut">${x.status||'—'}</td></tr>`;
-    }).join('') : '<tr><td class="empty" colspan="8">No orders</td></tr>';
+    };
+
+    const OHEAD = `<thead><tr><th>Time</th><th>Instrument</th><th>Strategy</th><th>Side</th>
+        <th>Qty</th><th>Price</th><th>Order value</th><th>Status</th></tr></thead>`;
+
+    const oDayBody = (d, rs) => {
+      if(S.filt !== 'all') return rs.map(oRow).join('');
+      const keys = [], by = new Map();
+      for(const x of rs){
+        const k = sof(x) || 'untagged';
+        if(!by.has(k)){ by.set(k, []); keys.push(k); }
+        by.get(k).push(x);
+      }
+      keys.sort((a,b)=>{
+        const ia = SORDER.indexOf(a), ib = SORDER.indexOf(b);
+        return (ia<0?99:ia) - (ib<0?99:ib) || a.localeCompare(b);
+      });
+      return keys.map(k=>{
+        const g    = by.get(k);
+        const key  = d+'|'+k;
+        const open = !S.ordStrats.has(key);
+        const name = (STRAT[k]||{}).n || 'Untagged';
+        return `<tr class="sgroup" data-sg="${key}">
+          <td colspan="5"><span class="chev${open?' open':''}"></span><span
+              style="border-left:3px solid ${(STRAT[k]||{}).c||'var(--muted)'};padding-left:8px">${name}</span>
+            <span class="dmeta">${meta(g)}</span></td>
+          <td colspan="3" class="num mut">${money(deployed(g))}</td></tr>`
+          + (open ? g.map(oRow).join('') : '');
+      }).join('');
+    };
+
+    // The colour coding is not self-evident on an order log the way it is on a
+    // P&L table, so it is stated rather than left to be inferred.
+    const LEGEND = `<div class="mut" style="font-size:11.5px;margin:0 2px 10px">
+        <b>Deployed</b> is capital put to work — the total spent on buys. Sells
+        are not added in, or a position would be counted twice: $500 into a
+        stock that came back as $983 is $500 used, not $1,483 traded.
+        <b>Realised</b> is the profit or loss actually booked from positions
+        closed that month, and matches the Closed P&amp;L tab. Only Realised is
+        ever green or red — order size is neither a gain nor a loss.</div>`;
+
+    el('ordWrap').innerHTML = oMonths.length ? LEGEND + oMonths.map(m=>{
+      const M     = oByMonth.get(m);
+      const all   = M.days.flatMap(d=>M.byDay.get(d));
+      const mOpen = !S.ordMonths.has(m);
+      const mLabel = m==='unknown' ? 'Unknown date'
+        : new Date(m+'-01T00:00:00').toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+
+      const body = M.days.map(d=>{
+        const rs   = M.byDay.get(d);
+        const open = !S.ordDays.has(d);
+        const label = d==='unknown' ? 'Unknown date'
+          : new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+        return `<tr class="dgroup" data-day="${d}">
+          <td colspan="5"><span class="chev${open?' open':''}"></span>${label}
+            <span class="dmeta">${meta(rs)}</span></td>
+          <td colspan="3" class="num mut" style="font-weight:500">${money(deployed(rs))}</td></tr>`
+          + (open ? oDayBody(d, rs) : '');
+      }).join('');
+
+      return `<div class="mbox">
+        <div class="mhead" data-month="${m}">
+          <span class="chev${mOpen?' open':''}"></span>
+          <span class="mname">${mLabel}</span>
+          <span class="dmeta">${meta(all)}</span>
+          <span class="dmeta" style="margin-left:auto"
+                title="Total spent on buys. Sells are not added in — the same position would be counted twice.">${money(deployed(all))} deployed</span>
+          <span class="dmeta">Realised</span>
+          <span class="num ${realised(m)?cls(realised(m)):'mut'}"
+                style="font-weight:500;min-width:88px;text-align:right"
+                ${realised(m)?'':'title="Nothing was closed in this month, so nothing was booked"'}
+          >${realised(m)?signed(realised(m)):'$0.00'}</span>
+        </div>
+        ${mOpen ? `<div class="scroll"><table>${OHEAD}<tbody>${body}</tbody></table></div>` : ''}
+      </div>`;
+    }).join('')
+      : `<div class="card"><div class="empty">${S.filt==='all'?'No orders':STRAT[S.filt].n+' has no orders'}</div></div>`;
+
+    const allCollapsed = oMonths.length && S.ordMonths.size >= oMonths.length;
+    el('collapseAll').textContent = allCollapsed ? 'Expand all' : 'Collapse all';
+    el('collapseAll').dataset.months = JSON.stringify(oMonths);
   }
 }
 

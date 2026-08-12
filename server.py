@@ -201,8 +201,12 @@ def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
 
 
 def _is_trade_day() -> bool:
-    """Alternates every calendar day in Berlin time — True today means skip tomorrow."""
-    return datetime.now(BERLIN).toordinal() % 2 == 0
+    """Alternates every calendar day in market time — True today means skip tomorrow.
+
+    Anchored to ET like the slots themselves; on a Berlin clock the alternation
+    would flip a day early for any slot that crossed midnight in Europe.
+    """
+    return datetime.now(US_EAST).toordinal() % 2 == 0
 
 
 async def _run_scan_and_cache_s3() -> list:
@@ -304,8 +308,12 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
 
     # Never place more orders than the weekly budget still allows — the budget
     # is per strategy, so this must not read the global WEEKLY_TRADE_LIMIT.
+    # BUYs only — exits are logged with the same strategy tag and must not eat
+    # the opening budget (see TradeLog.trades_in_last_7_days).
     from auto_trader import weekly_limit_for
-    remaining = weekly_limit_for(strategy) - len(trader.tradelog.trades_in_last_7_days(strategy=strategy))
+    remaining = weekly_limit_for(strategy) - len(
+        trader.tradelog.trades_in_last_7_days(strategy=strategy, action="BUY")
+    )
     n_orders  = min(n_orders, max(0, remaining))
 
     # ── Position sizing: Kelly-scaled risk budget ────────────────────────────
@@ -480,13 +488,29 @@ async def _premarket_scan_and_notify():
 
 # Schedule slots:
 #   03:30 ET  — pre-market scan + Telegram alert (scan only, no orders)
-#   07:00 Berlin — scan + execute top 2 orders  (alternating days)
-#   14:30 Berlin — scan + execute top 1 order   (alternating days)
+#   09:35 ET  — scan + execute top 2 orders  (alternating days)
+#   11:00 ET  — scan + execute top 1 order   (alternating days)
 
-# Trade slots run in Berlin time
-_BERLIN_SLOTS = [
-    (7,  0,  2, "Morning-7am"),
-    (14, 30, 1, "Afternoon-2:30pm"),
+# Trade slots run in US/Eastern — the same clock the market keeps.
+#
+# They used to be Berlin times (07:00 and 14:30), which are 01:00 and 08:30 ET:
+# BOTH sat outside the 09:30–16:00 session, so _execute_scheduled_trades() hit
+# its market-hours gate every time and fell through to scan-only. That is why
+# picks were cached daily and S3 never placed a single order.
+#
+# 09:35 is the primary slot because the backtest fills signals at the NEXT day's
+# OPEN — trading five minutes after the bell is the only entry timing its
+# results describe. The five-minute delay avoids the opening auction's spread
+# without meaningfully departing from that assumption. 11:00 is a second chance
+# for days when the first slot is blocked (all picks already held, Kelly
+# standing aside), still well inside the session.
+#
+# Expressed in ET rather than Berlin on purpose: Europe and the US switch DST on
+# different dates, so a Berlin-anchored slot drifts by an hour twice a year
+# against the only clock that matters here.
+_ET_SLOTS = [
+    (9,  35, 2, "Open-9:35"),
+    (11, 0,  1, "Midday-11am"),
 ]
 
 # Pre-market slot runs in US/Eastern time
@@ -518,16 +542,16 @@ async def _premarket_loop():
 
 async def _scheduled_trade_loop():
     """
-    Fires at 07:00 and 14:30 Berlin time on alternating calendar days.
+    Fires at 09:35 and 11:00 ET on alternating calendar days.
     Non-trade days: scans and caches picks but places no orders.
     """
-    log.info("Scheduled trade loop started — 7:00 AM and 2:30 PM Berlin on alternating days")
+    log.info("Scheduled trade loop started — 9:35 AM and 11:00 AM ET on alternating days")
     asyncio.create_task(_run_scan_and_cache())  # immediate startup scan
 
     while True:
-        now     = datetime.now(BERLIN)
+        now     = datetime.now(US_EAST)
         targets = []
-        for h, m, n_orders, label in _BERLIN_SLOTS:
+        for h, m, n_orders, label in _ET_SLOTS:
             t = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if now >= t:
                 t += timedelta(days=1)
@@ -901,10 +925,35 @@ async def portfolio():
     return out
 
 
+async def _annotate_names(rows: list) -> list:
+    """Attach `name` to any row carrying a `symbol`.
+
+    Alpaca's order payload has no company name, so the dashboard's Instrument
+    column could only ever show a bare ticker. Names come from the same
+    process-cached /v2/assets map the scanner uses, so the cost is one fetch per
+    process rather than one per row — but that first fetch is blocking httpx,
+    hence the thread.
+    """
+    def _work():
+        from scanner import get_ticker_name
+        for r in rows:
+            sym = r.get("symbol")
+            if sym:
+                r["name"] = get_ticker_name(sym)
+        return rows
+    try:
+        return await asyncio.to_thread(_work)
+    except Exception as e:
+        log.warning(f"Could not attach company names: {e}")
+        return rows
+
+
 @app.get("/api/orders")
 async def orders():
     """Open/pending orders."""
-    return await alpaca_get("/orders", params={"status": "open", "limit": 100})
+    return await _annotate_names(
+        await alpaca_get("/orders", params={"status": "open", "limit": 100})
+    )
 
 
 @app.get("/api/history/orders")
@@ -916,7 +965,7 @@ async def history_orders(limit: int = 50):
         # Attributed as of the order's own time — see _strategy_resolver().
         o["strategy"] = resolve_strat(o.get("symbol"),
                                       o.get("filled_at") or o.get("created_at"))
-    return orders
+    return await _annotate_names(orders)
 
 
 class OrderRequest(BaseModel):
@@ -1636,7 +1685,7 @@ async def strategy_compare():
         o["strategy"] = resolve_strat(o.get("symbol"),
                                       o.get("filled_at") or o.get("created_at"))
 
-    round_trips = match_closed_trades(closed_orders)
+    round_trips = await _annotate_names(match_closed_trades(closed_orders))
 
     def _strategy_stats(strat: str) -> dict:
         trades = [t for t in all_trades if t.get("strategy") == strat]
@@ -1805,7 +1854,7 @@ if __name__ == "__main__":
     print(f"  API key:       {'configured ✓' if ALPACA_API_KEY else 'NOT SET — edit .env'}")
     print(f"  Dashboard:     http://localhost:8000")
     print(f"  Pre-market:    03:30 ET daily — scan + Telegram alert (no orders)")
-    print(f"  Trade slots:   07:00 Berlin — top 2 orders | 14:30 Berlin — top 1 order")
+    print(f"  Trade slots:   09:35 ET — top 2 orders | 11:00 ET — top 1 order")
     print(f"                 Alternating days (trade / rest / trade / rest...)")
     print(f"  Weekly limit:  S1 {weekly_limit_for('s1')} | "
           f"S2 {weekly_limit_for('s2')} | S3 {weekly_limit_for('s3')} trades/week")

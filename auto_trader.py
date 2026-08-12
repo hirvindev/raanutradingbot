@@ -104,7 +104,16 @@ class TradeLog:
         except Exception as e:
             log.error(f"Failed to write trade log: {e}")
 
-    def trades_in_last_7_days(self, strategy: Optional[str] = None):
+    def trades_in_last_7_days(self, strategy: Optional[str] = None,
+                              action: Optional[str] = None):
+        """Log entries inside the rolling 7-day window.
+
+        `action` filters by BUY/SELL. The weekly limit budgets *new orders*, so
+        every limit check must pass action="BUY": exits land in the same log,
+        tagged with the strategy they were opened under, and without this filter
+        a closed round-trip consumed the opening budget. With
+        WEEKLY_TRADE_LIMIT_S2=1 a single exit locked S2 out for a whole week.
+        """
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         out = []
         for t in self.data.get("trades", []):
@@ -115,13 +124,15 @@ class TradeLog:
                 if ts > cutoff:
                     if strategy and t.get("strategy") != strategy:
                         continue
+                    if action and (t.get("action") or "BUY").upper() != action.upper():
+                        continue
                     out.append(t)
             except Exception:
                 continue
         return out
 
     def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
-        recent = self.trades_in_last_7_days(strategy=strategy)
+        recent = self.trades_in_last_7_days(strategy=strategy, action="BUY")
         label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
         limit = weekly_limit_for(strategy)   # per strategy, not the global cap
         if len(recent) >= limit:
@@ -318,7 +329,14 @@ class AutoTrader:
         log.info(f"[auto:{kind}] {msg}")
 
     def status(self) -> dict:
-        recent = self.tradelog.trades_in_last_7_days()
+        recent = self.tradelog.trades_in_last_7_days()          # display: buys + sells
+        buys_by_strat = {
+            s: len(self.tradelog.trades_in_last_7_days(strategy=s, action="BUY"))
+            for s in ("s1", "s2", "s3")
+        }
+        remaining_by_strat = {
+            s: max(0, weekly_limit_for(s) - n) for s, n in buys_by_strat.items()
+        }
         return {
             "enabled": self.enabled,
             "config": {
@@ -334,8 +352,13 @@ class AutoTrader:
                 "scan_interval_sec":  SCAN_INTERVAL_SEC,
                 "watchlist":          WATCHLIST,
             },
-            "trades_this_week":           len(recent),
-            "trades_remaining_this_week": max(0, WEEKLY_TRADE_LIMIT - len(recent)),
+            # Budgets count BUYs only, and they are per strategy — comparing an
+            # all-strategy count against the global limit reported "0 remaining"
+            # while S3 still had its full allowance.
+            "trades_this_week":           sum(buys_by_strat.values()),
+            "trades_remaining_this_week": sum(remaining_by_strat.values()),
+            "trades_this_week_by_strategy":      buys_by_strat,
+            "trades_remaining_by_strategy":      remaining_by_strat,
             "recent_trades":   recent[-5:],
             "last_scan":       self.last_scan,
             "last_decision":   self.last_decision,
