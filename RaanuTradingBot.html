@@ -168,6 +168,109 @@ details .inner{padding:0 18px 16px}
   .srow{grid-template-columns:1fr 1fr} .g2{grid-template-columns:1fr} nav{gap:14px}
   nav a{font-size:12px} .logo{display:none}
 }
+
+/* ───────────────────────── PHONE (<=560px) ─────────────────────────────────
+   The desktop layout survives narrow screens only by scrolling six tables
+   sideways inside .scroll — up to nine columns each, unusable one-handed. Here
+   every wide table becomes a stack of cards: the header row is dropped and each
+   cell prints its own label from data-label, so there is ONE rendering path in
+   the JS rather than a table plus a parallel mobile list to keep in sync.
+   Group rows (month / day / strategy) keep their single-line band shape, since
+   collapsing is the main way to navigate a long history on a phone.
+--------------------------------------------------------------------------- */
+@media(max-width:560px){
+  body{padding-bottom:64px}                    /* clear the fixed tab bar */
+  main{padding:14px 12px 24px}
+
+  /* Header keeps only the brand and status pills; navigation moves to the
+     bottom where a thumb can reach it. */
+  .hwrap{padding:0 14px;height:50px}
+  .logo{display:block;font-size:14px}
+  .pill{margin-left:8px;font-size:10px;padding:2px 6px}
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;gap:0;
+      display:flex;justify-content:space-around;background:var(--card);
+      border-top:1px solid var(--line);
+      /* Keeps the bar above the iPhone home indicator. */
+      padding-bottom:env(safe-area-inset-bottom,0);
+      box-shadow:0 -1px 4px rgba(105,65,198,.07)}
+  nav a{flex:1;text-align:center;font-size:10.5px;padding:11px 2px 9px;
+        border-bottom:0;border-top:2px solid transparent;min-height:44px}
+  nav a.on{border-bottom-color:transparent;border-top-color:var(--accent);background:var(--accent-bg)}
+
+  .strip{grid-template-columns:repeat(2,1fr)}
+  .stat{padding:13px 14px}
+  .stat .v{font-size:20px}                     /* the numbers are the point */
+
+  h2{font-size:13.5px}
+  .card,.mbox{border-radius:6px;margin-bottom:14px}
+
+  /* ── wide tables become cards ── */
+  /* width:100% deliberately NOT on td. A block-level td already fills its row,
+     and setting it explicitly makes flex-basis:auto resolve to the full row
+     width — which handed the group rows' money cell all 349px and crushed the
+     date into a 28px column. */
+  .cards table,.cards thead,.cards tbody,.cards tr{display:block;width:100%}
+  .cards td{display:block}
+  .cards thead{display:none}
+  .cards .scroll{overflow-x:visible}
+  .cards tbody tr{border-bottom:1px solid var(--line);padding:4px 0}
+  .cards tbody tr:last-child{border-bottom:0}
+  .cards tbody tr:hover{background:transparent}
+  .cards td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+            border-bottom:0;padding:5px 14px;text-align:right;white-space:normal}
+  .cards td:before{content:attr(data-label);color:var(--muted);font-size:11px;
+                   text-transform:uppercase;letter-spacing:.4px;text-align:left;
+                   flex:0 0 auto;white-space:nowrap}
+  /* Instrument leads the card: full width, no label, larger. */
+  .cards td[data-label="Instrument"]{display:block;text-align:left;padding-top:11px;
+                                     font-size:14px}
+  .cards td[data-label="Instrument"]:before{content:none}
+  /* Cells carrying no data-label (the Closed P&L spacer, the Exit button) must
+     not render an empty labelled row. */
+  .cards td:not([data-label]){display:none}
+  .cards td.act{display:flex;justify-content:flex-end;padding:6px 14px 11px}
+  .cards td.act:before{content:none}
+  .cards td.reason{display:block;text-align:left;color:var(--muted);
+                   max-width:none;padding-bottom:11px}
+  .cards td.empty{display:block;text-align:center}
+  .cards td.empty:before{content:none}
+
+  /* Group rows stay bands, not cards — label left, figure right, one line.
+     Both cells get an explicit flex: these are <td>s with colspan, and their
+     intrinsic table sizing otherwise leaks into the flex basis and hands the
+     money cell most of the row (measured: 274px of a 349px row for "-$52.88",
+     squeezing the date into three wrapped lines). */
+  /* The band colour moves to the ROW. On the cells it left a white notch behind
+     the shorter money cell, which does not fill the taller row. */
+  .cards tr.dgroup{display:flex;align-items:center;padding:0;background:var(--wash);
+                   border-bottom:1px solid var(--line)}
+  .cards tr.sgroup{display:flex;align-items:center;padding:0;background:transparent;
+                   border-bottom:1px solid var(--line)}
+  .cards tr.dgroup td,.cards tr.sgroup td{display:block;padding:12px 14px;
+                                          background:transparent;
+                                          border-bottom:0;min-height:0}
+  .cards tr.dgroup td:before,.cards tr.sgroup td:before{content:none}
+  .cards tr.dgroup td:first-child,.cards tr.sgroup td:first-child{
+      flex:1 1 auto;min-width:0;text-align:left}
+  .cards tr.dgroup td:last-child,.cards tr.sgroup td:last-child{
+      flex:0 0 auto;text-align:right;white-space:nowrap}
+  .cards tr.sgroup td:first-child{padding-left:22px}
+  .dmeta{display:block;margin-left:0;margin-top:2px}
+
+  /* Month header: same treatment, and it must wrap rather than squash since it
+     carries a name, a meta line and two figures. */
+  .mhead{flex-wrap:wrap;row-gap:2px}
+  .mhead .dmeta{flex:1 1 100%;order:3}
+  .mhead .num{margin-left:auto;order:2;white-space:nowrap}
+
+  /* ── finger-sized hit areas ── */
+  .mhead{padding:14px 14px;min-height:44px}
+  .mhead .num{margin-left:auto}
+  .tabs{gap:16px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .tab{padding:13px 0;white-space:nowrap}
+  .chip,.btn{padding:10px 14px;min-height:40px}
+  .bar{gap:6px}
+}
 </style>
 
 <header>
@@ -204,7 +307,7 @@ details .inner{padding:0 18px 16px}
     </div>
 
     <h2>Positions <em id="poscount"></em></h2>
-    <div class="card scroll">
+    <div class="card scroll cards">
       <table>
         <thead><tr><th>Instrument</th><th>Strategy</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Value</th><th>P&amp;L</th><th>Chg</th><th></th></tr></thead>
         <tbody id="pos"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
@@ -241,9 +344,9 @@ details .inner{padding:0 18px 16px}
       <span class="chip" id="collapseAll">Collapse all</span>
     </div>
 
-    <div id="closedWrap"><div class="card"><div class="empty">Loading…</div></div></div>
+    <div id="closedWrap" class="cards"><div class="card"><div class="empty">Loading…</div></div></div>
 
-    <div id="ordWrap" style="display:none"><div class="card"><div class="empty">Loading…</div></div></div>
+    <div id="ordWrap" class="cards" style="display:none"><div class="card"><div class="empty">Loading…</div></div></div>
   </section>
 
   <!-- ─────────── SIGNALS ─────────── -->
@@ -254,7 +357,7 @@ details .inner{padding:0 18px 16px}
       <span class="chip mut" id="scanStat">Idle</span>
     </div>
     <div class="prog" id="prog"><i></i></div>
-    <div class="card scroll">
+    <div class="card scroll cards">
       <table>
         <thead><tr><th>Instrument</th><th>Score</th><th>Price</th><th>RSI</th><th>1M</th><th>3M</th><th>vs SPY</th><th>Signal</th></tr></thead>
         <tbody id="sig"><tr><td class="empty" colspan="8">Run a scan to see candidates</td></tr></tbody>
@@ -423,16 +526,19 @@ function renderPos(){
       const ltp=p.currentPrice??p.averagePrice, pl=p.ppl??(ltp-p.averagePrice)*p.quantity;
       const ch=((ltp-p.averagePrice)/p.averagePrice)*100, val=ltp*p.quantity;
       const nm=p.name&&p.name!==p.ticker?`<div class="sub">${p.name}</div>`:'';
+      // data-label drives the phone layout: under 560px the table collapses to
+      // cards and each cell prints its own header from this attribute, so there
+      // is one rendering path rather than a desktop table plus a mobile list.
       return `<tr>
-        <td><span class="sym">${p.ticker}</span>${nm}</td>
-        <td>${tag(sof(p))}</td>
-        <td class="num">${p.quantity.toFixed(2)}</td>
-        <td class="num">${money(p.averagePrice)}</td>
-        <td class="num">${money(ltp)}</td>
-        <td class="num">${money(val)}</td>
-        <td class="num ${cls(pl)}">${signed(pl)}</td>
-        <td class="num ${cls(ch)}">${pct(ch)}</td>
-        <td><button class="btn danger sm" data-close="${p.ticker}" data-qty="${p.quantity}">Exit</button></td>
+        <td data-label="Instrument"><span class="sym">${p.ticker}</span>${nm}</td>
+        <td data-label="Strategy">${tag(sof(p))}</td>
+        <td data-label="Qty" class="num">${p.quantity.toFixed(2)}</td>
+        <td data-label="Avg" class="num">${money(p.averagePrice)}</td>
+        <td data-label="LTP" class="num">${money(ltp)}</td>
+        <td data-label="Value" class="num">${money(val)}</td>
+        <td data-label="P&amp;L" class="num ${cls(pl)}">${signed(pl)}</td>
+        <td data-label="Chg" class="num ${cls(ch)}">${pct(ch)}</td>
+        <td class="act"><button class="btn danger sm" data-close="${p.ticker}" data-qty="${p.quantity}">Exit</button></td>
       </tr>`;
     }).join('');
 }
@@ -605,17 +711,17 @@ function renderOrders(){
     }
 
     const tradeRow = r => `<tr>
-        <td></td>
-        <td>${instrument(r)}</td>
-        <td>${tag(sof(r))}</td>
-        <td class="num${r.n>1?'':' mut'}"${r.n>1
+        <td class="spacer"></td>
+        <td data-label="Instrument">${instrument(r)}</td>
+        <td data-label="Strategy">${tag(sof(r))}</td>
+        <td data-label="Lots" class="num${r.n>1?'':' mut'}"${r.n>1
             ? ` title="${r.n} buy lots closed by one sell — quantity and P&L are their total, buy and sell are size-weighted"`
             : ''}>${r.n}</td>
-        <td class="num">${r.qty.toFixed(2)}</td>
-        <td class="num">${money(r.buy_price||0)}</td>
-        <td class="num">${money(r.sell_price||0)}</td>
-        <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
-        <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
+        <td data-label="Qty" class="num">${r.qty.toFixed(2)}</td>
+        <td data-label="Buy" class="num">${money(r.buy_price||0)}</td>
+        <td data-label="Sell" class="num">${money(r.sell_price||0)}</td>
+        <td data-label="P&amp;L" class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
+        <td data-label="Return" class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
 
     const HEAD = `<thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th>
         <th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>`;
@@ -756,14 +862,14 @@ function renderOrders(){
       // Side is direction, not outcome — weight distinguishes it instead of
       // colour, so nothing on this page competes with green-means-profit.
       return `<tr>
-        <td class="mut">${x.created_at?new Date(x.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
-        <td>${instrument(x)}</td>
-        <td>${tag(sof(x))}</td>
-        <td class="${x.side==='buy'?'':'mut'}" style="font-weight:${x.side==='buy'?600:400}">${(x.side||'').toUpperCase()}</td>
-        <td class="num">${q.toFixed(2)}</td>
-        <td class="num">${p?money(p):'—'}</td>
-        <td class="num">${p&&q?money(p*q):'—'}</td>
-        <td class="mut">${x.status||'—'}</td></tr>`;
+        <td data-label="Time" class="mut">${x.created_at?new Date(x.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+        <td data-label="Instrument">${instrument(x)}</td>
+        <td data-label="Strategy">${tag(sof(x))}</td>
+        <td data-label="Side" class="${x.side==='buy'?'':'mut'}" style="font-weight:${x.side==='buy'?600:400}">${(x.side||'').toUpperCase()}</td>
+        <td data-label="Qty" class="num">${q.toFixed(2)}</td>
+        <td data-label="Price" class="num">${p?money(p):'—'}</td>
+        <td data-label="Order value" class="num">${p&&q?money(p*q):'—'}</td>
+        <td data-label="Status" class="mut">${x.status||'—'}</td></tr>`;
     };
 
     const OHEAD = `<thead><tr><th>Time</th><th>Instrument</th><th>Strategy</th><th>Side</th>
@@ -883,14 +989,14 @@ el('scanBtn').onclick = () => {
     if(d.done){
       res.sort((a,b)=>b.score-a.score);
       body.innerHTML = res.length ? res.map(r=>`<tr>
-          <td><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
-          <td class="num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
-          <td class="num">${money(r.price||0)}</td>
-          <td class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
-          <td class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
-          <td class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
-          <td class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
-          <td class="mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
+          <td data-label="Instrument"><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
+          <td data-label="Score" class="num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
+          <td data-label="Price" class="num">${money(r.price||0)}</td>
+          <td data-label="RSI" class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
+          <td data-label="1M" class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
+          <td data-label="3M" class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
+          <td data-label="vs SPY" class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
+          <td data-label="Signal" class="reason mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
         : '<tr><td class="empty" colspan="8">Nothing in a confirmed uptrend right now</td></tr>';
       finish(`${d.scanned||total} screened · ${res.length} candidates`);
       logLine(`Scan done — ${d.scanned||total} screened, ${res.length} candidates`,'ok');
