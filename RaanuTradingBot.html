@@ -447,14 +447,30 @@ function renderOrders(){
     // broken. Merging keeps every figure — qty and P&L are summed, and the
     // count is shown — while making the repetition legible instead of
     // looking like the same trade printed twice.
+    // Key is symbol + strategy + sell date, deliberately NOT buy price. The
+    // duplicate buys filled moments apart at slightly different prices (TENB
+    // at 36.94, 37.11 and 36.97 on the same morning), so keying on price left
+    // them as separate near-identical rows — the thing that looked wrong.
+    // One position, closed on one day, is one row.
     const groups = [];
     const byKey = new Map();
     for(const r of shown){
-      const k = [r.symbol, r.strategy, r.buy_price, r.sell_price,
-                 String(r.sell_date||'').slice(0,10)].join('|');
+      const k = [r.symbol, r.strategy, String(r.sell_date||'').slice(0,10)].join('|');
+      const q = r.qty||0;
       const g = byKey.get(k);
-      if(g){ g.n++; g.qty += r.qty||0; g.pnl += r.pnl||0; }
-      else { const ng = {...r, n:1, qty:r.qty||0, pnl:r.pnl||0}; byKey.set(k,ng); groups.push(ng); }
+      if(g){ g.n++; g.qty += q; g.pnl += r.pnl||0; g._cost += q*(r.buy_price||0); g._proc += q*(r.sell_price||0); }
+      else { const ng = {...r, n:1, qty:q, pnl:r.pnl||0,
+                         _cost:q*(r.buy_price||0), _proc:q*(r.sell_price||0)};
+             byKey.set(k,ng); groups.push(ng); }
+    }
+    // Merged rows show size-weighted entry and exit, and a return measured
+    // against actual cost — averaging the percentages would misweight lots.
+    for(const g of groups){
+      if(g.n>1 && g.qty>0){
+        g.buy_price  = g._cost/g.qty;
+        g.sell_price = g._proc/g.qty;
+        g.pct = g._cost ? (g.pnl/g._cost)*100 : 0;
+      }
     }
     el('closed').innerHTML = groups.length ? groups.map(r=>`<tr>
         <td class="mut">${r.sell_date?new Date(r.sell_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—'}</td>
