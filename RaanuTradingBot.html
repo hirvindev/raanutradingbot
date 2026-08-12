@@ -71,6 +71,13 @@ tbody tr:hover{background:#fcfcfc}
 .sym{font-weight:500;color:var(--head)}
 .sub{font-size:11px;color:var(--muted);font-weight:400}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
+.dgroup td{background:#fbfbfb;border-bottom:1px solid var(--line);cursor:pointer;
+           font-weight:500;color:var(--head);padding-top:9px;padding-bottom:9px;user-select:none}
+.dgroup:hover td{background:#f6f8fa}
+.dmeta{font-weight:400;font-size:11px;color:var(--muted);margin-left:9px}
+.chev{display:inline-block;width:9px;margin-right:8px;color:var(--muted);font-size:9px}
+.chev:before{content:"\25B8"}
+.chev.open:before{content:"\25BE"}
 .empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:12px}
 
 .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
@@ -187,6 +194,8 @@ details .inner{padding:0 18px 16px}
     <div class="bar" id="ordView">
       <span class="chip on" data-view="closed">Closed P&amp;L</span>
       <span class="chip" data-view="orders">Order history</span>
+      <span style="flex:1"></span>
+      <span class="chip" id="collapseAll">Collapse all</span>
     </div>
 
     <div class="card scroll" id="closedWrap">
@@ -258,7 +267,9 @@ details .inner{padding:0 18px 16px}
 
 <script>
 const API = location.origin;
-const S = {pos:[], orders:[], cfg:{}, cmp:{}, exit:{}, view:'closed', filt:'all'};
+const S = {pos:[], orders:[], cfg:{}, cmp:{}, exit:{}, view:'closed', filt:'all',
+           // days the user has collapsed; survives the 30s refresh
+           closedDays:new Set()};
 
 const money  = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed = n => (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -400,8 +411,23 @@ el('ordTabs').addEventListener('click', e=>{
   document.querySelectorAll('#ordTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
   renderOrders();
 });
+el('closed').addEventListener('click', e=>{
+  const h = e.target.closest('.dgroup'); if(!h) return;
+  const d = h.dataset.day;
+  S.closedDays.has(d) ? S.closedDays.delete(d) : S.closedDays.add(d);
+  renderOrders();
+});
+el('collapseAll').addEventListener('click', () => {
+  const days = JSON.parse(el('collapseAll').dataset.days || '[]');
+  if(S.closedDays.size >= days.length && days.length) S.closedDays.clear();
+  else days.forEach(d=>S.closedDays.add(d));
+  renderOrders();
+});
 el('ordView').addEventListener('click', e=>{
   const c=e.target.closest('.chip'); if(!c) return;
+  // Collapse-all shares the chip style but is not a view — without this it set
+  // S.view to undefined and the table stopped rendering entirely.
+  if(!c.dataset.view) return;
   S.view = c.dataset.view;
   document.querySelectorAll('#ordView .chip').forEach(x=>x.classList.toggle('on',x===c));
   renderOrders();
@@ -470,8 +496,18 @@ function renderOrders(){
         g.pct = g._cost ? (g.pnl/g._cost)*100 : 0;
       }
     }
-    el('closed').innerHTML = groups.length ? groups.map(r=>`<tr>
-        <td class="mut">${r.sell_date?new Date(r.sell_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—'}</td>
+    // Clustered by close date, each day collapsible. The day header carries
+    // its own P&L, so a collapsed day is still informative rather than merely
+    // hidden — the point is to scan days first and open the one that matters.
+    const days = [];
+    const byDay = new Map();
+    for(const g of groups){
+      const d = String(g.sell_date||'').slice(0,10) || 'unknown';
+      if(!byDay.has(d)){ byDay.set(d, []); days.push(d); }
+      byDay.get(d).push(g);
+    }
+    const tradeRow = r => `<tr>
+        <td></td>
         <td><span class="sym">${r.symbol}</span></td>
         <td>${tag(sof(r))}</td>
         <td class="num${r.n>1?'':' mut'}"${r.n>1
@@ -481,8 +517,24 @@ function renderOrders(){
         <td class="num">${money(r.buy_price||0)}</td>
         <td class="num">${money(r.sell_price||0)}</td>
         <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
-        <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`).join('')
+        <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
+
+    el('closed').innerHTML = days.length ? days.map(d=>{
+      const rs   = byDay.get(d);
+      const net  = rs.reduce((a,r)=>a+r.pnl, 0);
+      const lots = rs.reduce((a,r)=>a+r.n, 0);
+      const open = !S.closedDays.has(d);
+      const label = d==='unknown' ? 'Unknown date'
+        : new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+      const head = `<tr class="dgroup" data-day="${d}">
+        <td colspan="5"><span class="chev${open?' open':''}"></span>${label}
+          <span class="dmeta">${rs.length} position${rs.length===1?'':'s'}${lots>rs.length?` · ${lots} lots`:''}</span></td>
+        <td colspan="4" class="num ${cls(net)}" style="font-weight:500">${signed(net)}</td></tr>`;
+      return head + (open ? rs.map(tradeRow).join('') : '');
+    }).join('')
       : `<tr><td class="empty" colspan="9">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
+    el('collapseAll').textContent = S.closedDays.size >= days.length && days.length ? 'Expand all' : 'Collapse all';
+    el('collapseAll').dataset.days = JSON.stringify(days);
     // Say so when rows were merged, or the row count contradicts the strip.
     const merged = shown.length - groups.length;
     el('oTotS').textContent = (S.filt==='all'?'All strategies':STRAT[S.filt].n)
