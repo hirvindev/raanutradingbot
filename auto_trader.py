@@ -265,9 +265,23 @@ async def alpaca_buy_notional(symbol: str, notional: float) -> dict:
 
 
 # ---------- AUTO TRADER ----------
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
 class AutoTrader:
     def __init__(self):
-        self.enabled = True
+        # Off unless explicitly enabled. This used to be a hardcoded True, so
+        # every `python3 server.py` silently became a live trading bot on the
+        # shared Alpaca account — contradicting the documented "starts
+        # DISABLED". Running a local server alongside the deployed one gave two
+        # traders on one account, each with its own weekly counter (so double
+        # the intended trades) and each seeing the other's fills as untagged.
+        # Set AUTO_TRADE_ENABLED=true on exactly ONE deployment.
+        self.enabled = _bool_env("AUTO_TRADE_ENABLED", False)
         self.tradelog = TradeLog()
         self.last_scan: Optional[dict] = None
         self.last_decision: Optional[dict] = None

@@ -1101,12 +1101,15 @@ function renderPositions(){
         const mv  = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
         const pl  = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
         const plc = pl>=0?'var(--green)':'var(--red)';
-        // Untagged positions are the ones opened before strategy attribution
-        // existed, so they belong to no strategy's risk budget — offer a bulk
-        // close. The click still goes through the PIN + confirm gate.
-        const bulk = k==='untagged'
-          ? `<button class="btn b-red b-xs" style="float:right;margin-left:10px" onclick="closeUntagged()">Close all untagged</button>`
-          : '';
+        // NO bulk-close button here, deliberately. "Untagged" means "no BUY in
+        // THIS instance's trade log" — which is not the same as "unknown junk".
+        // With a local server and the deployed one sharing one Alpaca account,
+        // each sees the other's fills as untagged, so a bulk close offered to
+        // liquidate real, attributed positions. It did exactly that once:
+        // DLTR (S1) and MPLX/NTRA/VRTX (S2) were sold from the deployed
+        // dashboard because that instance's log had no BUY for them.
+        // Close positions individually, where the row shows what it is.
+        const bulk = '';
         html += `<tr><td colspan="9" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;`+
           `color:${colour};border-bottom:2px solid var(--border2)">${title}${bulk}`+
           `<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">`+
@@ -1572,29 +1575,6 @@ async function setStopLoss(ticker, qty, price){
 }
 async function closePos(ticker,qty){ requirePin(()=>confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close'))); }
 
-// Bulk-close every position the trade log could not attribute to a strategy.
-// One PIN + one confirm listing every symbol, then the sells go in sequence so
-// a failure on one does not silently swallow the rest.
-async function closeUntagged(){
-  const ps = S.positions.filter(p=>!_stratOf(p));
-  if(!ps.length){ log('No untagged positions to close','warn'); return; }
-  const mv = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
-  const pl = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
-  const list = ps.map(p=>`  ${p.ticker} ×${fn(p.quantity,2)}`).join('\n');
-  requirePin(()=>confirm2(
-    `Close ALL ${ps.length} untagged positions?\n\n${list}\n\n`+
-    `Market value ${fmtCur(mv)} · open P&L ${pl>=0?'+':''}${fmtCur(pl)}\n\n`+
-    `This places ${ps.length} market SELL orders.`,
-    'Confirm Close All Untagged',
-    async ()=>{
-      for(const p of ps){
-        try{ await placeTrade(p.ticker,'SELL',p.quantity,'Bulk close — untagged'); }
-        catch(e){ log(`Close failed for ${p.ticker}: ${e.message||e}`,'err'); }
-      }
-      log(`Bulk close submitted for ${ps.length} untagged positions`,'ok');
-      fetchPositions?.();
-    }));
-}
 function manOrder(dir){
   const sym=document.getElementById('mSym').value.trim().toUpperCase();
   const qty=parseFloat(document.getElementById('mQty').value);
@@ -2400,6 +2380,11 @@ async function testTelegram(){
 // ═══════════════════════════════════════
 function addRecent({ticker,dir,qty,price,status,reason}){
   const tbody=document.getElementById('recTrades');
+  // Null-guard: this threw whenever the current page has no #recTrades table.
+  // placeTrade() calls it AFTER the order is already submitted, so the throw
+  // made a successful order look like a failure to any caller wrapping it in
+  // try/catch -- which invited re-submitting orders that had in fact filled.
+  if(!tbody) return;
   const row=`<tr>
 <td style="color:var(--muted);font-size:.65rem">${new Date().toLocaleTimeString()}</td>
 <td style="font-weight:700">${ticker}</td>
