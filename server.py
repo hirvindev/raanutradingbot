@@ -1741,7 +1741,10 @@ async def s4_flow(runs: int = 10):
             "min_total_option_vol": s4_logger.MIN_TOTAL_OPTION_VOL,
             "top_n": s4_logger.TOP_N,
             "forward_days": list(s4_logger.FORWARD_DAYS),
-            "feed": os.getenv("ALPACA_OPTIONS_FEED", "indicative"),
+            # The resolved feed, not the raw env var — it is normally unset and
+            # auto-detected, so reading the variable would report "indicative"
+            # even after the OPRA agreement is signed.
+            "feed": __import__("options_flow")._feed(),
             "trades": False,
         },
         "recent_runs": data.get("runs", [])[-runs:][::-1],

@@ -100,9 +100,52 @@ def _headers() -> dict:
     }
 
 
+_feed_cache: Optional[str] = None
+
+
+def _probe_feed() -> str:
+    """Ask Alpaca which options feed this account actually has.
+
+    OPRA is the real tape; `indicative` delays trades and modifies quotes. The
+    upgrade is a free agreement signed in the Alpaca dashboard, so which feed is
+    available changes the moment the user signs — with no deploy and no config
+    edit. Probing once per process means the logger picks up the better feed on
+    its next restart instead of waiting for someone to remember to flip a
+    variable, and it can never sit on a hardcoded `opra` that 403s every call.
+    """
+    try:
+        r = httpx.get(
+            f"{DATA_BASE}/snapshots/AAPL",
+            headers=_headers(),
+            params={"feed": "opra", "limit": "1"},
+            timeout=TIMEOUT_SEC,
+        )
+        if r.status_code == 200:
+            log.info("[S4] options feed: OPRA (agreement signed) — real trade prints")
+            return "opra"
+        if r.status_code == 403:
+            log.info("[S4] options feed: indicative — OPRA agreement not signed. "
+                     "Sign it free in the Alpaca dashboard to get the real tape.")
+        else:
+            log.warning(f"[S4] OPRA probe returned {r.status_code}; using indicative")
+    except Exception as e:
+        log.warning(f"[S4] OPRA probe failed ({e}); using indicative")
+    return "indicative"
+
+
 def _feed() -> str:
-    """opra when the agreement is signed, indicative otherwise."""
-    return os.getenv("ALPACA_OPTIONS_FEED", "indicative").strip().lower()
+    """The options feed to use.
+
+    ALPACA_OPTIONS_FEED pins it explicitly ('opra' / 'indicative'); unset or
+    'auto' detects it once per process.
+    """
+    global _feed_cache
+    pinned = os.getenv("ALPACA_OPTIONS_FEED", "").strip().lower()
+    if pinned in ("opra", "indicative"):
+        return pinned
+    if _feed_cache is None:
+        _feed_cache = _probe_feed()
+    return _feed_cache
 
 
 def weekly_expiry(today: Optional[date] = None) -> date:

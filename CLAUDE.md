@@ -635,9 +635,17 @@ expressions, so their flow says nothing about a company.
 
 | Constraint | Reality |
 |---|---|
-| OPRA feed | 403, agreement unsigned — free to sign in the Alpaca dashboard |
+| OPRA feed | 403 as of 2026-08-12, agreement unsigned — free to sign in the Alpaca dashboard (Account → Market Data Subscriptions → Options) |
 | Indicative feed | works; trades delayed, quotes modified |
 | Open interest | **not available on any plan here** — so no volume/OI ratio |
+
+**The feed auto-detects.** `options_flow._feed()` probes OPRA once per process
+and falls back to indicative on 403, so signing the agreement upgrades the
+logger on its next restart with no config change and no deploy. Only set
+`ALPACA_OPTIONS_FEED` to pin it deliberately (`opra` / `indicative`); any other
+value, or leaving it unset, means auto. Do not hardcode `opra` — before the
+agreement is signed that 403s every call and the log silently records nothing.
+Check which feed is live at `GET /api/s4/flow` → `config.feed`.
 
 Two cohorts are logged so two questions get answered: `flow` (options ranking
 alone) and `flow+tech` (also passed MACD / RSI / volume / trend). A baseline
