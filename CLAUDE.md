@@ -89,8 +89,16 @@ Then open: **http://localhost:8000**
 ---
 
 ## 🤖 Auto Trader — auto_trader.py
-- **Scan interval:** 1800s (30 min)
+- **Scans:** 03:30 ET (alert only), 09:35 ET and 11:00 ET (execute), plus one
+  silent scan at server startup. There is **no periodic scan interval** — the
+  old `SCAN_INTERVAL_SEC=1800` was reported by the API but no loop consumed it,
+  so the dashboard advertised a 30-minute cadence that never ran. Removed.
 - **Starts:** DISABLED — must POST `/api/auto/start` or click ENABLE
+- **Only the 09:35/11:00 ET slots place orders.** The startup scan, the
+  pre-market scan and the alternating "rest day" branch all call
+  `run_one_cycle(execute=False)` and can never trade. Before this, the rest-day
+  branch logged "scanning only, no orders" while ordering, and restarting the
+  server during market hours could fire a trade immediately.
 - **Weekly trade limit:** 2 trades per 7 days (configurable via .env)
 - **Per trade max:** $500 USD (configurable via .env)
 - **Min signal score:** 60/100
@@ -431,7 +439,6 @@ PER_TRADE_MAX_USD_S1=1000
 PER_TRADE_MAX_USD_S2=100
 PER_TRADE_MAX_USD_S3=5000
 MIN_SIGNAL_SCORE=60
-SCAN_INTERVAL_SEC=1800
 PROFIT_CHECK_SEC=300
 
 # Exit rules — ATR-scaled (see Exit Engine section)

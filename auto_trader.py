@@ -80,7 +80,11 @@ def weekly_limit_for(strategy: str) -> int:
     )
 
 
-SCAN_INTERVAL_SEC  = _int_env("SCAN_INTERVAL_SEC", 1800)  # 30 min default
+# NOTE: there is deliberately no periodic scan interval. Scans are driven by
+# the schedule in server.py (_premarket_loop and _scheduled_trade_loop). A
+# SCAN_INTERVAL_SEC setting used to be defined here and reported by the API,
+# but no loop ever consumed it — the dashboard displayed "30 min" for a scan
+# cadence that did not exist.
 WATCHLIST = [t.strip().upper() for t in os.getenv("WATCHLIST", "AAPL,MSFT,NVDA,GOOGL,AMZN").split(",") if t.strip()]
 
 
@@ -349,7 +353,6 @@ class AutoTrader:
                     s: weekly_limit_for(s) for s in ("s1", "s2", "s3")
                 },
                 "min_score":          MIN_SIGNAL_SCORE,
-                "scan_interval_sec":  SCAN_INTERVAL_SEC,
                 "watchlist":          WATCHLIST,
             },
             # Budgets count BUYs only, and they are per strategy — comparing an
@@ -367,10 +370,17 @@ class AutoTrader:
 
     async def run_one_cycle(self, picks: Optional[list] = None,
                            force_market_open: bool = False,
-                           strategy: str = "s1"):
+                           strategy: str = "s1",
+                           execute: bool = True):
         """
         Check signals and maybe place a trade.
-        strategy: "s1" (pullback) or "s2" (breakout)
+        strategy: "s1" (pullback), "s2" (breakout) or "s3" (leader dip)
+        execute:  False = scan, cache and report only, never order.
+
+        The scan-and-cache paths pass execute=False. They used to call this
+        with ordering enabled, which meant the startup scan and the "rest day"
+        branch of the scheduled loop could both place trades — the rest-day
+        branch logging "scanning only, no orders" while doing exactly that.
         """
         label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
         uptrend_key = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
@@ -385,6 +395,10 @@ class AutoTrader:
             "ts":      datetime.now(timezone.utc).isoformat(),
             "results": picks,
         }
+
+        if not execute:
+            self.last_decision = {"action": "idle", "reason": f"[{label}] Scan-only run — picks cached, no order placed"}
+            return
 
         if not self.enabled:
             self.last_decision = {"action": "idle", "reason": f"[{label}] Auto-execute is off — picks cached, no order placed"}

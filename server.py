@@ -124,8 +124,13 @@ def _load_picks_s3() -> Optional[dict]:
 
 # ---------- BACKGROUND SCAN ----------
 
-async def _run_scan_and_cache() -> list:
-    """Run S1 scanner in a thread pool (non-blocking), cache results."""
+async def _run_scan_and_cache(alert: bool = True) -> list:
+    """Run S1 scanner in a thread pool (non-blocking), cache results.
+
+    alert=False suppresses the Telegram/WhatsApp push. The startup scan
+    passes it: a restart is not a scheduled event, and during development
+    every code change sent a fresh round of buy alerts.
+    """
     from scanner import find_top_picks
     log.info("[S1] Running momentum scan...")
     loop  = asyncio.get_event_loop()
@@ -133,10 +138,13 @@ async def _run_scan_and_cache() -> list:
     _save_picks(picks)
     log.info(f"[S1] Scan done — {len(picks)} picks cached")
 
-    _send_confident_buy_alerts(picks, strategy="s1")
+    if alert:
+        _send_confident_buy_alerts(picks, strategy="s1")
 
     try:
-        await trader.run_one_cycle(picks=picks, strategy="s1")
+        # execute=False: this is a scan-and-cache path (startup, rest day,
+        # market closed, alert/preview endpoints) — none of them may order.
+        await trader.run_one_cycle(picks=picks, strategy="s1", execute=False)
     except Exception as e:
         log.exception(f"[S1] Trader cycle error: {e}")
         trader.event("error", f"[S1] Trader cycle crashed: {e}")
@@ -144,7 +152,7 @@ async def _run_scan_and_cache() -> list:
     return picks
 
 
-async def _run_scan_and_cache_s2() -> list:
+async def _run_scan_and_cache_s2(alert: bool = True) -> list:
     """Run S2 scanner in a thread pool (non-blocking), cache results."""
     from scanner import find_top_picks_s2
     log.info("[S2] Running VCP breakout scan...")
@@ -153,10 +161,13 @@ async def _run_scan_and_cache_s2() -> list:
     _save_picks_s2(picks)
     log.info(f"[S2] Scan done — {len(picks)} picks cached")
 
-    _send_confident_buy_alerts(picks, strategy="s2")
+    if alert:
+        _send_confident_buy_alerts(picks, strategy="s2")
 
     try:
-        await trader.run_one_cycle(picks=picks, strategy="s2")
+        # execute=False: this is a scan-and-cache path (startup, rest day,
+        # market closed, alert/preview endpoints) — none of them may order.
+        await trader.run_one_cycle(picks=picks, strategy="s2", execute=False)
     except Exception as e:
         log.exception(f"[S2] Trader cycle error: {e}")
         trader.event("error", f"[S2] Trader cycle crashed: {e}")
@@ -209,7 +220,7 @@ def _is_trade_day() -> bool:
     return datetime.now(US_EAST).toordinal() % 2 == 0
 
 
-async def _run_scan_and_cache_s3() -> list:
+async def _run_scan_and_cache_s3(alert: bool = True) -> list:
     """Run S3 scanner in a thread pool (non-blocking), cache results."""
     from scanner import find_top_picks_s3
     log.info("[S3] Running leader-dip scan...")
@@ -218,10 +229,13 @@ async def _run_scan_and_cache_s3() -> list:
     _save_picks_s3(picks)
     log.info(f"[S3] Scan done — {len(picks)} picks cached")
 
-    _send_confident_buy_alerts(picks, strategy="s3")
+    if alert:
+        _send_confident_buy_alerts(picks, strategy="s3")
 
     try:
-        await trader.run_one_cycle(picks=picks, strategy="s3")
+        # execute=False: this is a scan-and-cache path (startup, rest day,
+        # market closed, alert/preview endpoints) — none of them may order.
+        await trader.run_one_cycle(picks=picks, strategy="s3", execute=False)
     except Exception as e:
         log.exception(f"[S3] Trader cycle error: {e}")
         trader.event("error", f"[S3] Trader cycle crashed: {e}")
@@ -546,7 +560,10 @@ async def _scheduled_trade_loop():
     Non-trade days: scans and caches picks but places no orders.
     """
     log.info("Scheduled trade loop started — 9:35 AM and 11:00 AM ET on alternating days")
-    asyncio.create_task(_run_scan_and_cache())  # immediate startup scan
+    # Immediate startup scan: caches picks so the dashboard is not empty, but
+    # stays silent. A restart is not a scheduled event — alerting here meant
+    # every code change pushed a fresh round of buy notifications.
+    asyncio.create_task(_run_scan_and_cache(alert=False))
 
     while True:
         now     = datetime.now(US_EAST)
@@ -717,7 +734,6 @@ def health():
             "trail_activate_pct":  os.getenv("TRAIL_ACTIVATE_PCT", os.getenv("TAKE_PROFIT_PCT", "5.0")),
             "trail_pct":           os.getenv("TRAIL_PCT", "2.5"),
             "hard_take_profit_pct": os.getenv("HARD_TAKE_PROFIT_PCT", "0"),
-            "scan_interval_sec":   os.getenv("SCAN_INTERVAL_SEC", "1800"),
             "min_signal_score":    os.getenv("MIN_SIGNAL_SCORE", "60"),
             "weekly_trade_limit":  os.getenv("WEEKLY_TRADE_LIMIT", "2"),
             "per_trade_max_usd":   os.getenv("PER_TRADE_MAX_USD", "500"),

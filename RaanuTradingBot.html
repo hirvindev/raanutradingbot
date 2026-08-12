@@ -956,7 +956,7 @@ function renderStrategy(){
     kv('Auto-trade', S.auto&&S.auto.enabled?'On':'Off') +
     kv('Mode', ((S.health.mode)||'—').toUpperCase()) +
     kv('Min signal score', c.min_signal_score??'—') +
-    kv('Scan interval', c.scan_interval_sec?(c.scan_interval_sec/60)+' min':'—') +
+    kv('Scans', '03:30 ET · 09:35 ET · 11:00 ET') +
     kv('Universe', '472 curated') +
     kv('Position sizing', 'min(strategy cap, 10% free cash)') +
     // Surfaced because a non-persistent state dir silently breaks strategy
