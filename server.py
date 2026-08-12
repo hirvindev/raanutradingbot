@@ -1728,6 +1728,16 @@ async def auto_scan_now_s2(force: bool = False):
 
 
 # ---------- STATIC ----------
+@app.get("/kite")
+def kite_prototype():
+    """Kite-style Overview prototype, served alongside the live dashboard at /
+    so the two can be compared before anything is replaced."""
+    p = HERE / "kite_prototype.html"
+    if not p.exists():
+        return JSONResponse({"error": "kite_prototype.html not found."}, status_code=404)
+    return FileResponse(p)
+
+
 @app.get("/")
 def root():
     html_path = HERE / "RaanuTradingBot.html"
