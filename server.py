@@ -546,11 +546,6 @@ _ET_SLOTS = [
 # Pre-market slot runs in US/Eastern time
 _PREMARKET_ET = (3, 30)  # 3:30 AM ET = 30 min before 4:00 AM pre-market
 
-# S4 options-flow logger — 16:15 ET, 15 min after the close so the day's option
-# volume and the equity daily bar are both final. RESEARCH ONLY: it records the
-# signal and never places an order. See s4_logger.py for why the signal cannot
-# be backtested and has to be gathered forward instead.
-_S4_FLOW_ET = (16, 15)
 
 
 async def _premarket_loop():
@@ -574,33 +569,6 @@ async def _premarket_loop():
             await _premarket_scan_and_notify()
         except Exception as e:
             log.exception(f"Pre-market scan error: {e}")
-
-
-async def _s4_flow_loop():
-    """Record the S4 options-flow signal after each weekday close. No orders.
-
-    Kept deliberately separate from _scheduled_trade_loop: this is an
-    experiment, and it must not acquire a trading path by accident the way the
-    "rest day" branch once did.
-    """
-    log.info("S4 flow logger started — 16:15 ET each weekday (research only, no orders)")
-    while True:
-        now = datetime.now(US_EAST)
-        t = now.replace(hour=_S4_FLOW_ET[0], minute=_S4_FLOW_ET[1], second=0, microsecond=0)
-        if now >= t:
-            t += timedelta(days=1)
-        while t.weekday() >= 5:
-            t += timedelta(days=1)
-        await asyncio.sleep((t - now).total_seconds())
-        try:
-            import s4_logger
-            # Blocking: ~450 HTTP calls plus a yfinance batch. Off the event loop.
-            run = await asyncio.to_thread(s4_logger.run_once)
-            passed = sum(1 for p in run.get("picks", []) if p.get("cohort") == "flow+tech")
-            log.info(f"[S4] logged {len(run.get('picks', []))} candidates "
-                     f"({passed} passed tech) for expiry {run.get('expiry')}")
-        except Exception as e:
-            log.exception(f"[S4] flow logging failed: {e}")
 
 
 async def _scheduled_trade_loop():
@@ -663,7 +631,6 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(_premarket_loop()),
         asyncio.create_task(_scheduled_trade_loop()),
-        asyncio.create_task(_s4_flow_loop()),
         asyncio.create_task(monitor_loop()),
         asyncio.create_task(_monthly_report_loop()),
     ]
@@ -1723,40 +1690,6 @@ async def _monthly_report_loop():
             log.info(f"Monthly report sent for {rep['period']}")
         except Exception as e:
             log.exception(f"Monthly report failed: {e}")
-
-
-@app.get("/api/s4/flow")
-async def s4_flow(runs: int = 10):
-    """S4 options-flow research log — cohort results plus recent runs.
-
-    Research surface only. There is no /api/s4/execute and there should not be
-    one until the summary shows an edge over the baseline on a real sample.
-    """
-    import s4_logger
-    data = s4_logger._load()
-    return {
-        "summary": s4_logger.summary(),
-        "config": {
-            "min_call_share": s4_logger.MIN_CALL_SHARE,
-            "min_total_option_vol": s4_logger.MIN_TOTAL_OPTION_VOL,
-            "top_n": s4_logger.TOP_N,
-            "forward_days": list(s4_logger.FORWARD_DAYS),
-            # The resolved feed, not the raw env var — it is normally unset and
-            # auto-detected, so reading the variable would report "indicative"
-            # even after the OPRA agreement is signed.
-            "feed": __import__("options_flow")._feed(),
-            "trades": False,
-        },
-        "recent_runs": data.get("runs", [])[-runs:][::-1],
-    }
-
-
-@app.post("/api/s4/flow/run-now")
-async def s4_flow_run_now():
-    """Force a flow scan now — for testing the logger outside its 16:15 ET slot."""
-    import s4_logger
-    run = await asyncio.to_thread(s4_logger.run_once)
-    return {"ok": True, "run": {k: v for k, v in run.items() if k != "baseline_sample"}}
 
 
 @app.get("/api/strategy/compare")

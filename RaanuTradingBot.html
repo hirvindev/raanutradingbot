@@ -265,11 +265,6 @@ details .inner{padding:0 18px 16px}
       <div id="picks"><div class="empty">Loading…</div></div>
     </div>
 
-    <h2>S4 Options Flow <em>research only — records the signal, places no orders</em></h2>
-    <div class="card">
-      <div id="s4meta" class="mut" style="padding:14px 18px;font-size:11.5px">Loading…</div>
-      <div id="s4picks"></div>
-    </div>
   </section>
 
   <!-- ─────────── STRATEGY ─────────── -->
@@ -357,7 +352,7 @@ function go(p){
   location.hash = p;
   if(p==='orders')   renderOrders();
   if(p==='strategy') renderStrategy();
-  if(p==='signals'){ renderPicks(); renderS4(); }
+  if(p==='signals')  renderPicks();
 }
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
 el('clearLog').onclick = ()=>{ el('log').innerHTML=''; };
@@ -869,59 +864,6 @@ function renderPicks(){
     }
   }
   box.innerHTML = rows.join('');
-}
-
-/* S4 options flow — a research panel, not a trading one. It deliberately shows
-   no score and no Execute button: the signal has never been validated, and a
-   button would invite acting on it before the forward returns say anything. */
-async function renderS4(){
-  const meta = el('s4meta'), box = el('s4picks');
-  let d;
-  try { d = await (await fetch(API+'/api/s4/flow?runs=1')).json(); }
-  catch(_) { meta.textContent = 'Could not load the flow log'; return; }
-
-  const s = d.summary || {}, c = d.config || {};
-  const co = s.cohorts || {};
-  const cell = (k,dd) => { const x=(co[k]||{})[dd]; return x ? `${x.avg_pct>0?'+':''}${x.avg_pct}% <span class="mut">n=${x.n}</span>` : '<span class="mut">—</span>'; };
-
-  meta.innerHTML =
-    `<b>${s.runs||0}</b> run${s.runs===1?'':'s'} logged${s.first_run?` since ${s.first_run}`:''} ·
-     top ${c.top_n} by call share ≥ ${Math.round((c.min_call_share||0)*100)}% ·
-     min ${(c.min_total_option_vol||0).toLocaleString()} contracts · feed <b>${c.feed}</b> ·
-     <b>places no orders</b>
-     <div style="margin-top:9px">${s.verdict||''}</div>
-     <table style="margin-top:10px;width:auto">
-       <thead><tr><th>Cohort</th><th>1 day</th><th>5 days</th><th>20 days</th></tr></thead>
-       <tbody>
-         ${['flow','flow+tech','baseline'].map(k=>`<tr>
-           <td>${k==='baseline'?'<span class="mut">Universe baseline</span>':k}</td>
-           <td class="num">${cell(k,'d1')}</td><td class="num">${cell(k,'d5')}</td><td class="num">${cell(k,'d20')}</td>
-         </tr>`).join('')}
-       </tbody></table>`;
-
-  const run = (d.recent_runs||[])[0];
-  if(!run || !run.picks?.length){ box.innerHTML = '<div class="empty">No flow recorded yet — first run is 16:15 ET</div>'; return; }
-
-  box.innerHTML = `<div class="scroll"><table>
-    <thead><tr><th>Instrument</th><th>Call share</th><th>Calls</th><th>Puts</th>
-      <th>RSI</th><th>MACD</th><th>Vol×</th><th>Trend</th><th>Cohort</th></tr></thead>
-    <tbody>${run.picks.map(p=>{ const t=p.tech||{};
-      return `<tr>
-        <td><span class="sym">${p.ticker}</span></td>
-        <td class="num">${(p.call_share*100).toFixed(1)}%</td>
-        <td class="num">${p.call_vol.toLocaleString()}</td>
-        <td class="num mut">${p.put_vol.toLocaleString()}</td>
-        <td class="num">${t.rsi ?? '—'}</td>
-        <td class="num ${t.macd_bull?'up':'mut'}">${t.macd_bull?'bull':'—'}</td>
-        <td class="num ${t.vol_ratio>=1?'':'mut'}">${t.vol_ratio ?? '—'}</td>
-        <td class="num ${t.uptrend?'':'mut'}">${t.uptrend?'up':'down'}</td>
-        <td>${p.cohort==='flow+tech'
-              ? '<span class="tag" style="border-left-color:var(--green)">FLOW+TECH</span>'
-              : '<span class="tag">FLOW</span>'}</td></tr>`;
-    }).join('')}</tbody></table></div>
-    <div class="mut" style="padding:10px 18px;font-size:11px">
-      Recorded ${run.date} for the ${run.expiry} expiry · ${run.scanned} stocks scanned,
-      ${run.liquid} with enough option volume · ETFs excluded</div>`;
 }
 
 el('scanBtn').onclick = () => {
