@@ -71,6 +71,12 @@ tbody tr:hover{background:#fcfcfc}
 .sym{font-weight:500;color:var(--head)}
 .sub{font-size:11px;color:var(--muted);font-weight:400}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
+.mbox{background:var(--card);border:1px solid var(--line);border-radius:3px;margin-bottom:14px;overflow:hidden}
+.mhead{display:flex;align-items:center;gap:9px;padding:12px 16px;cursor:pointer;user-select:none;
+       border-bottom:1px solid var(--line)}
+.mbox:has(.mhead:only-child) .mhead,.mhead.solo{border-bottom:0}
+.mhead:hover{background:#fafbfc}
+.mname{font-weight:600;font-size:13.5px;color:var(--head)}
 .dgroup td{background:#fbfbfb;border-bottom:1px solid var(--line);cursor:pointer;
            font-weight:500;color:var(--head);padding-top:9px;padding-bottom:9px;user-select:none}
 .dgroup:hover td{background:#f6f8fa}
@@ -198,12 +204,7 @@ details .inner{padding:0 18px 16px}
       <span class="chip" id="collapseAll">Collapse all</span>
     </div>
 
-    <div class="card scroll" id="closedWrap">
-      <table>
-        <thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th><th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>
-        <tbody id="closed"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
-      </table>
-    </div>
+    <div id="closedWrap"><div class="card"><div class="empty">Loading…</div></div></div>
 
     <div class="card scroll" id="ordWrap" style="display:none">
       <table>
@@ -269,7 +270,7 @@ details .inner{padding:0 18px 16px}
 const API = location.origin;
 const S = {pos:[], orders:[], cfg:{}, cmp:{}, exit:{}, view:'closed', filt:'all',
            // days the user has collapsed; survives the 30s refresh
-           closedDays:new Set()};
+           closedDays:new Set(), closedMonths:new Set()};
 
 const money  = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed = n => (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -411,16 +412,25 @@ el('ordTabs').addEventListener('click', e=>{
   document.querySelectorAll('#ordTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
   renderOrders();
 });
-el('closed').addEventListener('click', e=>{
-  const h = e.target.closest('.dgroup'); if(!h) return;
-  const d = h.dataset.day;
-  S.closedDays.has(d) ? S.closedDays.delete(d) : S.closedDays.add(d);
-  renderOrders();
+// One delegated listener on the container: month boxes and their day rows are
+// re-rendered wholesale, so binding per element would leak handlers.
+el('closedWrap').addEventListener('click', e=>{
+  const mh = e.target.closest('.mhead');
+  if(mh){ const m = mh.dataset.month;
+    S.closedMonths.has(m) ? S.closedMonths.delete(m) : S.closedMonths.add(m);
+    return renderOrders(); }
+  const dh = e.target.closest('.dgroup');
+  if(dh){ const d = dh.dataset.day;
+    S.closedDays.has(d) ? S.closedDays.delete(d) : S.closedDays.add(d);
+    return renderOrders(); }
 });
 el('collapseAll').addEventListener('click', () => {
-  const days = JSON.parse(el('collapseAll').dataset.days || '[]');
-  if(S.closedDays.size >= days.length && days.length) S.closedDays.clear();
-  else days.forEach(d=>S.closedDays.add(d));
+  const months = JSON.parse(el('collapseAll').dataset.months || '[]');
+  if(months.length && S.closedMonths.size >= months.length){
+    S.closedMonths.clear(); S.closedDays.clear();   // expanding means fully open
+  } else {
+    months.forEach(m=>S.closedMonths.add(m));
+  }
   renderOrders();
 });
 el('ordView').addEventListener('click', e=>{
@@ -496,16 +506,20 @@ function renderOrders(){
         g.pct = g._cost ? (g.pnl/g._cost)*100 : 0;
       }
     }
-    // Clustered by close date, each day collapsible. The day header carries
-    // its own P&L, so a collapsed day is still informative rather than merely
-    // hidden — the point is to scan days first and open the one that matters.
-    const days = [];
-    const byDay = new Map();
+    // Two levels: a box per month, day groups inside it. Both collapsible.
+    // Each header carries its own P&L so a collapsed level still says
+    // something — you scan months, open one, then open the day you want.
+    const months = [];
+    const byMonth = new Map();
     for(const g of groups){
       const d = String(g.sell_date||'').slice(0,10) || 'unknown';
-      if(!byDay.has(d)){ byDay.set(d, []); days.push(d); }
-      byDay.get(d).push(g);
+      const m = d === 'unknown' ? 'unknown' : d.slice(0,7);
+      if(!byMonth.has(m)){ byMonth.set(m, {days:[], byDay:new Map()}); months.push(m); }
+      const M = byMonth.get(m);
+      if(!M.byDay.has(d)){ M.byDay.set(d, []); M.days.push(d); }
+      M.byDay.get(d).push(g);
     }
+
     const tradeRow = r => `<tr>
         <td></td>
         <td><span class="sym">${r.symbol}</span></td>
@@ -519,22 +533,48 @@ function renderOrders(){
         <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
         <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
 
-    el('closed').innerHTML = days.length ? days.map(d=>{
-      const rs   = byDay.get(d);
-      const net  = rs.reduce((a,r)=>a+r.pnl, 0);
-      const lots = rs.reduce((a,r)=>a+r.n, 0);
-      const open = !S.closedDays.has(d);
-      const label = d==='unknown' ? 'Unknown date'
-        : new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
-      const head = `<tr class="dgroup" data-day="${d}">
-        <td colspan="5"><span class="chev${open?' open':''}"></span>${label}
-          <span class="dmeta">${rs.length} position${rs.length===1?'':'s'}${lots>rs.length?` · ${lots} lots`:''}</span></td>
-        <td colspan="4" class="num ${cls(net)}" style="font-weight:500">${signed(net)}</td></tr>`;
-      return head + (open ? rs.map(tradeRow).join('') : '');
+    const HEAD = `<thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th>
+        <th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>`;
+
+    el('closedWrap').innerHTML = months.length ? months.map(m=>{
+      const M    = byMonth.get(m);
+      const all  = M.days.flatMap(d=>M.byDay.get(d));
+      const net  = all.reduce((a,r)=>a+r.pnl, 0);
+      const lots = all.reduce((a,r)=>a+r.n, 0);
+      const wins = all.filter(r=>r.pnl>0).length;
+      const mOpen = !S.closedMonths.has(m);
+      const mLabel = m==='unknown' ? 'Unknown date'
+        : new Date(m+'-01T00:00:00').toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+
+      const body = M.days.map(d=>{
+        const rs   = M.byDay.get(d);
+        const dnet = rs.reduce((a,r)=>a+r.pnl, 0);
+        const dlot = rs.reduce((a,r)=>a+r.n, 0);
+        const open = !S.closedDays.has(d);
+        const label = d==='unknown' ? 'Unknown date'
+          : new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+        const head = `<tr class="dgroup" data-day="${d}">
+          <td colspan="5"><span class="chev${open?' open':''}"></span>${label}
+            <span class="dmeta">${rs.length} position${rs.length===1?'':'s'}${dlot>rs.length?` · ${dlot} lots`:''}</span></td>
+          <td colspan="4" class="num ${cls(dnet)}" style="font-weight:500">${signed(dnet)}</td></tr>`;
+        return head + (open ? rs.map(tradeRow).join('') : '');
+      }).join('');
+
+      return `<div class="mbox">
+        <div class="mhead" data-month="${m}">
+          <span class="chev${mOpen?' open':''}"></span>
+          <span class="mname">${mLabel}</span>
+          <span class="dmeta">${all.length} position${all.length===1?'':'s'} · ${lots} lots · ${wins}W/${all.length-wins}L</span>
+          <span class="num ${cls(net)}" style="margin-left:auto;font-weight:500">${signed(net)}</span>
+        </div>
+        ${mOpen ? `<div class="scroll"><table>${HEAD}<tbody>${body}</tbody></table></div>` : ''}
+      </div>`;
     }).join('')
-      : `<tr><td class="empty" colspan="9">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
-    el('collapseAll').textContent = S.closedDays.size >= days.length && days.length ? 'Expand all' : 'Collapse all';
-    el('collapseAll').dataset.days = JSON.stringify(days);
+      : `<div class="card"><div class="empty">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</div></div>`;
+
+    const allCollapsed = months.length && S.closedMonths.size >= months.length;
+    el('collapseAll').textContent = allCollapsed ? 'Expand all' : 'Collapse all';
+    el('collapseAll').dataset.months = JSON.stringify(months);
     // Say so when rows were merged, or the row count contradicts the strip.
     const merged = shown.length - groups.length;
     el('oTotS').textContent = (S.filt==='all'?'All strategies':STRAT[S.filt].n)
@@ -648,6 +688,12 @@ function renderStrategy(){
     kv('Stop mode', atrMode?'ATR-scaled':'Fixed %') +
     (atrMode ? kv('Stop floor / ceiling', `${e.stop_min_pct}% / ${e.stop_max_pct}%`)
              : kv('Stop loss', '-'+e.stop_loss_pct+'%')) +
+    // STOP_LOSS_PCT still sits in config but is read only when STOP_MODE=pct.
+    // Shown struck through and marked inactive rather than hidden, because the
+    // value is visible in .env and reads as the live stop when it is not.
+    (atrMode ? `<div class="kv"><span class="mut">Fixed stop %</span>
+        <b class="num mut" title="Only used when STOP_MODE=pct — the ATR stops above are what run">
+        <s>-${e.stop_loss_pct}%</s> inactive</b></div>` : '') +
     kv('Trail', e.trail_mode==='atr'?`arms +${e.trail_activate_atr}×ATR, trails ${e.trail_atr_mult}×ATR`:`+${e.trail_activate_pct}% / ${e.trail_pct}%`) +
     kv('Trail floors', `give-back ≥${e.trail_min_pct}%, arm ≥${e.trail_activate_min_pct}%`) +
     kv('Hard take-profit', e.hard_take_profit_pct>0?'+'+e.hard_take_profit_pct+'%':'Disabled') +
