@@ -169,8 +169,9 @@ async def market_is_open() -> tuple[bool, str]:
         return False, f"Clock check failed: {e}"
 
 
-async def get_open_orders() -> list[dict]:
-    """Return orders that are submitted but not yet filled (queued/accepted/new)."""
+async def get_open_orders() -> Optional[list[dict]]:
+    """Orders submitted but not yet filled. None (not []) when the call fails,
+    so callers can tell "no open orders" from "could not check"."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
@@ -179,10 +180,12 @@ async def get_open_orders() -> list[dict]:
                 params={"status": "open", "limit": 500},
             )
         if r.status_code != 200:
-            return []
+            log.error(f"get_open_orders: Alpaca returned {r.status_code}")
+            return None
         return r.json()
-    except Exception:
-        return []
+    except Exception as e:
+        log.error(f"get_open_orders: {e}")
+        return None
 
 
 def _order_cash_committed(order: dict) -> float:
@@ -212,15 +215,19 @@ async def get_free_cash() -> Optional[float]:
     except Exception:
         return None
 
+    open_orders = await get_open_orders()
+    if open_orders is None:
+        # Without the order book, `cash` overstates what is free by the value
+        # of every queued buy — the exact error that overspends.
+        log.error("get_free_cash: open orders unreadable, refusing to report cash")
+        return None
     committed = sum(
-        _order_cash_committed(o)
-        for o in await get_open_orders()
-        if o.get("side") == "buy"
+        _order_cash_committed(o) for o in open_orders if o.get("side") == "buy"
     )
     return max(0.0, cash - committed)
 
 
-async def get_held_symbols() -> set[str]:
+async def get_held_symbols() -> Optional[set[str]]:
     """
     Symbols we must not buy again — open positions *plus* symbols with an
     unfilled buy order already working.
@@ -228,17 +235,31 @@ async def get_held_symbols() -> set[str]:
     Position-only checking was the source of duplicate orders: an order queued
     while the market is closed creates no position, so every later scan saw the
     ticker as un-held and submitted another buy for it.
+
+    Returns None when the check could not be completed. It used to swallow
+    every error and return whatever it had — usually an empty set — so a single
+    timed-out Alpaca call turned the duplicate guard off entirely and the
+    caller could not tell "nothing held" from "could not look". Callers must
+    treat None as "do not trade this cycle": failing closed costs one skipped
+    scan, failing open costs a duplicate position.
     """
     held: set[str] = set()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{_broker_base()}/positions", headers=_alpaca_headers())
-        if r.status_code == 200:
-            held = {p["symbol"].upper() for p in r.json()}
-    except Exception:
-        pass
+        if r.status_code != 200:
+            log.error(f"get_held_symbols: /positions returned {r.status_code}")
+            return None
+        held = {p["symbol"].upper() for p in r.json()}
+    except Exception as e:
+        log.error(f"get_held_symbols: /positions failed: {e}")
+        return None
 
-    for o in await get_open_orders():
+    open_orders = await get_open_orders()
+    if open_orders is None:
+        log.error("get_held_symbols: could not read open orders")
+        return None
+    for o in open_orders:
         if o.get("side") == "buy" and o.get("symbol"):
             held.add(o["symbol"].upper())
     return held
@@ -366,6 +387,12 @@ class AutoTrader:
         # ── Gate 3: fetch live account state ─────────────────────────────
         free_cash   = await get_free_cash()
         held        = await get_held_symbols()
+
+        if held is None:
+            msg = "Could not verify existing holdings — skipping (fail closed)"
+            self.event("error", msg)
+            self.last_decision = {"action": "error", "reason": msg}
+            return
 
         if free_cash is None:
             msg = "Could not fetch account balance — skipping"

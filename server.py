@@ -291,6 +291,13 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     held      = await get_held_symbols()
     free_cash = await get_free_cash()
 
+    # Fail closed. An unreadable holdings list used to arrive as an empty set,
+    # which reads as "hold nothing" and disables the duplicate guard for the
+    # whole slot — one skipped scan is far cheaper than a duplicate position.
+    if held is None:
+        log.error(f"[{label}][{strategy.upper()}] Could not verify existing holdings — aborting")
+        return
+
     if free_cash is None:
         log.error(f"[{label}][{strategy.upper()}] Could not fetch account balance — aborting")
         return
