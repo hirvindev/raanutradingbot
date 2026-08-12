@@ -532,9 +532,15 @@ async def _premarket_scan_and_notify():
 # Expressed in ET rather than Berlin on purpose: Europe and the US switch DST on
 # different dates, so a Berlin-anchored slot drifts by an hour twice a year
 # against the only clock that matters here.
+#
+# The per-slot order count is deliberately larger than the old 2/1. With the
+# weekly limits raised so they no longer bind, the slot count would have become
+# the new hidden throttle — the same mistake the alternating-day rule made.
+# Free cash and MAX_POSITION_PCT are meant to be what stops the bot, so the
+# slot allows more orders than either will ever permit in one sitting.
 _ET_SLOTS = [
-    (9,  35, 2, "Open-9:35"),
-    (11, 0,  1, "Midday-11am"),
+    (9,  35, 5, "Open-9:35"),
+    (11, 0,  5, "Midday-11am"),
 ]
 
 # Pre-market slot runs in US/Eastern time
@@ -1875,7 +1881,10 @@ if __name__ == "__main__":
     print(f"  API key:       {'configured ✓' if ALPACA_API_KEY else 'NOT SET — edit .env'}")
     print(f"  Dashboard:     http://localhost:8000")
     print(f"  Pre-market:    03:30 ET daily — scan + Telegram alert (no orders)")
-    print(f"  Trade slots:   09:35 ET — top 2 orders | 11:00 ET — top 1 order")
+    # Driven off _ET_SLOTS, not hardcoded — the previous literal went stale the
+    # moment the slot times and counts changed.
+    print(f"  Trade slots:   " + " | ".join(
+        f"{h:02d}:{m:02d} ET — top {n} orders" for h, m, n, _ in _ET_SLOTS))
     print(f"                 Every weekday — per-strategy weekly limit decides if an order follows")
     print(f"  Weekly limit:  S1 {weekly_limit_for('s1')} | "
           f"S2 {weekly_limit_for('s2')} | S3 {weekly_limit_for('s3')} trades/week")
