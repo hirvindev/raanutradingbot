@@ -1675,6 +1675,35 @@ async def strategy_compare():
         "s1_scanned_at": s1_picks.get("scanned_at") if s1_picks else None,
         "s2_scanned_at": s2_picks.get("scanned_at") if s2_picks else None,
         "s3_scanned_at": s3_picks.get("scanned_at") if s3_picks else None,
+        # Booked profit and loss as separate figures, over EVERY round-trip and
+        # not just the attributed ones. Summing the per-strategy blocks would
+        # silently drop the untagged history — most of this account's realized
+        # P&L — and report a total that disagrees with Alpaca.
+        "totals": _booked_totals(round_trips),
+    }
+
+
+def _booked_totals(round_trips: list[dict]) -> dict:
+    """Gross profit, gross loss and net across all matched round-trips."""
+    wins   = [r for r in round_trips if r["pnl"] > 0]
+    losses = [r for r in round_trips if r["pnl"] <= 0]
+    gross_profit = sum(r["pnl"] for r in wins)
+    gross_loss   = sum(r["pnl"] for r in losses)     # negative or zero
+    return {
+        "closed_trades": len(round_trips),
+        "wins":          len(wins),
+        "losses":        len(losses),
+        "win_rate":      round(len(wins) / len(round_trips) * 100, 1) if round_trips else 0,
+        "gross_profit":  round(gross_profit, 2),
+        "gross_loss":    round(gross_loss, 2),
+        "net_pnl":       round(gross_profit + gross_loss, 2),
+        "avg_win":       round(gross_profit / len(wins), 2) if wins else 0,
+        "avg_loss":      round(gross_loss / len(losses), 2) if losses else 0,
+        # Expectancy is what decides profitability — win rate alone is
+        # trivially raised by booking winners early, and has been misleading
+        # here before. payoff = avg win / avg loss.
+        "payoff":        round(abs((gross_profit / len(wins)) / (gross_loss / len(losses))), 2)
+                         if wins and losses and gross_loss else 0,
     }
 
 

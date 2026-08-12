@@ -173,6 +173,14 @@ details .inner{padding:0 18px 16px}
       <div class="stat"><div class="k">Free cash</div><div class="v num" id="cash">—</div><div class="s">Available to trade</div></div>
     </div>
 
+    <h2>Booked <em>realised on closed trades, all history</em></h2>
+    <div class="strip">
+      <div class="stat"><div class="k">Profit booked</div><div class="v num up" id="bProfit">—</div><div class="s" id="bProfitS">&nbsp;</div></div>
+      <div class="stat"><div class="k">Loss booked</div><div class="v num down" id="bLoss">—</div><div class="s" id="bLossS">&nbsp;</div></div>
+      <div class="stat"><div class="k">Net realised</div><div class="v num" id="bNet">—</div><div class="s" id="bNetS">&nbsp;</div></div>
+      <div class="stat"><div class="k">Payoff</div><div class="v num" id="bPayoff">—</div><div class="s" id="bPayoffS">&nbsp;</div></div>
+    </div>
+
     <h2>Positions <em id="poscount"></em></h2>
     <div class="card scroll">
       <table>
@@ -341,8 +349,32 @@ async function load(){
   el('open').textContent = signed(openPl); el('open').className = 'v num '+cls(openPl);
   el('opens').textContent = S.pos.length+' position'+(S.pos.length===1?'':'s');
 
-  renderPos(); renderStrats(); renderOrders();
+  renderBooked(); renderPos(); renderStrats(); renderOrders();
   if(el('p-strategy').classList.contains('on')) renderStrategy();
+}
+
+// Booked profit and loss shown as two separate figures, not just a net.
+// A net of -$679 hides that $799 was actually made and $1,479 given back —
+// which is the number that tells you whether the exits or the entries are the
+// problem. Totals come from the server over EVERY round-trip, including
+// untagged history, so they match the broker rather than the attributed subset.
+function renderBooked(){
+  const t = S.cmp.totals;
+  if(!t){ return; }
+  const set=(id,v)=>{const n=el(id); if(n) n.textContent=v;};
+  set('bProfit', t.wins ? '+'+money(t.gross_profit) : '—');
+  set('bProfitS', t.wins ? `${t.wins} winning trade${t.wins===1?'':'s'} · avg +${money(t.avg_win)}` : 'No winners yet');
+  set('bLoss', t.losses ? money(t.gross_loss) : '—');
+  set('bLossS', t.losses ? `${t.losses} losing trade${t.losses===1?'':'s'} · avg ${money(t.avg_loss)}` : 'No losers yet');
+  set('bNet', t.closed_trades ? signed(t.net_pnl) : '—');
+  const n=el('bNet'); if(n) n.className='v num '+cls(t.net_pnl);
+  set('bNetS', `${t.closed_trades} closed · ${t.win_rate}% win rate`);
+  set('bPayoff', t.payoff ? t.payoff.toFixed(2) : '—');
+  // Payoff below 1 with a sub-50% win rate is the losing combination; saying
+  // so beats leaving a bare ratio the reader has to interpret.
+  set('bPayoffS', t.payoff
+    ? `avg win / avg loss${t.payoff>=1 && t.win_rate>=50 ? '' : ' — needs >'+(100/(1+t.payoff)).toFixed(0)+'% wins'}`
+    : 'avg win / avg loss');
 }
 
 function renderPos(){
