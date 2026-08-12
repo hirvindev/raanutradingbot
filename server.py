@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
+                               RedirectResponse, StreamingResponse)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -1729,12 +1730,21 @@ async def auto_scan_now_s2(force: bool = False):
 
 # ---------- STATIC ----------
 @app.get("/kite")
-def kite_prototype():
-    """Kite-style Overview prototype, served alongside the live dashboard at /
-    so the two can be compared before anything is replaced."""
-    p = HERE / "kite_prototype.html"
+def kite_alias():
+    """The prototype now IS the dashboard. Kept so existing /kite links land
+    somewhere sensible instead of 404ing."""
+    return RedirectResponse("/", status_code=307)
+
+
+@app.get("/legacy")
+def legacy_dashboard():
+    """The previous dark dashboard. Retained because it still has controls the
+    new one does not: editable exit-rule inputs, the PIN gate, per-signal
+    Execute, the equity chart and the S2/S3 scan streams. Reach for it when you
+    need one of those; everything else lives at /."""
+    p = HERE / "RaanuTradingBot.legacy.html"
     if not p.exists():
-        return JSONResponse({"error": "kite_prototype.html not found."}, status_code=404)
+        return JSONResponse({"error": "RaanuTradingBot.legacy.html not found."}, status_code=404)
     return FileResponse(p)
 
 

@@ -1,2739 +1,607 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RaanuTradingBot — Alpaca</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  RaanuTradingBot dashboard — Kite-style, served at /.
+
+  The previous dark dashboard is kept at /legacy (RaanuTradingBot.legacy.html)
+  because it still carries controls this one does not: editable exit-rule
+  inputs, the PIN gate, per-signal Execute, the equity chart, and the S2/S3
+  scan streams. Port them here as they are needed rather than reinstating that
+  page wholesale.
+
+  The brief was "too much on each page", so the guiding rule is one job per
+  page. Seven sections became five: Positions was folded into Dashboard (it
+  appeared on three pages before), and Trade Performance became the closed-P&L
+  half of Orders. Reference material — scoring weights, backtest tables, exit
+  internals — is collapsed by default on Strategy rather than always on screen.
+
+  Colour discipline is Kite's: white surfaces, one blue accent for navigation,
+  and colour otherwise spent almost only on P&L. Strategy identity is a 2px
+  rule, not a filled badge.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RaanuTradingBot</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0d0f12;--bg2:#13161b;--bg3:#1a1e26;--bg4:#212733;
-  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.11);
-  --text:#dde3ef;--muted:#5e6878;--muted2:#8a96a8;
-  --accent:#00c896;--accent2:#3b82f6;
-  --green:#22c55e;--red:#f43f5e;--warn:#f59e0b;--purple:#a78bfa;
-  /* One colour per strategy, used for every S1/S2/S3 badge, block header,
-     card and filter. S3 is violet, NOT --accent2 blue: that blue is already
-     the "pending" order badge and the info-alert colour, so an S3 badge next
-     to a pending badge read as the same thing. */
-  --s1:#00c896;--s1-bg:rgba(0,200,150,.12);--s1-bd:rgba(0,200,150,.3);
-  --s2:#f59e0b;--s2-bg:rgba(245,158,11,.12);--s2-bd:rgba(245,158,11,.3);
-  --s3:#a855f7;--s3-bg:rgba(168,85,247,.14);--s3-bd:rgba(168,85,247,.35);
-  --mono:'IBM Plex Mono',monospace;--sans:'Inter',sans-serif;
-  --nav-h:52px;--sb-w:200px;
+  --bg:#f9f9f9; --card:#fff; --line:#e9e9e9; --line2:#f2f2f2;
+  --text:#3c3c3c; --head:#1a1a1a; --muted:#9b9b9b;
+  --blue:#387ed1; --blue-bg:#eef4fb; --green:#4caf50; --red:#ff5722;
+  --s1:#4caf50; --s2:#f0a02e; --s3:#7b5cd6;
 }
-*{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh;overflow-x:hidden;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:400 13px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.up{color:var(--green)} .down{color:var(--red)} .mut{color:var(--muted)}
 
-/* ── NAV ── */
-nav{
-  height:var(--nav-h);display:flex;align-items:center;justify-content:space-between;
-  padding:0 1.25rem;border-bottom:1px solid var(--border);
-  background:var(--bg);position:sticky;top:0;z-index:200;gap:1rem;
+header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+.hwrap{max-width:1180px;margin:0 auto;padding:0 20px;height:56px;display:flex;align-items:center}
+.logo{font-weight:600;font-size:15px;color:var(--head);letter-spacing:-.2px}
+.logo span{color:var(--blue)}
+nav{display:flex;gap:22px;margin-left:auto}
+nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:19px 0;border-bottom:2px solid transparent;cursor:pointer}
+nav a:hover{color:var(--text)}
+nav a.on{color:var(--blue);border-bottom-color:var(--blue)}
+.pill{margin-left:18px;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:3px 8px;white-space:nowrap}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:1px}
+.dot.off{background:var(--muted)}
+
+main{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
+.page{display:none} .page.on{display:block}
+
+.strip{background:var(--card);border:1px solid var(--line);border-radius:3px;display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:22px}
+.stat{padding:16px 20px;border-right:1px solid var(--line2)}
+.stat:last-child{border-right:0}
+.stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat .v{font-size:22px;font-weight:400;color:var(--head);letter-spacing:-.4px}
+.stat .s{font-size:11px;color:var(--muted);margin-top:3px}
+
+h2{font-size:14px;font-weight:500;color:var(--head);margin:0 0 10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+h2 em{font-style:normal;font-size:12px;color:var(--muted);font-weight:400}
+.card{background:var(--card);border:1px solid var(--line);border-radius:3px;margin-bottom:22px}
+.pad{padding:16px 18px}
+.scroll{overflow-x:auto}
+
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:400;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child{text-align:left}
+td{padding:11px 14px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+td:first-child{text-align:left}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fcfcfc}
+.sym{font-weight:500;color:var(--head)}
+.sub{font-size:11px;color:var(--muted);font-weight:400}
+.tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
+.empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:12px}
+
+.bar{display:flex;gap:7px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.chip{font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:3px;padding:5px 11px;cursor:pointer;user-select:none}
+.chip:hover{color:var(--text)}
+.chip.on{color:var(--blue);border-color:var(--blue);background:var(--blue-bg)}
+.btn{font:inherit;font-size:12px;color:#fff;background:var(--blue);border:0;border-radius:3px;padding:7px 14px;cursor:pointer}
+.btn:disabled{background:#b9cfe8;cursor:default}
+.btn.ghost{color:var(--muted);background:var(--card);border:1px solid var(--line)}
+.btn.ghost:hover{color:var(--text)}
+.btn.sm{padding:4px 10px;font-size:11px}
+.btn.danger{color:var(--red);background:var(--card);border:1px solid var(--line)}
+.btn.danger:hover{border-color:var(--red)}
+
+.srow{display:grid;grid-template-columns:150px repeat(4,1fr);gap:10px;align-items:center;padding:13px 16px;border-bottom:1px solid var(--line2)}
+.srow:last-child{border-bottom:0}
+.sname{font-weight:500;color:var(--head);border-left:2px solid var(--line);padding-left:9px}
+.sk{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.sv{font-size:13px;color:var(--text);margin-top:2px}
+.idle{color:var(--muted);font-size:12px;grid-column:2/-1}
+
+/* key/value rows for Strategy config */
+.kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.kv:last-child{border-bottom:0}
+.kv b{font-weight:400;color:var(--head)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+
+/* reference material stays folded away until asked for */
+details{border-top:1px solid var(--line2)}
+details summary{cursor:pointer;padding:12px 18px;font-size:13px;color:var(--blue);list-style:none;user-select:none}
+details summary::-webkit-details-marker{display:none}
+details summary:before{content:"▸ ";font-size:10px;vertical-align:1px}
+details[open] summary:before{content:"▾ "}
+details .inner{padding:0 18px 16px}
+
+#log{font:400 11.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:520px;overflow:auto;padding:14px 18px}
+#log div{border-bottom:1px solid var(--line2);padding:3px 0}
+#log .t{color:var(--muted);margin-right:9px}
+.prog{height:2px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:12px;display:none}
+.prog i{display:block;height:100%;background:var(--blue);width:0;transition:width .25s}
+@media(max-width:820px){
+  .strip{grid-template-columns:repeat(2,1fr)} .stat{border-bottom:1px solid var(--line2)}
+  .srow{grid-template-columns:1fr 1fr} .g2{grid-template-columns:1fr} nav{gap:14px}
+  nav a{font-size:12px} .logo{display:none}
 }
-.logo{font-weight:800;font-size:1rem;letter-spacing:-.02em;white-space:nowrap;}
-.logo em{color:var(--accent);font-style:normal;}
-.logo sub{font-size:.6rem;font-family:var(--mono);color:var(--muted);font-weight:400;vertical-align:middle;margin-left:4px;}
-.nav-pills{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.pill{display:flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;border:1px solid var(--border2);font-size:.68rem;font-family:var(--mono);white-space:nowrap;}
-.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
-.dg{background:var(--green);box-shadow:0 0 4px var(--green);animation:blink 2s infinite;}
-.dr{background:var(--red);}
-.dy{background:var(--warn);animation:blink 1s infinite;}
-.dm{background:var(--muted);}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
-.btn{padding:5px 14px;border-radius:6px;border:none;font-family:var(--sans);font-weight:600;font-size:.75rem;cursor:pointer;transition:all .18s;white-space:nowrap;}
-.b-acc{background:var(--accent);color:#000;}.b-acc:hover{filter:brightness(1.1);}
-.b-out{background:transparent;border:1px solid var(--border2);color:var(--text);}.b-out:hover{border-color:var(--accent);color:var(--accent);}
-.b-red{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);color:var(--red);}
-.b-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:var(--warn);}
-.b-eng{background:rgba(0,200,150,.08);border:1px solid rgba(0,200,150,.25);color:var(--accent);}
-.b-sm{padding:3px 10px;font-size:.7rem;}.b-xs{padding:2px 7px;font-size:.65rem;}
-
-/* ── LAYOUT ── */
-.app{display:flex;height:calc(100vh - var(--nav-h));overflow:hidden;}
-
-/* ── SIDEBAR ── */
-.sb{width:var(--sb-w);flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;padding:.5rem 0;}
-.sb-grp{padding:.25rem .75rem .1rem;font-size:.58rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:.5rem;}
-.sb-item{display:flex;align-items:center;gap:8px;padding:.38rem .75rem;font-size:.78rem;font-weight:500;color:var(--muted2);cursor:pointer;border-left:2px solid transparent;transition:all .12s;}
-.sb-item:hover{color:var(--text);background:var(--bg2);}
-.sb-item.on{color:var(--accent);border-left-color:var(--accent);background:rgba(0,200,150,.04);}
-.sb-icon{font-size:.75rem;width:15px;text-align:center;}
-.sb-foot{padding:.7rem .75rem;margin-top:auto;border-top:1px solid var(--border);font-size:.65rem;font-family:var(--mono);color:var(--muted);line-height:1.95;}
-.sb-foot strong{color:var(--text);}
-
-/* ── MAIN ── */
-.main{flex:1;overflow-y:auto;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.85rem;}
-
-/* ── SECTIONS ── */
-.sec{display:none;flex-direction:column;gap:.85rem;}
-.sec.on{display:flex;}
-
-/* ── METRIC ROW ── */
-.mrow{display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem;}
-.mcard{background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:.9rem 1rem;position:relative;overflow:hidden;}
-.mcard::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:9px 9px 0 0;}
-.mc-blue::after{background:var(--accent2);}
-.mc-green::after{background:var(--green);}
-.mc-teal::after{background:var(--accent);}
-.mc-warn::after{background:var(--warn);}
-.mc-red::after{background:var(--red);}
-.mlabel{font-size:.62rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;}
-.mval{font-size:1.3rem;font-weight:800;letter-spacing:-.03em;font-family:var(--sans);}
-.msub{font-size:.66rem;font-family:var(--mono);margin-top:4px;}
-.mload{display:inline-block;width:60px;height:14px;background:var(--bg3);border-radius:3px;animation:shimmer 1.5s infinite;}
-@keyframes shimmer{0%,100%{opacity:.5}50%{opacity:1}}
-
-/* ── CARD ── */
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:1rem;}
-.card-sm{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:.8rem;}
-.card-title{font-size:.62rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.65rem;}
-.card-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:.65rem;}
-
-/* ── GRIDS ── */
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:.85rem;}
-.g3l{display:grid;grid-template-columns:1.55fr 1fr;gap:.85rem;}
-.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;}
-
-/* ── TABLE ── */
-table{width:100%;border-collapse:collapse;}
-th{font-family:var(--mono);font-size:.59rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;text-align:left;border-bottom:1px solid var(--border);font-weight:400;}
-td{padding:7px 8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:.72rem;vertical-align:middle;}
-tr:last-child td{border-bottom:none;}
-tbody tr:hover td{background:rgba(255,255,255,.02);}
-.te{text-align:center;color:var(--muted);padding:1.5rem!important;font-size:.75rem;}
-
-/* ── BADGE ── */
-.bdg{display:inline-block;padding:2px 6px;border-radius:4px;font-size:.61rem;font-weight:600;font-family:var(--mono);}
-.bdg-buy{background:rgba(34,197,94,.1);color:var(--green);}
-.bdg-sell{background:rgba(244,63,94,.1);color:var(--red);}
-.bdg-hold{background:rgba(94,104,120,.12);color:var(--muted2);}
-.bdg-ok{background:rgba(34,197,94,.08);color:var(--green);border:1px solid rgba(34,197,94,.2);}
-.bdg-err{background:rgba(244,63,94,.08);color:var(--red);border:1px solid rgba(244,63,94,.2);}
-.bdg-pend{background:rgba(59,130,246,.08);color:var(--accent2);border:1px solid rgba(59,130,246,.2);}
-.bdg-live{background:rgba(0,200,150,.08);color:var(--accent);border:1px solid rgba(0,200,150,.2);}
-.bdg-paper{background:rgba(245,158,11,.08);color:var(--warn);border:1px solid rgba(245,158,11,.2);}
-
-/* ── FORM ── */
-input,select,textarea{background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:6px 10px;font-family:var(--mono);font-size:.76rem;outline:none;transition:border-color .18s;width:100%;}
-input:focus,select:focus,textarea:focus{border-color:var(--accent);}
-.fg{display:flex;flex-direction:column;gap:4px;}
-.fl{font-size:.62rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
-
-/* ── TOGGLE ── */
-.tog{position:relative;width:30px;height:16px;cursor:pointer;flex-shrink:0;}
-.tog input{opacity:0;width:0;height:0;}
-.tog-s{position:absolute;inset:0;background:var(--bg4);border-radius:16px;border:1px solid var(--border2);transition:.18s;}
-.tog-s::before{content:'';position:absolute;height:10px;width:10px;left:2px;top:2px;background:var(--muted);border-radius:50%;transition:.18s;}
-.tog input:checked+.tog-s{background:rgba(0,200,150,.15);border-color:var(--accent);}
-.tog input:checked+.tog-s::before{transform:translateX(14px);background:var(--accent);}
-
-/* ── RANGE ── */
-input[type=range]{-webkit-appearance:none;height:3px;background:var(--border2);border-radius:2px;outline:none;cursor:pointer;border:none;padding:0;}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;}
-
-/* ── CHART ── */
-.chart-wrap{position:relative;}
-.ctabs{display:flex;gap:4px;margin-bottom:7px;}
-.ctab{padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:.63rem;font-family:var(--mono);cursor:pointer;transition:all .14s;}
-.ctab.on,.ctab:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,200,150,.05);}
-
-/* ── RING ── */
-.ring-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;}
-.ring{display:flex;flex-direction:column;align-items:center;justify-content:center;width:82px;height:82px;border-radius:50%;border:3px solid var(--accent);}
-.ring-n{font-size:1.5rem;font-weight:800;color:var(--accent);letter-spacing:-.04em;}
-.ring-l{font-size:.52rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;}
-
-/* ── SIGNAL BAR ── */
-.sbar{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:3px;}
-.sfill{height:100%;border-radius:2px;transition:width .4s;}
-
-/* ── INDICATORS ── */
-.ind-g{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-.ind{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;}
-.ind-n{font-size:.62rem;font-family:var(--mono);color:var(--muted);}
-.ind-v{font-size:.92rem;font-weight:700;margin-top:2px;}
-.ind-s{font-size:.6rem;font-family:var(--mono);margin-top:2px;}
-
-/* ── LOG ── */
-.log-row{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:.68rem;font-family:var(--mono);}
-.log-row:last-child{border-bottom:none;}
-.log-t{color:var(--muted);flex-shrink:0;font-size:.63rem;}
-.c-ok{color:var(--green);}.c-warn{color:var(--warn);}.c-err{color:var(--red);}.c-info{color:var(--accent2);}
-
-/* ── MODAL ── */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:400;align-items:center;justify-content:center;}
-.modal-bg.open{display:flex;}
-.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:1.5rem;width:480px;max-width:95vw;max-height:88vh;overflow-y:auto;}
-.modal-ttl{font-size:.95rem;font-weight:800;margin-bottom:3px;}
-.modal-sub{font-size:.71rem;font-family:var(--mono);color:var(--muted);margin-bottom:1rem;}
-
-/* ── ALERTS ── */
-.al{padding:8px 12px;border-radius:6px;font-size:.7rem;font-family:var(--mono);line-height:1.6;}
-.al-info{background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);color:var(--accent2);}
-.al-warn{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);color:var(--warn);}
-.al-ok{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);color:var(--green);}
-.al-err{background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.2);color:var(--red);}
-
-/* ── SPINNER ── */
-.spin{width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .65s linear infinite;display:inline-block;}
-@keyframes sp{to{transform:rotate(360deg)}}
-
-/* ── COLOURS ── */
-.up{color:var(--green);}.down{color:var(--red);}.nu{color:var(--muted2);}.hi{color:var(--accent);}
-
-/* ── WATCH TAG ── */
-
-/* ── SCROLLBAR ── */
-::-webkit-scrollbar{width:3px;height:3px;}
-::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
-
-/* ── RESPONSIVE ── */
-@media(max-width:1200px){.mrow{grid-template-columns:repeat(3,1fr);}}
-@media(max-width:960px){.g3l{grid-template-columns:1fr;}.mrow{grid-template-columns:repeat(2,1fr);}}
-@media(max-width:720px){.sb{display:none;}.g2,.g4{grid-template-columns:1fr;}.mrow{grid-template-columns:1fr 1fr;}}
-#toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:.8rem;font-family:var(--mono);font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
-#toast.show{opacity:1;}
-#toast.t-ok{background:#16a34a;color:#fff;}
-#toast.t-err{background:#dc2626;color:#fff;}
-#confBuy{position:fixed;top:0;left:0;right:0;z-index:300;display:none;flex-direction:column;gap:0;cursor:pointer;}
-#confBuy.show{display:flex;}
-#confBuy .cb-bar{display:flex;align-items:center;gap:10px;padding:10px 1.25rem;border-bottom:1px solid rgba(0,200,150,.15);animation:cbPulse 1.5s ease-in-out infinite;}
-@keyframes cbPulse{0%,100%{background:rgba(0,200,150,.12)}50%{background:rgba(0,200,150,.25)}}
-#confBuy .cb-ticker{font-size:1rem;font-weight:800;color:var(--green);}
-#confBuy .cb-name{font-size:.72rem;color:var(--muted2);font-family:var(--mono);}
-#confBuy .cb-score{font-size:.85rem;font-weight:700;color:#fff;background:var(--green);padding:2px 8px;border-radius:4px;font-family:var(--mono);}
-#confBuy .cb-detail{font-size:.68rem;font-family:var(--mono);color:var(--muted2);}
-#confBuy .cb-gp{font-size:.62rem;font-family:var(--mono);color:var(--warn);padding:1px 6px;border:1px solid rgba(245,158,11,.3);border-radius:3px;}
-#confBuy .cb-close{margin-left:auto;color:var(--muted);font-size:.9rem;padding:4px 8px;cursor:pointer;flex-shrink:0;}
-#confBuy .cb-close:hover{color:var(--text);}
-#confBuy .cb-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1s infinite;flex-shrink:0;}
 </style>
-</head>
-<body>
-<div id="toast"></div>
-<div id="confBuy" onclick="this.classList.remove('show')"></div>
 
-<!-- ══ NAV ══ -->
-<nav>
-  <div class="logo">Raanu<em>TradingBot</em><sub>v2.1</sub></div>
-  <div class="nav-pills">
-    <div class="pill" id="connPill">
-      <div class="dot dm" id="connDot"></div>
-      <span id="connLbl" style="color:var(--muted)">DISCONNECTED</span>
-    </div>
-    <div class="pill">
-      <div class="dot dm" id="engDot"></div>
-      <span id="engLbl" style="color:var(--accent)">SCANNING (no auto-trade)</span>
-    </div>
-    <div class="pill" id="modePill" style="display:none">
-      <span id="modeLbl">PAPER</span>
-    </div>
-    <button class="btn b-eng b-sm" id="engBtn" onclick="toggleEngine()">&#9654; Enable Auto-Trade</button>
+<header>
+  <div class="hwrap">
+    <div class="logo">Raanu<span>Bot</span></div>
+    <nav id="nav">
+      <a data-p="dash" class="on">Dashboard</a>
+      <a data-p="orders">Orders</a>
+      <a data-p="signals">Signals</a>
+      <a data-p="strategy">Strategy</a>
+      <a data-p="logs">Logs</a>
+    </nav>
+    <span class="pill" id="mode">—</span>
+    <span class="pill" id="engine" style="cursor:pointer" title="Click to start or stop the auto-trader">—</span>
   </div>
-</nav>
+</header>
 
-<div class="app">
+<main>
+  <!-- ─────────── DASHBOARD ─────────── -->
+  <section class="page on" id="p-dash">
+    <div class="strip">
+      <div class="stat"><div class="k">Portfolio value</div><div class="v num" id="pv">—</div><div class="s" id="pvs">&nbsp;</div></div>
+      <div class="stat"><div class="k">Day's P&amp;L</div><div class="v num" id="day">—</div><div class="s">Since previous close</div></div>
+      <div class="stat"><div class="k">Open P&amp;L</div><div class="v num" id="open">—</div><div class="s" id="opens">&nbsp;</div></div>
+      <div class="stat"><div class="k">Free cash</div><div class="v num" id="cash">—</div><div class="s">Available to trade</div></div>
+    </div>
 
-<!-- ══ SIDEBAR ══ -->
-<div class="sb">
-  <div class="sb-grp">Dashboard</div>
-  <div class="sb-item on" onclick="nav('ov',this)"><span class="sb-icon">◈</span>Overview</div>
-  <div class="sb-item" onclick="nav('port',this)"><span class="sb-icon">◉</span>Portfolio</div>
-  <div class="sb-item" onclick="nav('ord',this)"><span class="sb-icon">◎</span>Orders</div>
-  <div class="sb-grp">Analysis</div>
-  <div class="sb-item" onclick="nav('sig',this)"><span class="sb-icon">⚡</span>Live Signals</div>
-  <div class="sb-item" onclick="nav('perf',this)"><span class="sb-icon">◈</span>Trade Performance</div>
-  <div class="sb-item" onclick="nav('strat',this)"><span class="sb-icon">◆</span>Strategy</div>
-  <div class="sb-grp">Execution</div>
-  <div class="sb-item" onclick="nav('logs',this)"><span class="sb-icon">≡</span>Engine Logs</div>
-  <div class="sb-foot">
-    <div>Mode: <strong id="sbMode">—</strong></div>
-    <div>Pre-mkt: <strong style="color:var(--warn)">3:30 AM ET</strong></div>
-    <div>Trade: <strong id="sbEng" style="color:var(--accent)">07:00 &amp; 14:30</strong></div>
-    <div>Auto-trade: <strong id="sbNext" style="color:var(--muted)">OFF</strong></div>
-    <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
-      Stop Loss: <strong style="color:var(--red)" id="sbSL">3%</strong><br>
-      Trail: <strong style="color:var(--green)" id="sbTrail">+5% arm / 2.5%</strong><br>
-      Positions: <strong id="sbPos">0</strong> open
-    </div>
-  </div>
-</div>
-
-<!-- ══ MAIN ══ -->
-<div class="main">
-
-<!-- ─────────── OVERVIEW ─────────── -->
-<div id="s-ov" class="sec on">
-
-  <!-- METRIC ROW — all real from T212 API -->
-  <div class="mrow">
-    <div class="mcard mc-blue">
-      <div class="mlabel">Portfolio Value</div>
-      <div class="mval hi" id="m-val"><span class="mload"></span></div>
-      <div class="msub nu" id="m-val-sub">Total account value</div>
-    </div>
-    <div class="mcard mc-teal">
-      <div class="mlabel">Open P&amp;L</div>
-      <div class="mval" id="m-pnl"><span class="mload"></span></div>
-      <div class="msub nu" id="m-pnl-sub">Unrealised gain/loss</div>
-    </div>
-    <div class="mcard mc-green">
-      <div class="mlabel">Profit Booked</div>
-      <div class="mval" id="m-booked-win"><span class="mload"></span></div>
-      <div class="msub nu" id="m-booked-win-sub">Realised gains</div>
-    </div>
-    <div class="mcard mc-red">
-      <div class="mlabel">Loss Booked</div>
-      <div class="mval" id="m-booked-loss"><span class="mload"></span></div>
-      <div class="msub nu" id="m-booked-loss-sub">Realised losses</div>
-    </div>
-    <div class="mcard mc-teal">
-      <div class="mlabel">Net Booked</div>
-      <div class="mval" id="m-booked-net"><span class="mload"></span></div>
-      <div class="msub nu" id="m-booked-net-sub">Profit minus loss</div>
-    </div>
-    <div class="mcard mc-green">
-      <div class="mlabel">Win Rate</div>
-      <div class="mval" id="m-wr"><span class="mload"></span></div>
-      <div class="msub nu" id="m-wr-sub">Closed trades</div>
-    </div>
-    <div class="mcard mc-warn">
-      <div class="mlabel">Avg Trade P&amp;L</div>
-      <div class="mval" id="m-avg"><span class="mload"></span></div>
-      <div class="msub nu" id="m-avg-sub">Per closed position</div>
-    </div>
-    <div class="mcard mc-red">
-      <div class="mlabel">Stop Loss Hits</div>
-      <div class="mval" id="m-sl"><span class="mload"></span></div>
-      <div class="msub nu" id="m-sl-sub">This month</div>
-    </div>
-  </div>
-
-  <!-- SECONDARY ROW -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;">
-    <div class="card-sm">
-      <div class="card-title">Free Cash</div>
-      <div style="font-size:1.05rem;font-weight:700;font-family:var(--sans)" id="m-cash">—</div>
-      <div style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Available for trading</div>
-    </div>
-    <div class="card-sm">
-      <div class="card-title">Invested</div>
-      <div style="font-size:1.05rem;font-weight:700;font-family:var(--sans)" id="m-inv">—</div>
-      <div style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-top:3px">In open positions</div>
-    </div>
-    <div class="card-sm">
-      <div class="card-title">Today's Return</div>
-      <div style="font-size:1.05rem;font-weight:700;font-family:var(--sans)" id="m-day">—</div>
-      <div style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Daily P&amp;L</div>
-    </div>
-    <div class="card-sm">
-      <div class="card-title">Open Positions</div>
-      <div style="font-size:1.05rem;font-weight:700;font-family:var(--sans)" id="m-pos">—</div>
-      <div style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Active holdings</div>
-    </div>
-  </div>
-
-  <!-- PER-STRATEGY SECTIONS — one block per strategy, live open exposure on
-       the left and realized closed-trade record on the right. Rendered by
-       renderStratSections(); each card is colour-keyed to its strategy. -->
-  <div class="card-hdr" style="margin-top:4px">
-    <div class="card-title" style="margin:0">By Strategy</div>
-    <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted)" id="stratSecNote"></span>
-  </div>
-  <div id="stratSections" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem">
-    <div class="card-sm" style="grid-column:1/-1;color:var(--muted)">Loading strategies…</div>
-  </div>
-
-  <!-- OPEN POSITIONS -->
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Open Positions</div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span id="lastRefresh" style="font-size:.62rem;font-family:var(--mono);color:var(--muted)"></span>
-        <button class="btn b-out b-sm" onclick="fetchPositions()">↻ Refresh</button>
-      </div>
-    </div>
-    <table>
-      <thead><tr><th>Symbol</th><th>Strategy</th><th>Qty</th><th>Avg Buy</th><th>Current</th><th>Mkt Value</th><th>P&amp;L</th><th>Return</th><th></th></tr></thead>
-      <tbody id="ovPosBody"><tr><td class="te" colspan="9">Loading positions...</td></tr></tbody>
-    </table>
-  </div>
-
-</div><!-- /overview -->
-
-<!-- ─────────── PORTFOLIO ─────────── -->
-<div id="s-port" class="sec">
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">Account Summary</div>
-      <div id="accGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:.76rem;font-family:var(--mono)">
-        <div style="color:var(--muted)">Connect API to load account data.</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Monthly Target Progress</div>
-      <div style="display:flex;justify-content:space-between;font-size:.74rem;font-family:var(--mono);margin-bottom:6px">
-        <span style="color:var(--muted)">Target: +4–5% / month</span>
-        <span id="mtdR" style="color:var(--green)">—</span>
-      </div>
-      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-        <div id="mtdBar" style="height:100%;width:0%;background:var(--green);border-radius:3px;transition:width .5s"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:.6rem;font-family:var(--mono);color:var(--muted);margin-top:4px">
-        <span>0%</span><span style="color:var(--warn)">4%</span><span style="color:var(--green)">5%</span><span>10%</span>
-      </div>
-      <div style="margin-top:12px">
-        <div class="card-title">Realised P&L Breakdown</div>
-        <div id="realisedBreak" style="font-size:.72rem;font-family:var(--mono);color:var(--muted)">—</div>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Open Positions</div>
-      <button class="btn b-out b-sm" onclick="fetchPositions()">↻ Refresh</button>
-    </div>
-    <table>
-      <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy</th><th>Current</th><th>Mkt Value</th><th>P&amp;L €</th><th>P&amp;L %</th><th>Auto Stop</th><th></th></tr></thead>
-      <tbody id="posBody"><tr><td class="te" colspan="9">No positions loaded</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ─────────── ORDERS ─────────── -->
-<div id="s-ord" class="sec">
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Order History</div>
-      <div style="display:flex;gap:7px">
-        <select id="ordGroup" style="width:auto" onchange="renderOrders()">
-          <option value="strategy">Group by Strategy</option>
-          <option value="date">Group by Date</option>
-        </select>
-        <select id="ordFilt" style="width:auto" onchange="renderOrders()">
-          <option value="all">All Orders</option>
-          <option value="BUY">Buys Only</option>
-          <option value="SELL">Sells Only</option>
-          <option value="FILLED">Filled</option>
-          <option value="REJECTED">Rejected</option>
-        </select>
-        <button class="btn b-out b-sm" onclick="fetchOrders()">↻ Refresh</button>
-      </div>
-    </div>
-    <table>
-      <thead><tr><th>Date/Time</th><th>Symbol</th><th>Strategy</th><th>Type</th><th>Qty</th><th>Fill Price</th><th>Total</th><th>Status</th><th>Notes</th></tr></thead>
-      <tbody id="ordBody"><tr><td class="te" colspan="9">No orders loaded</td></tr></tbody>
-    </table>
-  </div>
-
-</div>
-
-<!-- ─────────── TRADE PERFORMANCE ─────────── -->
-<div id="s-perf" class="sec">
-
-  <!-- SUB-TAB PILLS -->
-  <div style="display:flex;gap:6px;margin-bottom:12px">
-    <button class="btn b-acc b-sm perfTab" data-sub="closed" onclick="perfSub('closed',this)">Closed P&L</button>
-    <button class="btn b-out b-sm perfTab" data-sub="stratbuys" onclick="perfSub('stratbuys',this)">Strategy Buys</button>
-  </div>
-
-  <!-- SUB: CLOSED P&L -->
-  <div id="perfSub-closed">
-    <!-- Strategy filter pills -->
-    <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center">
-      <span style="font-size:.65rem;font-family:var(--mono);color:var(--muted);margin-right:4px">FILTER</span>
-      <button class="btn b-acc b-xs closedStratFilter on" onclick="filterClosedByStrat('all',this)">All</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s1',this)" style="border-color:var(--s1-bd);color:var(--s1)">S1 Pullback</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s3',this)" style="border-color:var(--s3-bd);color:var(--s3)">S3 Leader Dip</button>
-      <button class="btn b-out b-xs closedStratFilter" onclick="filterClosedByStrat('s2',this)" style="border-color:var(--s2-bd);color:var(--s2)">S2 Breakout</button>
-    </div>
-    <div class="card">
-      <div class="card-hdr">
-        <div class="card-title" style="margin:0">Closed Trades</div>
-        <div id="perfSummary" style="font-size:.72rem;font-family:var(--mono);color:var(--muted)"></div>
-      </div>
-      <div id="perfStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px">
-        <div class="card-sm" style="text-align:center">
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Total Trades</div>
-          <div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="pfTotal">0</div>
-        </div>
-        <div class="card-sm" style="text-align:center">
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Profitable</div>
-          <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="pfWins">0</div>
-        </div>
-        <div class="card-sm" style="text-align:center">
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Loss Making</div>
-          <div style="font-size:1.1rem;font-weight:800;color:var(--red)" id="pfLosses">0</div>
-        </div>
-        <div class="card-sm" style="text-align:center">
-          <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Net P&L</div>
-          <div style="font-size:1.1rem;font-weight:800" id="pfNet">—</div>
-        </div>
-      </div>
+    <h2>Positions <em id="poscount"></em></h2>
+    <div class="card scroll">
       <table>
-        <thead><tr><th>Closed</th><th>Strategy</th><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>Return</th><th>Held</th></tr></thead>
-        <tbody id="perfBody"><tr><td class="te" colspan="9">No closed trades yet</td></tr></tbody>
+        <thead><tr><th>Instrument</th><th>Strategy</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Value</th><th>P&amp;L</th><th>Chg</th><th></th></tr></thead>
+        <tbody id="pos"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
       </table>
     </div>
-  </div>
 
-  <!-- SUB: STRATEGY BUYS -->
-  <div id="perfSub-stratbuys" style="display:none">
+    <h2>Strategies <em>live budget and realised record</em></h2>
+    <div class="card" id="strats"><div class="empty">Loading…</div></div>
+  </section>
 
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-hdr">
-        <div class="card-title" style="margin:0">Strategy A/B Test — 6-Month Comparison</div>
-        <div style="display:flex;gap:6px">
-          <button class="btn b-out b-xs stratFilter on" onclick="filterStratTrades('all',this)">All</button>
-          <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('1w',this)">1W</button>
-          <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('1m',this)">1M</button>
-          <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('3m',this)">3M</button>
-          <button class="btn b-out b-xs stratFilter" onclick="filterStratTrades('6m',this)">6M</button>
-          <button class="btn b-acc b-xs" onclick="loadStrategyComparison()" style="margin-left:8px">Refresh</button>
-        </div>
-      </div>
+  <!-- ─────────── ORDERS ─────────── -->
+  <section class="page" id="p-orders">
+    <div class="strip">
+      <div class="stat"><div class="k">Closed trades</div><div class="v num" id="oTot">—</div><div class="s" id="oTotS">&nbsp;</div></div>
+      <div class="stat"><div class="k">Win rate</div><div class="v num" id="oWin">—</div><div class="s" id="oWinS">&nbsp;</div></div>
+      <div class="stat"><div class="k">Realised P&amp;L</div><div class="v num" id="oPnl">—</div><div class="s">Matched round-trips</div></div>
+      <div class="stat"><div class="k">Orders</div><div class="v num" id="oCnt">—</div><div class="s">In history</div></div>
     </div>
 
-    <div class="g2" style="margin-bottom:16px">
-      <!-- S1 card -->
-      <div class="card" style="border-left:3px solid var(--accent)">
-        <div class="card-title" style="color:var(--s1)">S1 — Pullback-in-Uptrend</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys healthy pullbacks to rising EMA20 in confirmed uptrends</div>
-        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s1);font-weight:700" id="s1Cap">—</span> · <span style="color:var(--s1);font-weight:700" id="s1Limit">—</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1Trades">0</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1WinRate">—</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Profitable</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono);color:var(--green)" id="s1Wins">0</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s1PnL">—</div>
-          </div>
-        </div>
-        <div style="margin-top:10px">
-          <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S1 picks</div>
-          <div id="s1PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
-        </div>
-      </div>
-      <!-- S2 card -->
-      <div class="card" style="border-left:3px solid var(--warn)">
-        <div class="card-title" style="color:var(--s2)">S2 — VCP Breakout</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys breakouts above tight consolidation near 52-week highs on volume surge</div>
-        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s2);font-weight:700" id="s2Cap">—</span> · <span style="color:var(--s2);font-weight:700" id="s2Limit">—</span> <span style="color:var(--muted2)">— throttled, kept alive to collect a live sample</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2Trades">0</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2WinRate">—</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Profitable</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono);color:var(--green)" id="s2Wins">0</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s2PnL">—</div>
-          </div>
-        </div>
-        <div style="margin-top:10px">
-          <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S2 picks</div>
-          <div id="s2PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
-        </div>
-      </div>
-
-      <!-- S3 card -->
-      <div class="card" style="border-left:3px solid var(--s3)">
-        <div class="card-title" style="color:var(--s3)">S3 — Market Leader Dip</div>
-        <div style="font-size:.65rem;color:var(--muted2);margin-bottom:6px">Buys pullbacks to the lower Bollinger Band in names beating SPY, with MACD turning up</div>
-        <div style="font-size:.6rem;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">Per-trade cap <span style="color:var(--s3);font-weight:700" id="s3Cap">—</span> · <span style="color:var(--s3);font-weight:700" id="s3Limit">—</span> <span style="color:var(--muted2)">— only strategy profitable in both halves</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Trades</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3Trades">0</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Win Rate</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3WinRate">—</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Payoff</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3Payoff">—</div>
-          </div>
-          <div style="padding:8px;background:var(--bg3);border-radius:6px;text-align:center">
-            <div style="font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Net P&amp;L</div>
-            <div style="font-size:1.3rem;font-weight:700;font-family:var(--mono)" id="s3PnL">—</div>
-          </div>
-        </div>
-        <div style="margin-top:10px">
-          <div style="font-size:.62rem;color:var(--muted);margin-bottom:4px">Latest S3 picks</div>
-          <div id="s3PicksList" style="font-size:.68rem;font-family:var(--mono);color:var(--muted2)">No scan yet</div>
-        </div>
-      </div>
+    <div class="bar">
+      <span class="chip on" data-view="closed">Closed P&amp;L</span>
+      <span class="chip" data-view="orders">Order history</span>
+      <span style="flex:1"></span>
+      <span class="chip on" data-of="all">All</span>
+      <span class="chip" data-of="s1">S1</span>
+      <span class="chip" data-of="s2">S2</span>
+      <span class="chip" data-of="s3">S3</span>
     </div>
 
-    <!-- STRATEGY TRADE HISTORY -->
-    <div class="card">
-      <div class="card-title">Trade History by Strategy</div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead><tr>
-            <th>Date</th><th>Strategy</th><th>Ticker</th><th style="text-align:right">Amount</th>
-            <th style="text-align:right">Score</th><th>Signal</th>
-          </tr></thead>
-          <tbody id="stratTradeBody">
-            <tr><td colspan="6" style="color:var(--muted2);text-align:center;padding:20px">No trades yet — both strategies will run on the next scan cycle</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ─────────── SIGNALS ─────────── -->
-<div id="s-sig" class="sec">
-  <div class="al al-info">🔍 Scans <span id="universeCount">400+</span> US stocks with S1 and S2 strategies. Only high-conviction picks shown: score ≥ 70, beating SPY, positive momentum, MACD bullish. Each pick tagged S1 or S2.</div>
-
-  <!-- SCAN CONTROLS -->
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Market Scanner</div>
-      <div style="display:flex;gap:7px;align-items:center">
-        <select id="capFilter" style="width:auto">
-          <option value="all">All Caps</option>
-          <option value="large">Large Cap Only</option>
-          <option value="mid">Mid Cap Only</option>
-          <option value="small">Small Cap Only</option>
-        </select>
-        <select id="patternFilter" style="width:auto">
-          <option value="all">All Patterns</option>
-          <option value="momentum">Momentum</option>
-          <option value="breakout">Breakout</option>
-          <option value="uptrend">Uptrend</option>
-        </select>
-        <button class="btn b-acc b-sm" onclick="runMarketScan()" id="scanBtn">⚡ Scan Market</button>
-      </div>
-    </div>
-
-    <!-- PROGRESS BAR -->
-    <div id="scanProgress" style="display:none;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;font-family:var(--mono);color:var(--muted);margin-bottom:4px">
-        <span id="scanStatus">Scanning...</span>
-        <span id="scanCount">0 / 0</span>
-      </div>
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
-        <div id="scanBar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .3s"></div>
-      </div>
-    </div>
-
-    <!-- STATS ROW -->
-    <div id="scanStats" style="display:none;margin-bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:7px">
-      <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Scanned</div>
-        <div style="font-size:1.1rem;font-weight:800;color:var(--accent)" id="stScanned">0</div>
-      </div>
-      <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Swing Picks</div>
-        <div style="font-size:1.1rem;font-weight:800;color:var(--green)" id="stWinners">0</div>
-      </div>
-      <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Golden Pocket</div>
-        <div style="font-size:1.1rem;font-weight:800;color:var(--warn)" id="stBreakouts">0</div>
-      </div>
-      <div class="card-sm" style="text-align:center">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)">Avg Score</div>
-        <div style="font-size:1.1rem;font-weight:800;color:var(--accent2)" id="stAvg">0</div>
-      </div>
-    </div>
-
-    <table>
-      <thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Strategy</th><th>Cap</th><th>Price</th><th>Score</th><th>Pattern</th><th>RSI</th><th>3M Mom</th><th>Fib Zone</th><th>Rel Str</th><th>Action</th></tr></thead>
-      <tbody id="sigBody"><tr><td class="te" colspan="13">Click ⚡ Scan Market to find top opportunities across all US stocks</td></tr></tbody>
-    </table>
-  </div>
-
-  <div class="card" id="aiCard" style="display:none">
-    <div class="card-title">Top Picks — Trade Reasoning</div>
-    <div id="aiReasons"></div>
-  </div>
-</div>
-
-
-<!-- ─────────── INDICATORS ─────────── -->
-<!-- ─────────── STRATEGY ─────────── -->
-<div id="s-strat" class="sec">
-
-  <!-- ── SCORING ENGINE DETAILS ── -->
-  <div class="g2">
-    <div class="card">
-      <div class="card-title" style="color:var(--s1)">S1 Scoring — Trend + Momentum (Pullback-in-Uptrend)</div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--green)">uptrend = true</span> AND <span style="color:var(--green)">score &ge; 60</span> become actionable BUY signals.</div>
+    <div class="card scroll" id="closedWrap">
       <table>
-        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
-        <tbody>
-          <tr><td style="color:var(--accent)">Trend structure</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Confirmed uptrend + price above EMA50</td></tr>
-          <tr><td style="color:var(--accent)">Momentum (3M ROC)</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">3-month rate of change</td></tr>
-          <tr><td style="color:var(--accent)">Relative strength vs SPY</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">Only rewards stocks beating the market</td></tr>
-          <tr><td style="color:var(--accent)">MACD regime</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Bullish + fresh crossover bonus</td></tr>
-          <tr><td style="color:var(--accent)">Pullback quality (RSI)</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">RSI 40–55 ideal; >72 penalised (chasing)</td></tr>
-          <tr><td style="color:var(--accent)">Proximity to 20-EMA</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Pulled-back-to-support; >12% above = penalty</td></tr>
-          <tr><td style="color:var(--accent)">Volume / structure</td><td style="text-align:right;color:var(--green)">10</td><td style="color:var(--muted2)">Up-day on above-avg volume, holding weekly low</td></tr>
-          <tr><td style="color:var(--accent)">Fib golden pocket (SMC)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">Price in 0.618–0.786 retracement, turning up</td></tr>
-        </tbody>
+        <thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>
+        <tbody id="closed"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
       </table>
-      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--warn)">
-        Hard gate: price &gt; EMA200 AND EMA50 &gt; EMA200 AND EMA50 rising — otherwise score capped at 45 (never actionable)
-      </div>
     </div>
-    <div class="card">
-      <div class="card-title" style="color:var(--s2)">S2 Scoring — VCP Breakout (Minervini Template)</div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--warn)">stage2 = true</span> AND <span style="color:var(--warn)">score &ge; 60</span> become actionable BUY signals.</div>
-      <table>
-        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
-        <tbody>
-          <tr><td style="color:var(--warn)">Stage 2 trend template</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Price &gt; 150 SMA &gt; 200 SMA, both rising</td></tr>
-          <tr><td style="color:var(--warn)">Near 52-week high</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">Within 25% of 52W high (closer = better)</td></tr>
-          <tr><td style="color:var(--warn)">Consolidation tightness</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">20-day range &lt; 8% = very tight VCP base</td></tr>
-          <tr><td style="color:var(--warn)">Volume pattern</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">Dry-up in base + surge on breakout (1.5x avg)</td></tr>
-          <tr><td style="color:var(--warn)">Relative strength vs SPY</td><td style="text-align:right;color:var(--green)">15</td><td style="color:var(--muted2)">3-month outperformance vs market</td></tr>
-          <tr><td style="color:var(--warn)">MACD regime</td><td style="text-align:right;color:var(--green)">8</td><td style="color:var(--muted2)">Bullish + fresh crossover bonus</td></tr>
-          <tr><td style="color:var(--warn)">Breakout confirmation</td><td style="text-align:right;color:var(--green)">7</td><td style="color:var(--muted2)">Price above 20-day high on volume</td></tr>
-        </tbody>
-      </table>
-      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--warn)">
-        Hard gate: price &gt; 150 SMA &gt; 200 SMA AND 200 SMA rising — otherwise score capped at 45 (never actionable)
-      </div>
-    </div>
-  </div>
 
-  <div class="g2">
-    <div class="card">
-      <div class="card-title" style="color:var(--s3)">S3 Scoring — Market Leader Dip (Bollinger + MACD)</div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Score range 0–100. Only stocks with <span style="color:var(--s3)">leader_dip = true</span> AND <span style="color:var(--s3)">score &ge; 60</span> become actionable BUY signals. Mean reversion: buys temporary weakness in names beating the market.</div>
+    <div class="card scroll" id="ordWrap" style="display:none">
       <table>
-        <thead><tr><th>Component</th><th style="text-align:right">Max</th><th>What it measures</th></tr></thead>
-        <tbody>
-          <tr><td style="color:var(--s3)">Bollinger stretch (%B)</td><td style="text-align:right;color:var(--green)">26</td><td style="color:var(--muted2)">%B &le; 0.20 = lower fifth of band; below band = max</td></tr>
-          <tr><td style="color:var(--s3)">MACD histogram turn</td><td style="text-align:right;color:var(--green)">24</td><td style="color:var(--muted2)">Rising off its low — stops us catching a falling band</td></tr>
-          <tr><td style="color:var(--s3)">Leadership vs SPY</td><td style="text-align:right;color:var(--green)">22</td><td style="color:var(--muted2)">3-month outperformance; &gt;20% = market leader</td></tr>
-          <tr><td style="color:var(--s3)">Trend integrity</td><td style="text-align:right;color:var(--green)">20</td><td style="color:var(--muted2)">Above EMA200/SMA200; bonus if still above EMA50</td></tr>
-          <tr><td style="color:var(--s3)">Oversold quality (RSI)</td><td style="text-align:right;color:var(--green)">12</td><td style="color:var(--muted2)">RSI 30–45 ideal; &lt;30 = deeply oversold, riskier</td></tr>
-          <tr><td style="color:var(--s3)">Capitulation volume</td><td style="text-align:right;color:var(--green)">6</td><td style="color:var(--muted2)">&gt;1.5x average — a flush often marks the low</td></tr>
-        </tbody>
+        <thead><tr><th>Time</th><th>Instrument</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Status</th></tr></thead>
+        <tbody id="orders"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
       </table>
-      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--s3)">
-        Hard gate: price &gt; EMA200 AND &gt; SMA200 — otherwise score capped at 45. Mean reversion outside an uptrend is catching a falling knife.
-      </div>
     </div>
-    <div class="card">
-      <div class="card-title">Backtest — 3 years, 472 tickers</div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Walk-forward, next-open fills, ATR-scaled stops with risk-based sizing. <span style="color:var(--warn)">Benchmark: SPY buy &amp; hold returned +78.82% (max drawdown 18.76%).</span></div>
+  </section>
+
+  <!-- ─────────── SIGNALS ─────────── -->
+  <section class="page" id="p-signals">
+    <h2>Live signals <em id="sigNote">screens the curated universe and shows only confirmed candidates</em></h2>
+    <div class="bar">
+      <button class="btn" id="scanBtn">Scan market</button>
+      <span class="chip mut" id="scanStat">Idle</span>
+    </div>
+    <div class="prog" id="prog"><i></i></div>
+    <div class="card scroll">
       <table>
-        <thead><tr><th>Strategy</th><th style="text-align:right">Return</th><th style="text-align:right">Max DD</th><th style="text-align:right">Win rate</th><th>Both halves?</th></tr></thead>
-        <tbody>
-          <tr><td style="color:var(--s3)">S3 Leader Dip (3.0×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+42.23%</td><td style="text-align:right;font-family:var(--mono)">11.14%</td><td style="text-align:right;font-family:var(--mono)">63.2%</td><td style="color:var(--green)">✓ +23.7% / +15.1%</td></tr>
-          <tr><td style="color:var(--s2)">S2 Breakout (8% fixed)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+39.46%</td><td style="text-align:right;font-family:var(--mono)">9.73%</td><td style="text-align:right;font-family:var(--mono)">57.3%</td><td style="color:var(--red)">✗ +42.8% / −1.8%</td></tr>
-          <tr><td style="color:var(--s1)">S1 Pullback (2.5×ATR)</td><td style="text-align:right;font-family:var(--mono);color:var(--green)">+6.38%</td><td style="text-align:right;font-family:var(--mono)">26.89%</td><td style="text-align:right;font-family:var(--mono)">53.8%</td><td style="color:var(--red)">✗ collapses</td></tr>
-          <tr><td style="color:var(--muted2)">S1 with old 3% stop</td><td style="text-align:right;font-family:var(--mono);color:var(--red)">−32.10%</td><td style="text-align:right;font-family:var(--mono)">38.03%</td><td style="text-align:right;font-family:var(--mono)">34.8%</td><td style="color:var(--red)">✗</td></tr>
-        </tbody>
-      </table>
-      <div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;color:var(--muted2)">
-        <span style="color:var(--warn)">Win rate is not the target.</span> The highest win rate tested here (68.0%) <em>lost money</em> — payoff 0.46 meant average wins were smaller than average losses. What matters is expectancy: <span style="font-family:var(--mono)">p × avgWin − q × avgLoss</span>. No strategy has yet beaten buy &amp; hold.
-      </div>
-    </div>
-  </div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-hdr">
-        <div class="card-title" style="margin:0">Exit Engine — Trailing Stop</div>
-        <button class="btn b-acc b-sm" onclick="saveExitConfig()">Save</button>
-      </div>
-      <div style="font-size:.72rem;color:var(--muted2);margin-bottom:10px">Polls positions every <span id="stratProfitSec" style="color:var(--accent)">300s</span>. First rule to fire closes the position. Changes apply immediately — no restart needed.</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div id="atrModeBanner" style="padding:8px 10px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;font-size:.68rem;color:var(--muted2);display:none">
-          <span style="color:var(--accent2);font-weight:600">ATR mode active.</span>
-          Stops scale to each stock's own daily range, so the fixed % fields below are <em>inactive</em>.
-          Live: S1 <span style="font-family:var(--mono);color:var(--s1)" id="atrS1">—</span> ·
-          S2 <span style="font-family:var(--mono);color:var(--s2)" id="atrS2">—</span> ·
-          S3 <span style="font-family:var(--mono);color:var(--s3)" id="atrS3">—</span>,
-          floor <span style="font-family:var(--mono)" id="atrFloor">—</span> / cap <span style="font-family:var(--mono)" id="atrCap">—</span>.
-          <br><span style="color:var(--muted)">A fixed 3% stop sat inside the daily range of most names — 70% of all exits were noise stop-outs at a 2.1-day median hold. Set STOP_MODE=pct to re-enable these fields.</span>
-        </div>
-        <div id="fixedStopRow" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="color:var(--red);font-size:.75rem;font-weight:600;min-width:120px">Hard stop-loss</span>
-          <div style="display:flex;align-items:center;gap:4px;flex:1">
-            <span style="color:var(--red);font-size:.72rem">-</span>
-            <input type="number" id="exitSL" step="0.5" min="1" max="20" value="3.0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
-            <span style="color:var(--muted);font-size:.72rem">%</span>
-          </div>
-          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Cut losers fast</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="color:var(--green);font-size:.75rem;font-weight:600;min-width:120px">Trail activate</span>
-          <div style="display:flex;align-items:center;gap:4px;flex:1">
-            <span style="color:var(--green);font-size:.72rem">+</span>
-            <input type="number" id="exitTrailAct" step="0.5" min="1" max="50" value="5.0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
-            <span style="color:var(--muted);font-size:.72rem">%</span>
-          </div>
-          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Arm trailing stop once up this %</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="color:var(--accent);font-size:.75rem;font-weight:600;min-width:120px">Trail giveback</span>
-          <div style="display:flex;align-items:center;gap:4px;flex:1">
-            <input type="number" id="exitTrailPct" step="0.5" min="0.5" max="20" value="2.5" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
-            <span style="color:var(--muted);font-size:.72rem">%</span>
-          </div>
-          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Exit if price gives back this % from peak</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="color:var(--warn);font-size:.75rem;font-weight:600;min-width:120px">Hard take-profit</span>
-          <div style="display:flex;align-items:center;gap:4px;flex:1">
-            <span style="color:var(--green);font-size:.72rem">+</span>
-            <input type="number" id="exitHardTP" step="1" min="0" max="100" value="0" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
-            <span style="color:var(--muted);font-size:.72rem">%</span>
-          </div>
-          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">0 = disabled (let trail ride)</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="color:var(--red);font-size:.75rem;font-weight:600;min-width:120px">Daily crash</span>
-          <div style="display:flex;align-items:center;gap:4px;flex:1">
-            <span style="color:var(--red);font-size:.72rem">-</span>
-            <input type="number" id="exitDailyCrash" step="1" min="0" max="30" value="8" style="width:60px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:4px 6px;color:var(--text);font-family:var(--mono);font-size:.75rem;text-align:right">
-            <span style="color:var(--muted);font-size:.72rem">%</span>
-          </div>
-          <span style="color:var(--muted2);font-size:.65rem;font-family:var(--mono)">Exit if stock drops this % in one day</span>
-        </div>
-      </div>
-      <div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.68rem;font-family:var(--mono);color:var(--muted2)">
-        Per-position peak persisted to <span style="color:var(--accent)">position_peaks.json</span> — trail survives restarts
-      </div>
-    </div>
-  </div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">Scanner Config</div>
-      <table>
-        <thead><tr><th>Setting</th><th style="text-align:right">Value</th></tr></thead>
-        <tbody>
-          <tr><td style="color:var(--muted2)">Universe</td><td style="text-align:right;font-family:var(--mono);color:var(--accent)" id="stratUniverse">472 curated</td></tr>
-          <tr><td style="color:var(--muted2)">Scan interval</td><td style="text-align:right;font-family:var(--mono)" id="stratScanInt">30 min</td></tr>
-          <tr><td style="color:var(--muted2)">Min signal score</td><td style="text-align:right;font-family:var(--mono);color:var(--green)" id="stratMinScore">70</td></tr>
-          <!-- Both the weekly limit and the per-trade cap are PER STRATEGY —
-               capital and attempts follow conviction. Single rows hid the fact
-               that S2 is deliberately throttled while S3 gets the most of both. -->
-          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s1)">S1</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s1)" id="stratWeeklyS1">—</td></tr>
-          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s2)">S2</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s2)" id="stratWeeklyS2">—</td></tr>
-          <tr><td style="color:var(--muted2)">Weekly limit — <span style="color:var(--s3)">S3</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s3)" id="stratWeeklyS3">—</td></tr>
-          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s1)">S1</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s1)" id="stratPerTradeS1">—</td></tr>
-          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s2)">S2</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s2)" id="stratPerTradeS2">—</td></tr>
-          <tr><td style="color:var(--muted2)">Per trade max — <span style="color:var(--s3)">S3</span></td><td style="text-align:right;font-family:var(--mono);color:var(--s3)" id="stratPerTradeS3">—</td></tr>
-          <tr><td style="color:var(--muted2)">Position sizing</td><td style="text-align:right;font-family:var(--mono);color:var(--muted2)">min(strategy cap, 10% free cash)</td></tr>
-        </tbody>
+        <thead><tr><th>Instrument</th><th>Score</th><th>Price</th><th>RSI</th><th>1M</th><th>3M</th><th>vs SPY</th><th>Signal</th></tr></thead>
+        <tbody id="sig"><tr><td class="empty" colspan="8">Run a scan to see candidates</td></tr></tbody>
       </table>
     </div>
     <div class="card">
-      <div class="card-title">Notifications</div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border-radius:6px">
-          <span style="font-size:1rem">📱</span>
-          <div>
-            <div style="font-size:.76rem;font-weight:600">Telegram Alerts</div>
-            <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted)" id="stratTgStatus">checking...</div>
-          </div>
-          <button class="btn b-out b-xs" style="margin-left:auto" onclick="testTelegram()">Test</button>
-        </div>
-        <div style="padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:.65rem;font-family:var(--mono);color:var(--muted2)">
-          Pre-trade alert → Order confirmation → Profit/loss close → Portfolio status
-        </div>
+      <h2 style="padding:14px 18px 0;margin:0">Latest cached picks <em>from the bot's own scheduled scans</em></h2>
+      <div id="picks"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- ─────────── STRATEGY ─────────── -->
+  <section class="page" id="p-strategy">
+    <h2>Budgets <em>capital and attempts, per strategy</em></h2>
+    <div class="card" id="budgets"><div class="empty">Loading…</div></div>
+
+    <div class="g2">
+      <div>
+        <h2>Exit rules</h2>
+        <div class="card"><div class="pad" id="exit"><div class="mut">Loading…</div></div></div>
+      </div>
+      <div>
+        <h2>Engine</h2>
+        <div class="card"><div class="pad" id="engineCfg"><div class="mut">Loading…</div></div></div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- ─────────── MANUAL TRADE ─────────── -->
-<!-- ─────────── LOGS ─────────── -->
-<div id="s-logs" class="sec">
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title" style="margin:0">Engine Log</div>
-      <div style="display:flex;gap:7px">
-        <select id="logFilt" style="width:auto" onchange="renderLogs()">
-          <option value="all">All</option><option value="ok">Trades</option><option value="warn">Warnings</option><option value="err">Errors</option><option value="info">API</option>
-        </select>
-        <button class="btn b-out b-sm" onclick="S.logs=[];renderLogs()">Clear</button>
-      </div>
+    <h2>Reference <em>collapsed by default — open only when you need it</em></h2>
+    <div class="card">
+      <details><summary>How each strategy scores a stock</summary><div class="inner scroll" id="scoring"></div></details>
+      <details><summary>Backtest record (3y, 472 tickers)</summary><div class="inner scroll" id="backtest"></div></details>
+      <details><summary>Exit engine internals</summary><div class="inner" id="exitRef"></div></details>
     </div>
-    <div id="logBox" style="max-height:580px;overflow-y:auto"></div>
-  </div>
-</div>
+  </section>
 
-</div><!-- /main -->
-</div><!-- /app -->
+  <!-- ─────────── LOGS ─────────── -->
+  <section class="page" id="p-logs">
+    <h2>Activity <em>this browser session</em></h2>
+    <div class="bar"><button class="btn ghost sm" id="clearLog">Clear</button></div>
+    <div class="card"><div id="log"></div></div>
+  </section>
+</main>
 
-<!-- ══ CONFIG MODAL ══ -->
-<div class="modal-bg" id="cfgM">
-  <div class="modal">
-    <div class="modal-ttl">Settings</div>
-    <div class="modal-sub">Alpaca API keys are configured in <code>.env</code> on the server — never entered here.</div>
-    <div style="display:flex;flex-direction:column;gap:11px">
-      <div class="fg">
-        <div class="fl">Backend Server URL (for remote / ngrok access)</div>
-        <input type="text" id="c-backend" placeholder="e.g. http://192.168.1.5:8000 or https://xxx.ngrok.io">
-        <div style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-top:3px">Leave blank when opening from the same machine as the server.</div>
-      </div>
-      <div class="fg">
-        <div class="fl">Claude API Key (optional — AI reasoning)</div>
-        <input type="password" id="c-claude" placeholder="sk-ant-...">
-      </div>
-      <div class="fg">
-        <div class="fl">News API Key (optional — newsapi.org)</div>
-        <input type="password" id="c-news" placeholder="Free at newsapi.org">
-      </div>
-      <div style="display:flex;gap:7px;justify-content:flex-end;margin-top:4px">
-        <button class="btn b-out" onclick="closeM('cfgM')">Cancel</button>
-        <button class="btn b-warn" onclick="testConn()">Test Connection</button>
-        <button class="btn b-acc" onclick="saveConfig()">Save &amp; Connect</button>
-      </div>
-      <div id="connTest" style="display:none"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ PIN AUTH MODAL ══ -->
-<div class="modal-bg" id="pinM">
-  <div class="modal" style="width:320px;text-align:center">
-    <div class="modal-ttl" style="color:var(--accent)">🔐 Trade PIN Required</div>
-    <div style="font-size:.75rem;color:var(--muted);margin-bottom:1.2rem">Enter your 2-letter + 6-digit PIN to authorise this trade.</div>
-    <div style="position:relative;margin-bottom:.5rem">
-      <input id="pinInput" type="password" maxlength="8" autocomplete="off" placeholder="AB123456"
-        style="width:100%;box-sizing:border-box;background:#0d0f12;border:1px solid var(--border);border-radius:7px;padding:12px 16px;font-size:1.3rem;font-family:var(--mono);color:var(--fg);text-align:center;letter-spacing:.18em;outline:none"
-        oninput="pinOnInput(this)" onkeydown="if(event.key==='Enter')pinSubmit()">
-    </div>
-    <div id="pinHint" style="font-size:.68rem;color:var(--muted);margin-bottom:1rem;min-height:1rem"></div>
-    <div style="display:flex;gap:7px;justify-content:center">
-      <button class="btn b-out" onclick="pinCancel()">Cancel</button>
-      <button class="btn b-acc" id="pinBtn" onclick="pinSubmit()" disabled>Unlock</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ CONFIRM MODAL ══ -->
-<div class="modal-bg" id="confM">
-  <div class="modal" style="width:360px">
-    <div class="modal-ttl" id="confTtl">Confirm Trade</div>
-    <div id="confBody" style="font-size:.78rem;font-family:var(--mono);color:var(--muted);line-height:1.9;margin-bottom:1rem"></div>
-    <div style="display:flex;gap:7px;justify-content:flex-end">
-      <button class="btn b-out" onclick="closeM('confM')">Cancel</button>
-      <button class="btn b-acc" id="confBtn">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-'use strict';
-// ═══════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════
-const S = {
-  connected: false,
-  claudeKey:localStorage.getItem('claudek') || '',
-  newsKey:  localStorage.getItem('newsk') || '',
-  mode:     'paper',
-  engineOn: false, engTimer:null, cdTimer:null,
-  logs:[], orders:[], positions:[],
-  account:null, eqHistory:[],
-  closedTrades:[], // derived from order history for win-rate
-  slHitsThisMonth:0,
-  watchlist: JSON.parse(localStorage.getItem('wl')||'["AAPL","NVDA","MSFT","META","AMZN","TSLA"]'),
-  weights:   {},
-  todayTrades:0,
-};
+const API = location.origin;
+const S = {pos:[], orders:[], cfg:{}, cmp:{}, exit:{}, view:'closed', filt:'all'};
 
-// ═══════════════════════════════════════
-//  API LAYER — routes through local backend (Alpaca)
-// ═══════════════════════════════════════
-function getBackendUrl(){
-  const saved = localStorage.getItem('backendUrl');
-  if(saved) return saved.replace(/\/$/, '');
-  const origin = window.location.origin;
-  if(origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
-  return origin; // use same origin when deployed
+const money  = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const signed = n => (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const cls    = n => n>=0?'up':'down';
+const pct    = n => (n>=0?'+':'')+n.toFixed(2)+'%';
+const el     = id => document.getElementById(id);
+const j = async p => { try{ const r = await fetch(API+p); return r.ok ? await r.json() : null; }catch(e){ logLine('fetch failed '+p,'err'); return null; } };
+
+const STRAT = {s1:{n:'S1 Pullback',s:'S1',c:'var(--s1)'}, s2:{n:'S2 Breakout',s:'S2',c:'var(--s2)'},
+               s3:{n:'S3 Leader Dip',s:'S3',c:'var(--s3)'}, manual:{n:'Manual',s:'MAN',c:'var(--muted)'}};
+const sof = o => STRAT[(o.strategy||'').toLowerCase()] ? (o.strategy||'').toLowerCase() : '';
+function tag(k){
+  const s = STRAT[k];
+  // "Untagged" is written out rather than shown as a dash: an unattributed
+  // position is unknown, and that is worth reading as a word.
+  if(!s) return '<span class="tag" title="No BUY for this symbol in this instance\'s trade log">Untagged</span>';
+  return `<span class="tag" style="border-left-color:${s.c}">${s.s}</span>`;
 }
 
-async function api(path, method='GET', body=null){
-  log(`${method} ${path}`,'info');
-  const backendUrl = getBackendUrl();
-  try{
-    const opts = { method, headers:{'Content-Type':'application/json'} };
-    if(body && method!=='GET') opts.body = JSON.stringify(body);
-    const res = await fetch(`${backendUrl}${path}`, opts);
-    const txt = await res.text();
-    if(!res.ok){ log(`API ${res.status}: ${txt.slice(0,120)}`,'err'); return null; }
-    return txt ? JSON.parse(txt) : {};
-  }catch(e){ log(`API error: ${e.message}`,'err'); return null; }
+function logLine(msg, kind){
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">${new Date().toLocaleTimeString()}</span><span class="${kind==='err'?'down':kind==='ok'?'up':''}">${msg}</span>`;
+  const box = el('log'); box.insertBefore(d, box.firstChild);
+  while(box.children.length > 400) box.removeChild(box.lastChild);
 }
 
-// ── FETCH ACCOUNT & DERIVE ALL METRICS ──────────────────
-async function fetchAccount(){
-  const d = await api('/api/account/cash');
-  if(!d) return;
-  S.account = d;
-
-  // Alpaca account (mapped by backend): { total, free, invested, ppl, daily_ppl, currency }
-  const totalValue  = d.total     ?? 0;
-  const freeCash    = d.free      ?? 0;
-  const invested    = d.invested  ?? 0;
-  const openPnl     = d.ppl       ?? 0;
-  const dailyPnl    = d.daily_ppl ?? 0;   // intraday move since yesterday's close
-  const dailyPct    = totalValue ? (dailyPnl/totalValue*100) : 0;
-
-  // ── Portfolio Value ──
-  setEl('m-val',  fmtCur(totalValue));
-  setEl('m-val-sub', `${dailyPct>=0?'+':''}${fn(dailyPct,2)}% today`);
-  document.getElementById('m-val').className = 'mval hi';
-
-  // ── Open P&L ──
-  setEl('m-pnl', (openPnl>=0?'+':'')+fmtCur(openPnl));
-  setEl('m-pnl-sub', S.positions.length+' open positions');
-  document.getElementById('m-pnl').className = 'mval '+(openPnl>=0?'up':'down');
-
-  // ── Secondary row ──
-  setEl('m-cash', fmtCur(freeCash));
-  setEl('m-inv',  fmtCur(invested));
-  setEl('m-day',  (dailyPnl>=0?'+':'')+fmtCur(dailyPnl));
-  document.getElementById('m-day').className = 'mval '+(dailyPnl>=0?'up':'down');
-  setEl('m-pos',  S.positions.length);
-
-  // ── Account summary card ──
-  document.getElementById('accGrid').innerHTML = [
-    ['Total Value', fmtCur(totalValue)],
-    ['Free Cash',   fmtCur(freeCash)],
-    ['Invested',    fmtCur(invested)],
-    ['Open P&L',    (openPnl>=0?'+':'')+fmtCur(openPnl)],
-    ['Daily P&L',   (dailyPnl>=0?'+':'')+fmtCur(dailyPnl)],
-    ['Mode',        S.mode.toUpperCase()],
-    ['Currency',    d.currency ?? 'USD'],
-    ['Positions',   S.positions.length+' open'],
-  ].map(([l,v])=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 9px"><div style="font-size:.6rem;color:var(--muted);margin-bottom:2px">${l}</div><div style="font-size:.85rem;font-weight:700">${v}</div></div>`).join('');
-
-  // Equity history
-  S.eqHistory.push({t:new Date().toLocaleTimeString(),v:totalValue});
-  if(S.eqHistory.length>80) S.eqHistory.shift();
-  drawEqChart();
-  setEl('lastRefresh','Updated '+new Date().toLocaleTimeString());
-  log(`Account: ${fmtCur(totalValue)} | Cash: ${fmtCur(freeCash)} | P&L: ${fmtCur(openPnl)}`,'ok');
+/* ── routing ───────────────────────────────────────────── */
+function go(p){
+  document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on', s.id==='p-'+p));
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on', a.dataset.p===p));
+  location.hash = p;
+  if(p==='orders')   renderOrders();
+  if(p==='strategy') renderStrategy();
+  if(p==='signals')  renderPicks();
 }
+document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
+el('clearLog').onclick = ()=>{ el('log').innerHTML=''; };
 
-// ── FETCH POSITIONS ──────────────────────
-async function fetchPositions(){
-  const d = await api('/api/portfolio');
-  if(!d) return;
-  S.positions = Array.isArray(d) ? d : (d.positions || []);
-  renderPositions();
-  setEl('m-pos', S.positions.length);
-  setEl('sbPos', S.positions.length);
+/* ── data ──────────────────────────────────────────────── */
+async function load(){
+  const [acct, pos, health, cmp, orders, auto, exit] = await Promise.all([
+    j('/api/account/cash'), j('/api/portfolio'), j('/api/health'),
+    j('/api/strategy/compare'), j('/api/history/orders?limit=500'),
+    j('/api/auto/status'), j('/api/exit-config')
+  ]);
+  S.pos=pos||[]; S.cfg=(health&&health.config)||{}; S.cmp=cmp||{}; S.health=health||{};
+  S.orders=Array.isArray(orders)?orders:[]; S.exit=exit||{}; S.auto=auto||{};
 
-  // Recalculate open P&L from positions
-  const openPnl = S.positions.reduce((s,p)=>s+(p.ppl??0), 0);
-  setEl('m-pnl', (openPnl>=0?'+':'')+fmtCur(openPnl));
-  setEl('m-pnl-sub', S.positions.length+' open positions');
-  document.getElementById('m-pnl').className='mval '+(openPnl>=0?'up':'down');
+  if(health) el('mode').innerHTML = `<span class="dot"></span>${(health.mode||'').toUpperCase()}`;
+  if(auto) el('engine').innerHTML =
+    `<span class="dot ${auto.enabled?'':'off'}"></span>${auto.enabled?'AUTO ON':'AUTO OFF'}`;
 
-  // Quick-close list
-  renderQClose();
-  renderStratSections();   // open-position half of the per-strategy sections
-  log(`Positions: ${S.positions.length} open — unrealised P&L: ${fmtCur(openPnl)}`,'ok');
-}
-
-function renderPositions(){
-  const tbody = document.getElementById('posBody');
-  const ovBody = document.getElementById('ovPosBody');
-  if(!S.positions.length){
-    tbody.innerHTML = '<tr><td class="te" colspan="9">No open positions</td></tr>';
-    if(ovBody) ovBody.innerHTML = '<tr><td class="te" colspan="8">No open positions</td></tr>';
-    return;
+  const openPl   = S.pos.reduce((a,p)=>a+(p.ppl||0),0);
+  const invested = S.pos.reduce((a,p)=>a+(p.currentPrice||p.averagePrice)*p.quantity,0);
+  if(acct){
+    el('pv').textContent  = money(acct.total||0);
+    el('pvs').textContent = money(invested)+' invested';
+    const d=acct.daily_ppl||0; el('day').textContent=signed(d); el('day').className='v num '+cls(d);
+    el('cash').textContent = money(acct.free||0);
   }
-  tbody.innerHTML = S.positions.map(p=>{
-    const cur  = p.currentPrice ?? p.averagePrice;
-    const pnl  = p.ppl ?? (cur - p.averagePrice) * p.quantity;
-    const pct  = ((cur - p.averagePrice) / p.averagePrice) * 100;
-    const mval = cur * p.quantity;
-    const slPrice = (p.averagePrice * (1 - parseInt(document.getElementById('slR')?.value||5)/100)).toFixed(2);
-    return `<tr>
-      <td style="font-weight:700">${p.ticker}</td>
-      <td>${fn(p.quantity,0)}</td>
-      <td>${fmtCur(p.averagePrice)}</td>
-      <td>${fmtCur(cur)}</td>
-      <td>${fmtCur(mval)}</td>
-      <td class="${pnl>=0?'up':'down'}">${pnl>=0?'+':'-'}${fmtCur(Math.abs(pnl))}</td>
-      <td class="${pct>=0?'up':'down'}">${pct>=0?'+':''}${fn(pct,2)}%</td>
-      <td style="color:var(--red);font-family:var(--mono);font-size:.7rem">${fmtCur(parseFloat(slPrice))}</td>
-      <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
-    </tr>`;
+  el('open').textContent = signed(openPl); el('open').className = 'v num '+cls(openPl);
+  el('opens').textContent = S.pos.length+' position'+(S.pos.length===1?'':'s');
+
+  renderPos(); renderStrats(); renderOrders();
+  if(el('p-strategy').classList.contains('on')) renderStrategy();
+}
+
+function renderPos(){
+  el('poscount').textContent = S.pos.length ? S.pos.length+' open' : '';
+  const b = el('pos');
+  if(!S.pos.length){ b.innerHTML='<tr><td class="empty" colspan="9">No open positions</td></tr>'; return; }
+  // Flat and sorted by size. No per-strategy block headers: the Strategy
+  // column already carries that, and grouping rows under an "Untagged" heading
+  // is what made a bulk close-all action look reasonable.
+  b.innerHTML = [...S.pos]
+    .sort((x,y)=>(y.currentPrice||y.averagePrice)*y.quantity-(x.currentPrice||x.averagePrice)*x.quantity)
+    .map(p=>{
+      const ltp=p.currentPrice??p.averagePrice, pl=p.ppl??(ltp-p.averagePrice)*p.quantity;
+      const ch=((ltp-p.averagePrice)/p.averagePrice)*100, val=ltp*p.quantity;
+      const nm=p.name&&p.name!==p.ticker?`<div class="sub">${p.name}</div>`:'';
+      return `<tr>
+        <td><span class="sym">${p.ticker}</span>${nm}</td>
+        <td>${tag(sof(p))}</td>
+        <td class="num">${p.quantity.toFixed(2)}</td>
+        <td class="num">${money(p.averagePrice)}</td>
+        <td class="num">${money(ltp)}</td>
+        <td class="num">${money(val)}</td>
+        <td class="num ${cls(pl)}">${signed(pl)}</td>
+        <td class="num ${cls(ch)}">${pct(ch)}</td>
+        <td><button class="btn danger sm" data-close="${p.ticker}" data-qty="${p.quantity}">Exit</button></td>
+      </tr>`;
+    }).join('');
+}
+
+// Individual exits only — no bulk action. Closing is confirmed against the row
+// the user is looking at, which states what the position actually is.
+el('pos').addEventListener('click', e=>{
+  const b = e.target.closest('[data-close]'); if(!b) return;
+  const t=b.dataset.close, q=parseFloat(b.dataset.qty);
+  if(!confirm(`Exit ${t} × ${q.toFixed(2)} at market?`)) return;
+  b.disabled=true; logLine(`Exit ${t} × ${q.toFixed(2)} requested`);
+  fetch(API+'/api/orders/sell',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ticker:t,quantity:q})})
+    .then(async r=>{
+      const d=await r.json().catch(()=>({}));
+      // Report the API result, never an exception from UI code that runs after
+      // the order is already in — that mistake made filled orders look failed
+      // and invited re-submitting them.
+      if(r.ok) logLine(`Exit ${t} accepted — ${d.status||'submitted'}`,'ok');
+      else     logLine(`Exit ${t} rejected — ${(d.detail||r.status)}`,'err');
+      setTimeout(load, 1200);
+    })
+    .catch(err=>{ logLine(`Exit ${t} — network error: ${err.message}`,'err'); b.disabled=false; });
+});
+
+function renderStrats(){
+  const caps=S.cfg.per_trade_max_by_strategy||{}, lims=S.cfg.weekly_limit_by_strategy||{};
+  el('strats').innerHTML = ['s1','s2','s3'].map(k=>{
+    const st=S.cmp[k]||{}, meta=STRAT[k];
+    const mine=S.pos.filter(p=>sof(p)===k);
+    const val=mine.reduce((a,p)=>a+(p.currentPrice||p.averagePrice)*p.quantity,0);
+    const closed=st.closed_trades||0, net=st.net_pnl||0;
+    const budget=`${caps[k]!=null?money(caps[k]):'—'} · ${lims[k]!=null?lims[k]+'/wk':'—'}`;
+    const name=`<div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>`;
+    if(!mine.length && !closed)
+      return `<div class="srow">${name}<div class="idle">No trades yet · budget ${budget}</div></div>`;
+    return `<div class="srow">${name}
+      <div><div class="sk">Open</div><div class="sv num">${mine.length?mine.length+' · '+money(val):'—'}</div></div>
+      <div><div class="sk">Closed</div><div class="sv num">${closed?closed+' · '+st.win_rate+'%':'—'}</div></div>
+      <div><div class="sk">Realised</div><div class="sv num ${closed?cls(net):''}">${closed?signed(net):'—'}</div></div>
+      <div><div class="sk">Budget</div><div class="sv num">${budget}</div></div></div>`;
   }).join('');
-  if(ovBody){
-    if(!S.positions.length){
-      ovBody.innerHTML = '<tr><td class="te" colspan="9">No open positions</td></tr>';
-    } else {
-      // Grouped into the same S1/S2/S3/Untagged blocks as Order History, so
-      // open exposure can be read per strategy against its per-trade cap.
-      const buckets = {s1:[],s2:[],s3:[],manual:[],untagged:[]};
-      S.positions.forEach(p=>buckets[_stratOf(p)||'untagged'].push(p));
-      let html = '';
-      for(const {k,title,colour} of STRAT_BLOCKS){
-        const ps = buckets[k];
-        if(!ps.length) continue;   // unlike orders, an empty block here is just noise
-        const mv  = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
-        const pl  = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
-        const plc = pl>=0?'var(--green)':'var(--red)';
-        // NO bulk-close button here, deliberately. "Untagged" means "no BUY in
-        // THIS instance's trade log" — which is not the same as "unknown junk".
-        // With a local server and the deployed one sharing one Alpaca account,
-        // each sees the other's fills as untagged, so a bulk close offered to
-        // liquidate real, attributed positions. It did exactly that once:
-        // DLTR (S1) and MPLX/NTRA/VRTX (S2) were sold from the deployed
-        // dashboard because that instance's log had no BUY for them.
-        // Close positions individually, where the row shows what it is.
-        const bulk = '';
-        html += `<tr><td colspan="9" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;`+
-          `color:${colour};border-bottom:2px solid var(--border2)">${title}${bulk}`+
-          `<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">`+
-          `${ps.length} position${ps.length===1?'':'s'} · ${fmtCur(mv)} value · `+
-          `<span style="color:${plc};font-weight:700">${pl>=0?'+':''}${fmtCur(pl)}</span></span></td></tr>`;
-        html += ps.map(_posRow).join('');
-      }
-      ovBody.innerHTML = html;
-    }
-  }
 }
 
-// ── PER-STRATEGY OVERVIEW SECTIONS ──────────────────────
-// Cached so the section can render on every positions refresh without
-// re-fetching config it already has.
-let _stratCfg = null;
-async function _loadStratCfg(){
-  if(_stratCfg) return _stratCfg;
-  try{
-    const r = await fetch(getBackendUrl()+'/api/health');
-    if(r.ok){ const d = await r.json(); _stratCfg = d.config || {}; }
-  }catch(e){ console.warn('strategy config fetch failed:', e); }
-  return _stratCfg || {};
-}
-
-async function renderStratSections(){
-  const host = document.getElementById('stratSections');
-  if(!host) return;
-  const cfg    = await _loadStratCfg();
-  const caps   = cfg.per_trade_max_by_strategy || {};
-  const limits = cfg.weekly_limit_by_strategy  || {};
-  const closed = S.closedTrades || [];
-
-  host.innerHTML = ['s1','s2','s3'].map(k=>{
-    const st = STRAT_STYLE[k];
-    const ps = (S.positions||[]).filter(p=>_stratOf(p)===k);
-    const mv = ps.reduce((s,p)=>s+(p.currentPrice ?? p.averagePrice)*p.quantity, 0);
-    const op = ps.reduce((s,p)=>s+(p.ppl ?? ((p.currentPrice ?? p.averagePrice)-p.averagePrice)*p.quantity), 0);
-
-    const ct   = closed.filter(t=>t.strategy===k);
-    const wins = ct.filter(t=>t.pnl>0).length;
-    const net  = ct.reduce((s,t)=>s+t.pnl, 0);
-    const wr   = ct.length ? (wins/ct.length*100) : null;
-
-    const cap = caps[k] ?? cfg.per_trade_max_usd;
-    const lim = limits[k] ?? cfg.weekly_trade_limit;
-    const c = (v,pos)=>`color:${v>=0?'var(--green)':'var(--red)'}`;
-    const cell = (lbl,val,style='')=>
-      `<div style="padding:6px 8px;background:var(--bg3);border-radius:5px">
-         <div style="font-size:.55rem;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.4px">${lbl}</div>
-         <div style="font-size:.9rem;font-weight:700;font-family:var(--mono);${style}">${val}</div>
-       </div>`;
-
-    // An idle strategy says so explicitly rather than rendering as all-zeros,
-    // which reads like a bug (S3 has never traded — that is expected, not broken).
-    const idle = !ps.length && !ct.length
-      ? `<div style="margin-top:7px;font-size:.62rem;color:var(--muted2);font-family:var(--mono)">No positions or closed trades yet</div>`
-      : '';
-
-    return `<div class="card-sm" style="border-left:3px solid ${st.colour}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
-        <span style="font-weight:700;font-size:.78rem;color:${st.colour}">${st.title}</span>
-        ${_stratBadge(k)}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
-        ${cell('Open', ps.length ? `${ps.length} · ${fmtCur(mv)}` : '—')}
-        ${cell('Open P&L', ps.length ? `${op>=0?'+':''}${fmtCur(op)}` : '—', ps.length?c(op):'')}
-        ${cell('Closed', ct.length || '—')}
-        ${cell('Win rate', wr===null ? '—' : fn(wr,1)+'%')}
-        ${cell('Net P&L', ct.length ? `${net>=0?'+':''}${fmtCur(net)}` : '—', ct.length?c(net):'')}
-        ${cell('Budget', (cap!=null?fmtCur(parseFloat(cap)):'—')+(lim!=null?` · ${lim}/wk`:''), `color:${st.colour}`)}
-      </div>
-      ${idle}
-    </div>`;
-  }).join('');
-
-  const note = document.getElementById('stratSecNote');
-  const untagged = (S.positions||[]).filter(p=>!_stratOf(p)).length;
-  if(note) note.textContent = untagged ? `${untagged} untagged position${untagged===1?'':'s'} not shown above` : '';
-}
-
-function _posRow(p){
-  const cur  = p.currentPrice ?? p.averagePrice;
-  const pnl  = p.ppl ?? (cur - p.averagePrice) * p.quantity;
-  const pct  = ((cur - p.averagePrice) / p.averagePrice) * 100;
-  const mval = cur * p.quantity;
-  // This used to be an inline copy that only knew s1/s2, so an S3
-  // position rendered as a bare dash. Share the one badge helper.
-  const sk = _stratOf(p);
-  const strat = _stratBadge(sk);
-  // Colour-band the row by strategy. The P&L tint stays as the row background
-  // (that is what the eye reads first); the strategy owns the left edge, so
-  // S1/S2/S3 stay distinguishable even when several are green at once.
-  const bandC = STRAT_STYLE[sk]?.colour || 'var(--muted)';
-  const nameStr = p.name && p.name !== p.ticker ? `<div style="font-size:.6rem;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${p.name}</div>` : '';
-  return `<tr style="background:${pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
-    <td style="border-left:3px solid ${bandC}"><div style="font-weight:700">${p.ticker}</div>${nameStr}</td>
-    <td style="text-align:center">${strat}</td>
-    <td style="font-family:var(--mono)">${fn(p.quantity,2)}</td>
-    <td style="font-family:var(--mono)">${fmtCur(p.averagePrice)}</td>
-    <td style="font-family:var(--mono)">${fmtCur(cur)}</td>
-    <td style="font-family:var(--mono)">${fmtCur(mval)}</td>
-    <td style="font-weight:700" class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}${fmtCur(pnl)}</td>
-    <td style="font-weight:700" class="${pct>=0?'up':'down'}">${pct>=0?'+':''}${fn(pct,2)}%</td>
-    <td><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></td>
-  </tr>`;
-}
-
-// ── FETCH ORDERS & DERIVE WIN RATE ──────────────────────
-async function fetchOrders(){
-  // Pull deep history — FIFO matching needs the opening buy, which may be far
-  // older than the last 50 orders.
-  const d = await api('/api/history/orders?limit=500');
-  if(!d) return;
-  S.orders = Array.isArray(d) ? d : (d.data || []);
-  deriveStats();
+/* ── orders / closed P&L ───────────────────────────────── */
+document.querySelector('#p-orders .bar').addEventListener('click', e=>{
+  const c=e.target.closest('.chip'); if(!c) return;
+  if(c.dataset.view){ S.view=c.dataset.view;
+    document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('on',x===c)); }
+  if(c.dataset.of){ S.filt=c.dataset.of;
+    document.querySelectorAll('[data-of]').forEach(x=>x.classList.toggle('on',x===c)); }
   renderOrders();
-  log(`Orders: ${S.orders.length} records loaded`,'ok');
-}
+});
 
-function deriveStats(){
-  // Pair buys and sells to compute closed trade P&L (Alpaca order format)
-  const filled = S.orders.filter(o=>o.status==='filled');
-  const buys   = filled.filter(o=>o.side==='buy');
-  const sells  = filled.filter(o=>o.side==='sell');
-
-  // FIFO lot matching. Alpaca returns orders newest-first and the bot can buy
-  // the same ticker more than once, so pair oldest buy lot to each sell and
-  // draw lots down share by share — one-sell-to-one-buy loses half the P&L on
-  // a doubled position.
-  const byTime = (a,b)=> new Date(a.filled_at||a.created_at) - new Date(b.filled_at||b.created_at);
-  const lots = {};
-  buys.slice().sort(byTime).forEach(b=>{
-    const qty = parseFloat(b.filled_qty||b.qty||0);
-    const px  = parseFloat(b.filled_avg_price||0);
-    // No `||'s1'` fallback: an untagged buy is unknown, not an S1 trade.
-    if(qty>0 && px>0) (lots[b.symbol] = lots[b.symbol]||[]).push({qty, px, date:new Date(b.filled_at||b.created_at), strategy:_stratOf(b)});
-  });
-
-  const tradeResults = [];
-  const closedTrades = [];
-  sells.slice().sort(byTime).forEach(sell=>{
-    let remaining    = parseFloat(sell.filled_qty||sell.qty||0);
-    const sellPrice  = parseFloat(sell.filled_avg_price||0);
-    const sellDate   = new Date(sell.filled_at||sell.created_at);
-    const queue      = lots[sell.symbol] || [];
-    if(!(remaining>0) || !(sellPrice>0)) return;
-
-    while(remaining > 1e-9 && queue.length){
-      const lot = queue[0];
-      const qty = Math.min(remaining, lot.qty);
-      const buyPrice = lot.px;
-      const pnl = (sellPrice - buyPrice) * qty;
-      const pct = buyPrice ? ((sellPrice - buyPrice) / buyPrice * 100) : 0;
-      const heldMs = sellDate - lot.date;
-      const heldDays = Math.floor(heldMs / 86400000);
-      const heldHrs = Math.floor((heldMs % 86400000) / 3600000);
-      tradeResults.push(pnl);
-      closedTrades.push({ symbol: sell.symbol, strategy: lot.strategy, qty, buyPrice, sellPrice, pnl, pct, buyDate: lot.date, sellDate, heldDays, heldHrs });
-      lot.qty   -= qty;
-      remaining -= qty;
-      if(lot.qty <= 1e-9) queue.shift();
-    }
-  });
-  S.closedTrades = closedTrades;
-  renderStratSections();   // closed-trade half of the per-strategy sections
-
-  const wins   = tradeResults.filter(p=>p>0).length;
-  const total  = tradeResults.length;
-  const winRate= total ? (wins/total*100) : null;
-  const avgPnl = total ? (tradeResults.reduce((a,b)=>a+b,0)/total) : null;
-
-  // Stop loss hits: closed trades with loss >= SL%
-  // Losing exits this month, counted off the matched round-trips. The old
-  // filter read Trade212 order fields (type/dateCreated/_isSL) that Alpaca
-  // never returns, so it was always 0 and fell back to an all-time count.
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const slHits = closedTrades.filter(t => t.pnl < 0 && t.sellDate >= monthStart).length;
-  S.slHitsThisMonth = slHits;
-
-  // ── Update metric cards ──
-  // ── Booked (realised) P&L, split into gains and losses ──
-  // Only counts closed round-trips. Open positions are unrealised and belong
-  // in the Open P&L card, never here.
-  const grossWin  = tradeResults.filter(p=>p>0).reduce((a,b)=>a+b,0);
-  const grossLoss = tradeResults.filter(p=>p<=0).reduce((a,b)=>a+b,0); // negative
-  const netBooked = grossWin + grossLoss;
-  const lossCount = total - wins;
-
-  if(total){
-    setEl('m-booked-win', '+'+fmtCur(grossWin));
-    setEl('m-booked-win-sub', `${wins} winning trade${wins!==1?'s':''}`);
-    document.getElementById('m-booked-win').className='mval up';
-
-    setEl('m-booked-loss', fmtCur(grossLoss));
-    setEl('m-booked-loss-sub', `${lossCount} losing trade${lossCount!==1?'s':''}`);
-    document.getElementById('m-booked-loss').className='mval down';
-
-    setEl('m-booked-net', (netBooked>=0?'+':'')+fmtCur(netBooked));
-    setEl('m-booked-net-sub', `Across ${total} closed trade${total!==1?'s':''}`);
-    document.getElementById('m-booked-net').className='mval '+(netBooked>=0?'up':'down');
-  } else {
-    ['m-booked-win','m-booked-loss','m-booked-net'].forEach(id=>{
-      setEl(id,'—'); document.getElementById(id).className='mval nu';
-    });
-    setEl('m-booked-win-sub','No closed trades yet');
-    setEl('m-booked-loss-sub','No closed trades yet');
-    setEl('m-booked-net-sub','No closed trades yet');
-  }
-
-  if(winRate!==null){
-    setEl('m-wr', fn(winRate,1)+'%');
-    setEl('m-wr-sub', `${wins}W / ${total-wins}L of ${total} trades`);
-    document.getElementById('m-wr').className='mval '+(winRate>=50?'up':'down');
-  } else {
-    setEl('m-wr','—');setEl('m-wr-sub','No closed trades yet');
-    document.getElementById('m-wr').className='mval nu';
-  }
-
-  if(avgPnl!==null){
-    setEl('m-avg', (avgPnl>=0?'+':'')+fmtCur(avgPnl));
-    setEl('m-avg-sub', total+' closed trade'+(total!==1?'s':''));
-    document.getElementById('m-avg').className='mval '+(avgPnl>=0?'up':'down');
-  } else {
-    setEl('m-avg','—');setEl('m-avg-sub','No closed trades yet');
-    document.getElementById('m-avg').className='mval nu';
-  }
-
-  setEl('m-sl', slHits);
-  setEl('m-sl-sub', 'Losses this month');
-  document.getElementById('m-sl').className='mval '+(slHits>3?'down':'nu');
-
-  // Realised P&L breakdown
-  const realized = tradeResults.reduce((a,b)=>a+b,0);
-  document.getElementById('realisedBreak').innerHTML = total
-    ? `<span class="${realized>=0?'up':'down'}">${realized>=0?'+':''}${fmtCur(realized)}</span> across ${total} closed trades — ${wins} profitable`
-    : 'No closed trades yet.';
-
-  // Monthly progress bar (rough estimate: daily P&L vs account start)
-  if(S.account){
-    const totalVal = S.account.total ?? 0;
-    const openPnl = S.account.ppl ?? 0;
-    // MTD = unrealised on open positions + everything banked this month.
-    const realizedMTD = closedTrades
-      .filter(t => t.sellDate >= monthStart)
-      .reduce((a,t) => a + t.pnl, 0);
-    const monthlyEst = openPnl + realizedMTD;
-    const pct = totalVal ? (monthlyEst/totalVal*100) : 0;
-    setEl('mtdR', (pct>=0?'+':'')+fn(pct,2)+'% MTD (est.)');
-    document.getElementById('mtdBar').style.width = Math.min(Math.max(pct/10*100,0),100)+'%';
-    document.getElementById('mtdBar').style.background = pct>=4?'var(--green)':pct>=2?'var(--warn)':'var(--red)';
-  }
-  renderPerf();
-}
-
-let _closedStratFilter = 'all';
-
-function filterClosedByStrat(strat, btn){
-  _closedStratFilter = strat;
-  document.querySelectorAll('.closedStratFilter').forEach(b=>{b.classList.remove('b-acc','on');b.classList.add('b-out');});
-  btn.classList.remove('b-out');btn.classList.add('b-acc','on');
-  renderPerf();
-}
-
-// One source of truth for how a strategy looks anywhere in the dashboard.
-const STRAT_STYLE = {
-  s1: {name:'S1', title:'S1 — Pullback',     colour:'var(--s1)', bg:'var(--s1-bg)', bd:'var(--s1-bd)'},
-  s2: {name:'S2', title:'S2 — VCP Breakout', colour:'var(--s2)', bg:'var(--s2-bg)', bd:'var(--s2-bd)'},
-  s3: {name:'S3', title:'S3 — Leader Dip',   colour:'var(--s3)', bg:'var(--s3-bg)', bd:'var(--s3-bd)'},
-  // Hand-placed via the Execute button. Its own tag, not a strategy: it does
-  // not consume any strategy's weekly budget or Kelly sample.
-  manual: {name:'MAN', title:'Manual', colour:'var(--purple)', bg:'rgba(167,139,250,.12)', bd:'rgba(167,139,250,.3)'},
-};
-
-function _stratBadge(s){
-  const st = STRAT_STYLE[s];
-  if(st) return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:${st.bg};border:1px solid ${st.bd};color:${st.colour}">${st.name}</span>`;
-  // No badge means the trade log could not attribute it — NOT that it was S1.
-  return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.6rem;font-weight:600;font-family:var(--mono);background:var(--bg3);color:var(--muted2)" title="Not attributed — no BUY entry in the trade log for this symbol">${(s||'—').toUpperCase()}</span>`;
-}
-
-function renderPerf(){
-  const all = S.closedTrades || [];
-  const trades = _closedStratFilter === 'all' ? all : all.filter(t=>t.strategy===_closedStratFilter);
-  const wins = trades.filter(t=>t.pnl>0);
-  const losses = trades.filter(t=>t.pnl<=0);
-  const net = trades.reduce((s,t)=>s+t.pnl,0);
-  document.getElementById('pfTotal').textContent = trades.length;
-  document.getElementById('pfWins').textContent = wins.length;
-  document.getElementById('pfLosses').textContent = losses.length;
-  const netEl = document.getElementById('pfNet');
-  netEl.textContent = trades.length ? (net>=0?'+':'')+fmtCur(net) : '—';
-  netEl.style.color = net>=0?'var(--green)':'var(--red)';
-  const sumEl = document.getElementById('perfSummary');
-  if(sumEl) sumEl.textContent = _closedStratFilter==='all' ? '' : _closedStratFilter.toUpperCase()+' only';
-  const tbody = document.getElementById('perfBody');
-  if(!trades.length){ tbody.innerHTML='<tr><td class="te" colspan="9">No closed trades yet</td></tr>'; return; }
-  tbody.innerHTML = trades.sort((a,b)=>b.sellDate-a.sellDate).map(t=>{
-    const col = t.pnl>=0?'var(--green)':'var(--red)';
-    const icon = t.pnl>=0?'▲':'▼';
-    const held = t.heldDays>0 ? t.heldDays+'d '+t.heldHrs+'h' : t.heldHrs+'h';
-    return `<tr style="background:${t.pnl>=0?'rgba(34,197,94,.03)':'rgba(244,63,94,.03)'}">
-      <td style="font-size:.66rem;color:var(--muted)">${t.sellDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
-      <td style="text-align:center">${_stratBadge(t.strategy)}</td>
-      <td style="font-weight:700">${t.symbol}</td>
-      <td style="font-family:var(--mono)">${fn(t.qty,2)}</td>
-      <td style="font-family:var(--mono)">${fmtCur(t.buyPrice)}</td>
-      <td style="font-family:var(--mono)">${fmtCur(t.sellPrice)}</td>
-      <td style="font-weight:700;color:${col}">${icon} ${t.pnl>=0?'+':''}${fmtCur(t.pnl)}</td>
-      <td style="font-weight:700;color:${col}">${t.pct>=0?'+':''}${fn(t.pct,2)}%</td>
-      <td style="font-size:.66rem;color:var(--muted)">${held}</td>
-    </tr>`;
-  }).join('');
-}
-
-// Strategy blocks always render in this order. Order History keeps an empty
-// block so "S3 placed nothing" is visible rather than invisible; the positions
-// table drops empty ones. `untagged` catches rows the backend could not
-// attribute — see the note on _stratOf().
-const STRAT_BLOCKS = [
-  ...['s1','s2','s3','manual'].map(k=>({k, title:STRAT_STYLE[k].title, colour:STRAT_STYLE[k].colour})),
-  {k:'untagged', title:'Untagged', colour:'var(--muted2)'},
-];
-
-// An order is only S1 if the trade log actually says so. The backend used to
-// default every unmatched symbol to "s1", which made positions opened before
-// the state volume existed look like S1 trades they were never part of.
-// Returns '' when the strategy is unknown, so the badge renders a dash.
-function _stratOf(o){
-  const s = (o.strategy||'').toLowerCase();
-  return STRAT_STYLE[s] ? s : '';
-}
-
-function _ordRow(o, cols){
-  const sc = {filled:'bdg-ok',canceled:'bdg-err',pending_new:'bdg-pend'}[o.status]||'bdg-hold';
-  const tc = o.side==='buy'?'bdg-buy':'bdg-sell';
-  const qty = parseFloat(o.filled_qty||o.qty||0);
-  const price = parseFloat(o.filled_avg_price||o.limit_price||0);
-  const total = price * qty;
-  const when = o.created_at
-    ? (cols==='date'
-        ? new Date(o.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
-        : new Date(o.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})+' '+
-          new Date(o.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}))
-    : '—';
-  return `<tr>
-    <td style="color:var(--muted);font-size:.66rem">${when}</td>
-    <td style="font-weight:700">${o.symbol??'—'}</td>
-    <td style="text-align:center">${_stratBadge(_stratOf(o))}</td>
-    <td><span class="bdg ${tc}">${o.side?.toUpperCase()??'—'}</span></td>
-    <td>${fn(qty,2)}</td>
-    <td>${fmtCur(price)}</td>
-    <td>${total?fmtCur(total):'—'}</td>
-    <td><span class="bdg ${sc}">${o.status??'—'}</span></td>
-    <td style="font-size:.65rem;color:var(--muted)">${o._reason??'—'}</td>
-  </tr>`;
-}
-
-function _ordHeaderRow(label, right, colour){
-  return `<tr><td colspan="9" style="background:var(--bg3);padding:8px 10px;font-weight:700;font-size:.75rem;`+
-    `color:${colour||'var(--text)'};border-bottom:2px solid var(--border2)">${label}`+
-    `<span style="float:right;font-size:.65rem;font-weight:400;color:var(--muted)">${right}</span></td></tr>`;
+function allClosed(){
+  const out=[];
+  for(const k of ['s1','s2','s3']) for(const r of ((S.cmp[k]||{}).closed)||[]) out.push(r);
+  return out.sort((a,b)=>String(b.sell_date||'').localeCompare(String(a.sell_date||'')));
 }
 
 function renderOrders(){
-  const f = document.getElementById('ordFilt')?.value || 'all';
-  const g = document.getElementById('ordGroup')?.value || 'strategy';
-  let orders = [...S.orders];
-  if(f!=='all') orders=orders.filter(o=>o.type?.includes(f)||o.status===f||o.side?.toUpperCase()===f);
-  orders.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
-  const tbody = document.getElementById('ordBody');
-  if(!orders.length){ tbody.innerHTML='<tr><td class="te" colspan="9">No orders</td></tr>'; return; }
+  const closed = allClosed();
+  const shown  = S.filt==='all' ? closed : closed.filter(r=>(r.strategy||'')===S.filt);
+  const wins   = shown.filter(r=>r.pnl>0).length;
+  const net    = shown.reduce((a,r)=>a+r.pnl,0);
+  el('oTot').textContent  = shown.length||'—';
+  el('oTotS').textContent = S.filt==='all'?'All strategies':STRAT[S.filt].n;
+  el('oWin').textContent  = shown.length?(wins/shown.length*100).toFixed(1)+'%':'—';
+  el('oWinS').textContent = shown.length?`${wins}W / ${shown.length-wins}L`:' ';
+  el('oPnl').textContent  = shown.length?signed(net):'—';
+  el('oPnl').className    = 'v num '+(shown.length?cls(net):'');
+  el('oCnt').textContent  = S.orders.length||'—';
 
-  let html = '';
+  el('closedWrap').style.display = S.view==='closed'?'':'none';
+  el('ordWrap').style.display    = S.view==='orders'?'':'none';
 
-  if(g==='strategy'){
-    const buckets = {s1:[],s2:[],s3:[],manual:[],untagged:[]};
-    orders.forEach(o=>buckets[_stratOf(o)||'untagged'].push(o));
-    for(const {k,title,colour} of STRAT_BLOCKS){
-      const ords = buckets[k];
-      // Keep an empty block for the three real strategies -- "S3 placed
-      // nothing" is a fact worth showing. Manual/Untagged are only meaningful
-      // when non-empty, so drop them rather than pad the table.
-      if(!ords.length && (k==='manual' || k==='untagged')) continue;
-      // Bought capital in this block — what the per-strategy cap is spending.
-      const bought = ords.reduce((s,o)=>o.side==='buy'&&o.status==='filled'
-        ? s+parseFloat(o.filled_avg_price||0)*parseFloat(o.filled_qty||0) : s, 0);
-      const buys  = ords.filter(o=>o.side==='buy').length;
-      const sells = ords.filter(o=>o.side==='sell').length;
-      html += _ordHeaderRow(title,
-        ords.length ? `${buys} buy${buys===1?'':'s'} · ${sells} sell${sells===1?'':'s'} · ${fmtCur(bought)} bought`
-                    : 'no orders',
-        colour);
-      html += ords.length
-        ? ords.map(o=>_ordRow(o,'strategy')).join('')
-        : `<tr><td colspan="9" style="text-align:center;color:var(--muted2);font-size:.68rem;padding:12px">This strategy has not placed an order yet</td></tr>`;
-    }
-    tbody.innerHTML = html;
-    return;
+  if(S.view==='closed'){
+    el('closed').innerHTML = shown.length ? shown.map(r=>`<tr>
+        <td class="mut">${r.sell_date?new Date(r.sell_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—'}</td>
+        <td><span class="sym">${r.symbol}</span></td>
+        <td>${tag(sof(r))}</td>
+        <td class="num">${(r.qty||0).toFixed(2)}</td>
+        <td class="num">${money(r.buy_price||0)}</td>
+        <td class="num">${money(r.sell_price||0)}</td>
+        <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
+        <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`).join('')
+      : `<tr><td class="empty" colspan="8">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
+  } else {
+    const o = S.filt==='all' ? S.orders : S.orders.filter(x=>(x.strategy||'')===S.filt);
+    el('orders').innerHTML = o.length ? o.slice(0,300).map(x=>{
+      const q=parseFloat(x.filled_qty||x.qty||0), p=parseFloat(x.filled_avg_price||x.limit_price||0);
+      return `<tr>
+        <td class="mut">${x.created_at?new Date(x.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+        <td><span class="sym">${x.symbol||'—'}</span></td>
+        <td>${tag(sof(x))}</td>
+        <td class="${x.side==='buy'?'':'mut'}">${(x.side||'').toUpperCase()}</td>
+        <td class="num">${q.toFixed(2)}</td>
+        <td class="num">${p?money(p):'—'}</td>
+        <td class="num">${p&&q?money(p*q):'—'}</td>
+        <td class="mut">${x.status||'—'}</td></tr>`;
+    }).join('') : '<tr><td class="empty" colspan="8">No orders</td></tr>';
   }
-
-  const groups = {};
-  orders.forEach(o=>{
-    const d = o.created_at ? new Date(o.created_at).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
-    (groups[d]||(groups[d]=[])).push(o);
-  });
-  for(const [date, ords] of Object.entries(groups)){
-    html += _ordHeaderRow(`📅 ${date}`, `${ords.length} order${ords.length>1?'s':''}`);
-    html += ords.map(o=>_ordRow(o,'date')).join('');
-  }
-  tbody.innerHTML = html;
 }
 
-// ── PLACE ORDER ──────────────────────────
-async function placeTrade(ticker, dir, qty, reason='Auto', limitPrice=null){
-  const ep = dir==='BUY' ? '/api/orders/buy' : '/api/orders/sell';
-  const body = { ticker, quantity: qty };
-  log(`Placing ${dir} ${ticker} ×${qty} [${S.mode.toUpperCase()}]`,'ok');
-  const res = await api(ep,'POST',body);
-  if(res){
-    S.todayTrades++;
-    // Add optimistic local entry (Alpaca format)
-    const order = {
-      symbol: ticker, side: dir.toLowerCase(), qty: String(qty),
-      filled_avg_price: String(res.filled_avg_price ?? 0),
-      status: res.status ?? 'pending_new',
-      created_at: new Date().toISOString(),
-      _reason: reason,
-    };
-    S.orders.unshift(order);
-    renderOrders();
-    log(`${dir} ${ticker} ×${qty} — ${res.status??'submitted'}`,'ok');
-    addRecent({ticker,dir,qty,price:parseFloat(res.filled_avg_price??0),status:res.status??'pending',reason});
-    deriveStats();
-    return res;
-  }
-  return null;
-}
-
-async function autoTrade(ticker, price, signal, trend, rsiVal){
-  const notional = parseFloat(document.getElementById('perTrade')?.value || 500);
-  const msg = `Buy $${notional} of ${ticker}?\n\nPrice: $${price.toFixed(2)}\nSignal: ${signal}\nRSI: ${rsiVal}\n\nThis places a real paper order on Alpaca.`;
-  requirePin(()=>confirm2(msg, `Confirm BUY ${ticker}`, async () => {
-    log(`Placing BUY $${notional} of ${ticker}...`, 'ok');
-    const res = await api('/api/orders/buy', 'POST', { ticker, notional });
-    if(res){
-      log(`✓ BUY ${ticker} $${notional} submitted — status: ${res.status ?? 'pending'}`, 'ok');
-      showToast(`✓ BUY ${ticker} $${notional} — ${res.status ?? 'accepted'}`, true);
-      addRecent({ticker, dir:'BUY', qty: notional, price, status: res.status ?? 'pending', reason: signal});
-      deriveStats();
-      await fetchAccount();
+/* ── signals ───────────────────────────────────────────── */
+function renderPicks(){
+  const box=el('picks'), rows=[];
+  for(const k of ['s1','s2','s3']){
+    const p=(S.cmp[k+'_picks'])||[], at=S.cmp[k+'_scanned_at'];
+    const meta=STRAT[k];
+    if(!p.length){
+      rows.push(`<div class="srow"><div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>
+        <div class="idle">No cached scan yet</div></div>`);
     } else {
-      showToast(`✗ Order failed — check Engine Logs`, false);
+      rows.push(`<div class="srow"><div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>
+        <div style="grid-column:2/-2">${p.slice(0,4).map(x=>`<span class="num">${x.ticker} <b class="mut">${x.score}</b></span>`).join(' &nbsp; ')}</div>
+        <div class="mut" style="font-size:11px">${at?new Date(at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div></div>`);
     }
-  }));
-}
-
-async function setStopLoss(ticker, qty, price){
-  // Alpaca stop orders can be placed via /api/orders/buy with type=stop
-  // For now log a reminder — full bracket order support coming
-  log(`Reminder: set a stop loss manually for ${ticker} at ${fmtCur(price)}`,'warn');
-}
-async function closePos(ticker,qty){ requirePin(()=>confirm2(`Close ${ticker} ×${qty}?`,'Confirm Close',()=>placeTrade(ticker,'SELL',qty,'Manual close'))); }
-
-function manOrder(dir){
-  const sym=document.getElementById('mSym').value.trim().toUpperCase();
-  const qty=parseFloat(document.getElementById('mQty').value);
-  const price=parseFloat(document.getElementById('mPrice').value)||null;
-  const note=document.getElementById('mNote').value||'Manual trade';
-  if(!sym||!qty){ log('Fill symbol and quantity','warn'); return; }
-  requirePin(()=>confirm2(`${dir} ${qty} × ${sym}${price?` @ ${fmtCur(price)}`:' at market'}\n\nStop Loss: −${getSL()}%\nTake Profit: +${getTP()}%\nReason: ${note}`,`Confirm ${dir}`,()=>placeTrade(sym,dir,qty,note,price)));
-}
-function updatePrev(){
-  const sym=document.getElementById('mSym').value.toUpperCase();
-  const qty=document.getElementById('mQty').value;
-  document.getElementById('oPrev').innerHTML = sym
-    ? `<div>Symbol: <strong style="color:var(--accent)">${sym}</strong></div><div>Qty: <strong>${qty}</strong></div><div>Stop Loss: <strong style="color:var(--red)">−${getSL()}%</strong></div><div>Take Profit: <strong style="color:var(--green)">+${getTP()}%</strong></div><div style="margin-top:6px;color:var(--warn);font-size:.65rem">Alpaca ${S.mode.toUpperCase()} mode</div>`
-    : 'Fill in the form to see preview.';
-}
-function renderQClose(){
-  const el = document.getElementById('qClose');
-  if(!el) return;
-  el.innerHTML = S.positions.length
-    ? S.positions.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)"><span>${p.ticker} ×${fn(p.quantity,0)}</span><button class="btn b-red b-xs" onclick="closePos('${p.ticker}',${p.quantity})">Close</button></div>`).join('')
-    : 'No open positions.';
-}
-
-// ═══════════════════════════════════════
-//  INDICATOR ENGINE
-// ═══════════════════════════════════════
-function calcRSI(p,per=14){
-  if(p.length<per+1)return null;
-  let g=0,l=0;
-  for(let i=1;i<=per;i++){const d=p[i]-p[i-1];d>0?g+=d:l-=d;}
-  g/=per;l/=per;
-  for(let i=per+1;i<p.length;i++){const d=p[i]-p[i-1];g=(g*(per-1)+Math.max(d,0))/per;l=(l*(per-1)+Math.max(-d,0))/per;}
-  return l===0?100:100-(100/(1+g/l));
-}
-function calcEMA(p,per){
-  if(p.length<per)return[];
-  const k=2/(per+1);let e=p.slice(0,per).reduce((a,b)=>a+b)/per;
-  const r=new Array(per-1).fill(null);r.push(e);
-  for(let i=per;i<p.length;i++){e=p[i]*k+e*(1-k);r.push(e);}
-  return r;
-}
-function calcMACD(p,f=12,sl=26,sig=9){
-  const ef=calcEMA(p,f),es=calcEMA(p,sl);
-  const ml=p.map((_,i)=>(ef[i]==null||es[i]==null)?null:ef[i]-es[i]);
-  const valid=ml.filter(v=>v!=null);
-  const sl2=calcEMA(valid,sig);
-  const lm=ml[ml.length-1],ls=sl2[sl2.length-1];
-  return{ml,sl:sl2,hist:lm!=null&&ls!=null?lm-ls:null,lm,ls};
-}
-function calcBB(p,per=20,sd=2){
-  if(p.length<per)return null;
-  const s=p.slice(-per),m=s.reduce((a,b)=>a+b)/per;
-  const v=s.reduce((x,y)=>x+(y-m)**2)/per;
-  return{upper:m+sd*Math.sqrt(v),middle:m,lower:m-sd*Math.sqrt(v)};
-}
-function calcATR(h,l,c,per=14){
-  if(!h.length)return null;
-  const trs=c.map((v,i)=>i===0?h[i]-l[i]:Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
-  return trs.slice(-per).reduce((a,b)=>a+b)/per;
-}
-function rsScore(rsi){if(rsi===null)return{s:50,sig:'NEUTRAL',c:'nu'};if(rsi<25)return{s:92,sig:'STRONG BUY',c:'up'};if(rsi<35)return{s:78,sig:'BUY',c:'up'};if(rsi<45)return{s:62,sig:'MILD BUY',c:'up'};if(rsi<55)return{s:50,sig:'NEUTRAL',c:'nu'};if(rsi<65)return{s:40,sig:'MILD SELL',c:'nu'};if(rsi<75)return{s:28,sig:'SELL',c:'down'};return{s:12,sig:'STRONG SELL',c:'down'};}
-function maScore(m){if(!m||m.lm==null)return{s:50,sig:'NEUTRAL',c:'nu'};if(m.hist>0&&m.lm>0)return{s:82,sig:'BULL X-OVER',c:'up'};if(m.hist>0&&m.lm<0)return{s:65,sig:'TURNING BULL',c:'up'};if(m.hist<0&&m.lm<0)return{s:22,sig:'BEAR X-OVER',c:'down'};if(m.hist<0)return{s:40,sig:'WEAKENING',c:'nu'};return{s:50,sig:'NEUTRAL',c:'nu'};}
-function bbScore(bb,price){if(!bb)return{s:50,sig:'NEUTRAL',c:'nu'};const pct=(price-bb.lower)/(bb.upper-bb.lower);if(pct<0.05)return{s:88,sig:'AT LOWER',c:'up'};if(pct<0.2)return{s:72,sig:'NEAR LOWER',c:'up'};if(pct>0.95)return{s:18,sig:'AT UPPER',c:'down'};if(pct>0.8)return{s:35,sig:'NEAR UPPER',c:'down'};return{s:50,sig:'MID BAND',c:'nu'};}
-function emaScore(e50,e200,price){const v50=e50[e50.length-1],v200=e200[e200.length-1],p50=e50[e50.length-2],p200=e200[e200.length-2];if(!v50||!v200)return{s:50,sig:'NOT ENOUGH DATA',c:'nu'};if(v50>v200&&p50<=p200)return{s:90,sig:'GOLDEN CROSS ✓',c:'up'};if(v50<v200&&p50>=p200)return{s:10,sig:'DEATH CROSS ✗',c:'down'};if(v50>v200&&price>v50)return{s:75,sig:'UPTREND',c:'up'};if(v50>v200&&price<v50)return{s:58,sig:'PULLBACK',c:'nu'};if(v50<v200&&price<v50)return{s:25,sig:'DOWNTREND',c:'down'};return{s:42,sig:'MIXED',c:'nu'};}
-function composite(sc){const w=S.weights,tot=Object.values(w).reduce((a,b)=>a+b);return Math.round((sc.rsi*w.rsi+sc.macd*w.macd+sc.bb*w.bb+sc.ema*w.ema+sc.news*w.news+sc.fund*w.fund)/tot);}
-function sLabel(s){if(s>=80)return{l:'STRONG BUY',col:'var(--green)'};if(s>=70)return{l:'BUY',col:'var(--green)'};if(s>=58)return{l:'MILD BUY',col:'var(--accent)'};if(s>=45)return{l:'NEUTRAL',col:'var(--muted2)'};if(s>=35)return{l:'MILD SELL',col:'var(--warn)'};if(s>=25)return{l:'SELL',col:'var(--red)'};return{l:'STRONG SELL',col:'var(--red)'};}
-
-// ═══════════════════════════════════════
-//  PRICE DATA
-// ═══════════════════════════════════════
-async function fetchPrices(ticker, days=60){
-  const yt=ticker.replace(/_US_EQ|_EQ|_UK_EQ/g,'');
-  const to=Math.floor(Date.now()/1000),from=to-days*86400;
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${yt}?interval=1d&period1=${from}&period2=${to}`;
-  try{
-    const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
-    const d=await r.json();
-    const q=d?.chart?.result?.[0];
-    if(q){
-      const raw=q.indicators.quote[0];
-      const idx=raw.close.map((v,i)=>v!=null?i:-1).filter(i=>i>=0);
-      const closes=idx.map(i=>raw.close[i]);
-      const highs=idx.map(i=>raw.high[i]);
-      const lows=idx.map(i=>raw.low[i]);
-      const vols=idx.map(i=>raw.volume[i]??0);
-      const times=idx.map(i=>new Date(q.timestamp[i]*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
-      log(`Prices: ${yt} — ${closes.length} candles`,'info');
-      return{closes,highs,lows,vols,times};
-    }
-  }catch(e){}
-  log(`Simulated prices for ${yt}`,'warn');
-  return mockPrices(days);
-}
-function mockPrices(days,base=null){
-  let p=base||(130+Math.random()*200);
-  const closes=[],highs=[],lows=[],vols=[],times=[];
-  for(let i=days;i>=0;i--){
-    const d=new Date();d.setDate(d.getDate()-i);
-    p=Math.max(p+(Math.random()-.47)*p*.022,5);
-    closes.push(p);highs.push(p*(1+Math.random()*.013));lows.push(p*(1-Math.random()*.013));
-    vols.push(Math.floor(8e5+Math.random()*4e6));
-    times.push(d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
   }
-  return{closes,highs,lows,vols,times};
+  box.innerHTML = rows.join('');
 }
 
-// ═══════════════════════════════════════
-//  FULL MARKET SCANNER
-//  Scans 200+ large/mid/small cap stocks
-//  Filters for momentum, uptrend, breakout
-//  Returns top 20 sure-shot winners only
-// ═══════════════════════════════════════
-
-// ── Universe of stocks by cap ──────────
-// ── Stock Name Lookup ──────────────────
-const STOCK_NAMES = {
-  // Mega cap tech
-  'AAPL':'Apple','MSFT':'Microsoft','NVDA':'NVIDIA','GOOGL':'Alphabet','GOOG':'Alphabet',
-  'AMZN':'Amazon','META':'Meta','TSLA':'Tesla','AVGO':'Broadcom','LLY':'Eli Lilly',
-  // Financials
-  'JPM':'JPMorgan','V':'Visa','MA':'Mastercard','BAC':'Bank of America','WFC':'Wells Fargo',
-  'GS':'Goldman Sachs','MS':'Morgan Stanley','BLK':'BlackRock','AXP':'Amex','SCHW':'Schwab',
-  'COF':'Capital One','USB':'US Bancorp','TFC':'Truist','PNC':'PNC Financial','C':'Citigroup',
-  // Healthcare
-  'UNH':'UnitedHealth','JNJ':'Johnson & Johnson','MRK':'Merck','ABBV':'AbbVie','TMO':'Thermo Fisher',
-  'ABT':'Abbott','ISRG':'Intuitive Surgical','ELV':'Elevance','SYK':'Stryker','MDT':'Medtronic',
-  'VRTX':'Vertex','REGN':'Regeneron','AMGN':'Amgen','GILD':'Gilead','BMY':'Bristol-Myers',
-  // Consumer
-  'HD':'Home Depot','WMT':'Walmart','COST':'Costco','MCD':'McDonald\'s','PG':'Procter & Gamble',
-  'KO':'Coca-Cola','PEP':'PepsiCo','NKE':'Nike','SBUX':'Starbucks','TGT':'Target',
-  'LOW':'Lowe\'s','TJX':'TJX Companies','LULU':'Lululemon','YUM':'Yum Brands','CMG':'Chipotle',
-  // Energy
-  'XOM':'ExxonMobil','CVX':'Chevron','COP':'ConocoPhillips','EOG':'EOG Resources','SLB':'Schlumberger',
-  'MPC':'Marathon Petroleum','VLO':'Valero','PSX':'Phillips 66','OXY':'Occidental','PXD':'Pioneer Natural',
-  'HAL':'Halliburton','DVN':'Devon Energy','FANG':'Diamondback','APA':'APA Corp','MRO':'Marathon Oil',
-  // Tech
-  'NFLX':'Netflix','CRM':'Salesforce','ADBE':'Adobe','QCOM':'Qualcomm','TXN':'Texas Instruments',
-  'AMD':'AMD','INTC':'Intel','IBM':'IBM','ACN':'Accenture','CSCO':'Cisco',
-  'ORCL':'Oracle','SAP':'SAP','NOW':'ServiceNow','SNOW':'Snowflake','UBER':'Uber',
-  // Industrial
-  'CAT':'Caterpillar','GE':'GE','HON':'Honeywell','RTX':'Raytheon','LMT':'Lockheed Martin',
-  'BA':'Boeing','DE':'Deere & Co','MMM':'3M','EMR':'Emerson','ETN':'Eaton',
-  'PH':'Parker Hannifin','ROK':'Rockwell','CMI':'Cummins','IR':'Ingersoll Rand','TT':'Trane Technologies',
-  // Other large
-  'BRK-B':'Berkshire Hathaway','NEE':'NextEra Energy','LIN':'Linde','DHR':'Danaher','SPGI':'S&P Global',
-  'PM':'Philip Morris','PANW':'Palo Alto Networks','AMAT':'Applied Materials','MU':'Micron',
-  'KLAC':'KLA Corp','LRCX':'Lam Research','MRVL':'Marvell Tech','BKNG':'Booking Holdings',
-  'DDOG':'Datadog','ZS':'Zscaler',
-  // REITs
-  'AMT':'American Tower','PLD':'Prologis','CCI':'Crown Castle','EQIX':'Equinix',
-  'PSA':'Public Storage','DLR':'Digital Realty','O':'Realty Income','SPG':'Simon Property',
-  'AVB':'AvalonBay','EQR':'Equity Residential',
-  // Cybersecurity
-  'CRWD':'CrowdStrike','FTNT':'Fortinet','NET':'Cloudflare','OKTA':'Okta','S':'SentinelOne',
-  'TENB':'Tenable','QLYS':'Qualys','VRNS':'Varonis','CYBR':'CyberArk','SAIL':'SailPoint',
-  // SaaS
-  'TEAM':'Atlassian','MDB':'MongoDB','TTD':'The Trade Desk','BILL':'Bill.com','HUBS':'HubSpot',
-  'PCTY':'Paylocity','ZI':'ZoomInfo','GTLB':'GitLab','CFLT':'Confluent','BRZE':'Braze',
-  'MNDY':'Monday.com','FROG':'JFrog','JAMF':'Jamf','IOT':'Samsara','ASAN':'Asana',
-  'DOCN':'DigitalOcean','ESTC':'Elastic','DOMO':'Domo','NCNO':'nCino','ALTR':'Altair',
-  // Fintech
-  'AFRM':'Affirm','UPST':'Upstart','SOFI':'SoFi','NU':'Nu Holdings','HOOD':'Robinhood',
-  'LC':'LendingClub','PAYO':'Payoneer','DLO':'dLocal','FLYW':'Flywire','RELY':'Remitly',
-  // Consumer tech
-  'CELH':'Celsius Holdings','DUOL':'Duolingo','ABNB':'Airbnb','DASH':'DoorDash','LYFT':'Lyft',
-  'PINS':'Pinterest','SNAP':'Snap','RBLX':'Roblox','BMBL':'Bumble','MTTR':'Matterport',
-  // EV
-  'RIVN':'Rivian','LCID':'Lucid Motors','NIO':'NIO','LI':'Li Auto','XPEV':'XPeng',
-  'CHPT':'ChargePoint','BLNK':'Blink Charging','EVGO':'EVgo','PTRA':'Proterra','WKHS':'Workhorse',
-  // AI & data
-  'PLTR':'Palantir','AI':'C3.ai','PATH':'UiPath','BBAI':'BigBear.ai','SOUN':'SoundHound',
-  // E-commerce
-  'ETSY':'Etsy','W':'Wayfair','CHWY':'Chewy','CVNA':'Carvana',
-  // Biotech
-  'RXRX':'Recursion Pharma','BEAM':'Beam Therapeutics','CRSP':'CRISPR Therapeutics',
-  'EDIT':'Editas Medicine','NTLA':'Intellia','VERV':'Verve Therapeutics','BLUE':'bluebird bio',
-  'FATE':'Fate Therapeutics','IMVT':'Immunovant','HIMS':'Hims & Hers',
-  // Semiconductors
-  'ACMR':'ACM Research','AMBA':'Ambarella','AEHR':'Aehr Test','CAMT':'Camtek',
-  'FORM':'FormFactor','ONTO':'Onto Innovation','MKSI':'MKS Instruments','COHU':'Cohu',
-  'WOLF':'Wolfspeed','OLED':'Universal Display',
-  // Gaming & entertainment
-  'DKNG':'DraftKings','PENN':'Penn Entertainment','MGM':'MGM Resorts','CZR':'Caesars','WYNN':'Wynn Resorts',
-  // Quantum & emerging
-  'IONQ':'IonQ','RGTI':'Rigetti Computing','QBTS':'D-Wave Quantum','QUBT':'Quantum Computing','ARQQ':'Arqit Quantum',
-  // Crypto miners
-  'MARA':'Marathon Digital','RIOT':'Riot Platforms','CLSK':'CleanSpark','HUT':'Hut 8','BTBT':'Bit Digital',
-  'CIFR':'Cipher Mining','IREN':'Iris Energy','WULF':'TeraWulf','MIGI':'Migi & Dali',
-  // Clean energy
-  'PLUG':'Plug Power','FCEL':'FuelCell Energy','BLDP':'Ballard Power','BE':'Bloom Energy',
-  'JOBY':'Joby Aviation','ACHR':'Archer Aviation',
-  // Healthcare tech
-  'TDOC':'Teladoc','AMWL':'American Well','OPRX':'OptimizeRx','VEEV':'Veeva Systems','GDRX':'GoodRx',
-  // Media
-  'PARA':'Paramount','WBD':'Warner Bros Discovery','SIRI':'Sirius XM','FUBO':'fuboTV',
+el('scanBtn').onclick = () => {
+  const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
+  btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
+  el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="8">Screening…</td></tr>';
+  const res=[]; let total=0, done=0;
+  const es=new EventSource('/api/scan/stream');
+  const finish = msg => { es.close(); btn.disabled=false; btn.textContent='Scan market';
+                          prog.style.display='none'; el('scanStat').textContent=msg; };
+  es.onmessage = e => {
+    let d; try{ d=JSON.parse(e.data); }catch(_){ return; }
+    if(d.failed){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
+      body.innerHTML=`<tr><td class="empty down" colspan="8">Scan failed — ${d.error}</td></tr>`; return; }
+    if(d.status==='downloading'){ total=d.total||0; el('scanStat').textContent=`Screening ${total}`; return; }
+    if(d.progress){ done=d.progress; if(total) bar.style.width=Math.min(100,done/total*100)+'%'; return; }
+    if(d.done){
+      res.sort((a,b)=>b.score-a.score);
+      body.innerHTML = res.length ? res.map(r=>`<tr>
+          <td><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
+          <td class="num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
+          <td class="num">${money(r.price||0)}</td>
+          <td class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
+          <td class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
+          <td class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
+          <td class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
+          <td class="mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
+        : '<tr><td class="empty" colspan="8">Nothing in a confirmed uptrend right now</td></tr>';
+      finish(`${d.scanned||total} screened · ${res.length} candidates`);
+      logLine(`Scan done — ${d.scanned||total} screened, ${res.length} candidates`,'ok');
+      return;
+    }
+    if(d.ticker) res.push(d);
+  };
+  es.onerror = () => finish('Connection lost');
 };
 
-function getStockName(ticker) {
-  return STOCK_NAMES[ticker] || ticker;
-}
-
-const LARGE_CAP = [
-  // Mega cap tech
-  'AAPL','MSFT','NVDA','GOOGL','GOOG','AMZN','META','TSLA','AVGO','LLY',
-  // Financials
-  'JPM','V','MA','BAC','WFC','GS','MS','BLK','AXP','SCHW','COF','USB','TFC','PNC','C',
-  // Healthcare
-  'UNH','JNJ','MRK','ABBV','TMO','ABT','ISRG','ELV','SYK','MDT','VRTX','REGN','AMGN','GILD','BMY',
-  // Consumer
-  'HD','WMT','COST','MCD','PG','KO','PEP','NKE','SBUX','TGT','LOW','TJX','LULU','YUM','CMG',
-  // Energy
-  'XOM','CVX','COP','EOG','SLB','MPC','VLO','PSX','OXY','PXD','HAL','DVN','FANG','APA','MRO',
-  // Tech
-  'NFLX','CRM','ADBE','QCOM','TXN','AMD','INTC','IBM','ACN','CSCO','ORCL','SAP','NOW','SNOW','UBER',
-  // Industrial
-  'CAT','GE','HON','RTX','LMT','BA','DE','MMM','EMR','ETN','PH','ROK','CMI','IR','TT',
-  // Other large
-  'BRK-B','NEE','LIN','DHR','SPGI','PM','PANW','AMAT','MU','KLAC','LRCX','MRVL','BKNG','DDOG','ZS',
-  // REITs & utilities
-  'AMT','PLD','CCI','EQIX','PSA','DLR','O','SPG','AVB','EQR'
+/* ── strategy ──────────────────────────────────────────── */
+const SCORING = {
+  s1:[['Trend structure',20,'Confirmed uptrend + price above EMA50'],['Momentum (3M ROC)',15,'3-month rate of change'],
+      ['Relative strength vs SPY',12,'Only rewards stocks beating the market'],['MACD regime',10,'Bullish + fresh crossover bonus'],
+      ['Pullback quality (RSI)',15,'RSI 40–55 ideal; >72 penalised'],['Proximity to 20-EMA',10,'Pulled back to support'],
+      ['Volume / structure',10,'Up-day on above-average volume'],['Fib golden pocket',12,'0.618–0.786 retracement, turning up']],
+  s2:[['Stage 2 trend template',20,'Price > 150 SMA > 200 SMA, both rising'],['Near 52-week high',15,'Within 25% of the high'],
+      ['Consolidation tightness',20,'20-day range < 8% = tight VCP base'],['Volume pattern',15,'Dry-up in base, surge on breakout'],
+      ['Relative strength vs SPY',15,'3-month outperformance'],['MACD regime',8,'Bullish + fresh crossover'],
+      ['Breakout confirmation',7,'Above 20-day high on volume']],
+  s3:[['Bollinger stretch (%B)',26,'%B ≤ 0.20 = lower fifth of band'],['MACD histogram turn',24,'Rising off its low'],
+      ['Leadership vs SPY',22,'3-month outperformance; >20% = leader'],['Trend integrity',20,'Above EMA200 and SMA200'],
+      ['Oversold quality (RSI)',12,'RSI 30–45 ideal'],['Capitulation volume',6,'>1.5× average']],
+};
+const BACKTEST = [
+  ['SPY buy &amp; hold (control)','+78.82%','18.76%','—','—','var(--head)'],
+  ['S3 Leader Dip (3.0×ATR)','+42.23%','11.14%','63.2%','Profitable in both halves','var(--s3)'],
+  ['S2 Breakout (8% fixed)','+39.46%','9.73%','57.3%','Fails second half','var(--s2)'],
+  ['S1 Pullback (2.5×ATR)','+6.38%','26.89%','53.8%','Collapses','var(--s1)'],
 ];
 
-const MID_CAP = [
-  // Cybersecurity
-  'CRWD','FTNT','NET','OKTA','S','TENB','QLYS','VRNS','CYBR','SAIL',
-  // SaaS
-  'TEAM','MDB','TTD','BILL','HUBS','PCTY','ZI','GTLB','CFLT','BRZE',
-  'MNDY','FROG','JAMF','IOT','ASAN','DOCN','ESTC','DOMO','NCNO','ALTR',
-  // Fintech
-  'AFRM','UPST','SOFI','NU','HOOD','LC','PAYO','DLO','FLYW','RELY',
-  // Consumer tech
-  'CELH','DUOL','ABNB','DASH','LYFT','PINS','SNAP','RBLX','BMBL','MTTR',
-  // EV & mobility
-  'RIVN','LCID','NIO','LI','XPEV','CHPT','BLNK','EVGO','PTRA','WKHS',
-  // AI & data
-  'PLTR','AI','PATH','BBAI','SOUN','BIGB','IREN','CIFR','BTBT','CORZ',
-  // E-commerce
-  'ETSY','W','CHWY','CVNA','PRTS','FLXS','BZUN','GLOB','ARCO','VTEX',
-  // Biotech mid
-  'HIMS','RXRX','BEAM','CRSP','EDIT','NTLA','VERV','BLUE','FATE','IMVT',
-  // Semiconductors mid
-  'ACMR','AMBA','AEHR','CAMT','FORM','ONTO','MKSI','COHU','WOLF','OLED',
-  // Industrials mid
-  'AXON','KTOS','RGEN','ACLS','IPGP','TTEC','RXO','STRC','ENFN','ARIS',
-  // Media & entertainment
-  'PARA','WBD','SIRI','FUBO','DKNG','RSI','PENN','MGM','CZR','WYNN'
-];
-
-const SMALL_CAP = [
-  // Quantum computing
-  'IONQ','RGTI','QBTS','QUBT','ARQQ','QUBT','IQM','SPCE',
-  // Crypto miners
-  'MARA','RIOT','CLSK','HUT','BTBT','CIFR','IREN','BTDR','WULF','MIGI',
-  // AI small caps
-  'SOUN','BBAI','AEYE','GFAI','AITX','AIXI','INPX','NNBR','IDAI','MVST',
-  // LiDAR & sensors
-  'OUST','INVZ','MVIS','LAZR','AEVA','LIDR','VLDR','RDAR','BFLY','SWVL',
-  // Biotech small
-  'SEER','PRME','SGMO','HRMY','INVA','PRAX','ARQT','RVNC','AVAH','TGTX',
-  'VKTX','KPTI','CTIC','ADMA','ACAD','SUPN','NUVL','KROS','IRON','TARS',
-  // Semiconductor small
-  'AEVA','OUST','INDI','CODA','POWI','DIOD','MPWR','SITM','AMBA','AIOT',
-  // Clean energy small
-  'PLUG','FCEL','BLDP','BE','EVTL','SKYH','JOBY','ACHR','LILM','WATT',
-  // Fintech small
-  'OPEN','OFFERPAD','REDFIN','COMP','UWMC','GHLD','MC','CURO','ATLC','RPAY',
-  // Healthcare small
-  'HIMS','WELL','TALK','DOCS','TDOC','AMWL','OPRX','PHR','VEEV','GDRX',
-  // Consumer small
-  'BIRD','LAZY','BARK','PETS','LOVE','LESL','XPOF','PLBY','CLOV','GOCO',
-  // Tech small
-  'PTRA','CIDM','KALI','SPRT','TPVG','GAIN','GLAD','CSWC','TRIN','PFLT',
-  // Special situations
-  'SPWR','MAXN','ARRY','NOVA','SHLS','FTCI','PESI','AMRC','CLNE','GEVO'
-];
-
-// ── Pattern Detection ──────────────────
-function detectPatterns(closes, highs, lows, vols) {
-  const patterns = [];
-  const price = closes[closes.length - 1];
-  const e20  = calcEMA(closes, 20);
-  const e50  = calcEMA(closes, 50);
-  const e200 = calcEMA(closes, 200);
-  const rsi  = calcRSI(closes);
-  const macd = calcMACD(closes);
-  const bb   = calcBB(closes);
-  const avgVol = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
-  const lastVol = vols[vols.length - 1];
-  const volSpike = lastVol > avgVol * 1.5;
-
-  // ── MOMENTUM ──
-  // Price making higher highs, RSI 50-70, MACD positive
-  const recentHighs = highs.slice(-5);
-  const higherHighs = recentHighs[4] > recentHighs[0];
-  const rsiMomentum = rsi > 50 && rsi < 75;
-  const macdPositive = macd.lm > 0 && macd.hist > 0;
-  if (higherHighs && rsiMomentum && macdPositive) {
-    patterns.push({ type: 'MOMENTUM', strength: 'STRONG', color: 'var(--green)' });
-  } else if (macdPositive && rsiMomentum) {
-    patterns.push({ type: 'MOMENTUM', strength: 'MILD', color: 'var(--accent)' });
-  }
-
-  // ── BREAKOUT ──
-  // Price breaking above 52-week high or BB upper with volume
-  const high52w = Math.max(...highs.slice(-252));
-  const nearHigh = price >= high52w * 0.97; // within 3% of 52w high
-  const bbBreakout = bb && price > bb.upper;
-  if ((nearHigh || bbBreakout) && volSpike) {
-    patterns.push({ type: 'BREAKOUT', strength: 'STRONG', color: 'var(--warn)' });
-  } else if (nearHigh || bbBreakout) {
-    patterns.push({ type: 'BREAKOUT', strength: 'FORMING', color: 'var(--warn)' });
-  }
-
-  // ── UPTREND ──
-  // Price > EMA20 > EMA50 > EMA200 (perfect uptrend stack)
-  const v20  = e20[e20.length-1];
-  const v50  = e50[e50.length-1];
-  const v200 = e200[e200.length-1];
-  if (v20 && v50 && v200 && price > v20 && v20 > v50 && v50 > v200) {
-    patterns.push({ type: 'UPTREND', strength: 'CONFIRMED', color: 'var(--accent2)' });
-  } else if (v50 && v200 && price > v50 && v50 > v200) {
-    patterns.push({ type: 'UPTREND', strength: 'PARTIAL', color: 'var(--accent2)' });
-  }
-
-  // ── GOLDEN CROSS ──
-  const pv50 = e50[e50.length-2], pv200 = e200[e200.length-2];
-  if (v50 && v200 && pv50 && pv200 && v50 > v200 && pv50 <= pv200) {
-    patterns.push({ type: 'GOLDEN CROSS', strength: 'FRESH', color: 'var(--purple)' });
-  }
-
-  return patterns;
-}
-
-// ── Momentum Score ─────────────────────
-function momentumScore(closes, highs, lows, vols) {
-  const price  = closes[closes.length - 1];
-  const rsi    = calcRSI(closes);
-  const macd   = calcMACD(closes);
-  const bb     = calcBB(closes);
-  const e50    = calcEMA(closes, 50);
-  const e200   = calcEMA(closes, 200);
-  const avgVol = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
-  const lastVol = vols[vols.length - 1];
-
-  let score = 0;
-
-  // RSI in sweet spot 50-70 = momentum zone
-  if (rsi >= 55 && rsi <= 70) score += 25;
-  else if (rsi >= 50 && rsi < 55) score += 15;
-  else if (rsi > 70 && rsi < 80) score += 10; // still going but extended
-
-  // MACD positive and rising
-  if (macd.lm > 0 && macd.hist > 0) score += 25;
-  else if (macd.hist > 0) score += 10;
-
-  // Price above both EMAs (uptrend)
-  const v50 = e50[e50.length-1], v200 = e200[e200.length-1];
-  if (v50 && v200 && price > v50 && v50 > v200) score += 25;
-  else if (v50 && price > v50) score += 12;
-
-  // Volume confirmation
-  if (lastVol > avgVol * 1.5) score += 15;
-  else if (lastVol > avgVol * 1.2) score += 8;
-
-  // Breakout — near 52w high
-  const high52w = Math.max(...highs.slice(-252));
-  if (price >= high52w * 0.97) score += 10;
-
-  return Math.min(score, 100);
-}
-
-// ── Main Market Scanner ────────────────
-// ── Signal badges derived from backend reasons ──────────────────────────────
-function deriveBadges(reasons) {
-  const b = [];
-  if (!reasons) return b;
-  const r = reasons.join(' ');
-  if (r.includes('fresh bullish crossover'))      b.push({type:'MACD X',    color:'#22c55e'});
-  else if (r.includes('MACD bullish'))            b.push({type:'MACD ↑',    color:'#00c896'});
-  else if (r.includes('MACD bearish'))            b.push({type:'MACD ↓',    color:'#f43f5e'});
-  if (r.includes('uptrend'))                      b.push({type:'UPTREND',   color:'#818cf8'});
-  else if (r.includes('downtrend'))               b.push({type:'DOWNTREND', color:'#f59e0b'});
-  if (r.includes('oversold'))                     b.push({type:'OVERSOLD',  color:'#06b6d4'});
-  if (r.includes('golden pocket'))                b.push({type:'FIB GP',    color:'#f59e0b'});
-  else if (r.includes('optimal trade zone'))      b.push({type:'FIB OTE',   color:'#a78bfa'});
-  return b;
-}
-
-function _scanRow(r, i) {
-  const badges   = deriveBadges(r.reasons || []);
-  const badgeHtml = badges.map(p =>
-    `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:.58rem;font-family:var(--mono);background:rgba(255,255,255,.05);color:${p.color};border:1px solid ${p.color}40;margin-right:2px">${p.type}</span>`
-  ).join('');
-  const scoreColor = r.score >= 60 ? 'var(--green)' : r.score >= 40 ? 'var(--warn)' : 'var(--muted2)';
-  const rsiColor   = r.rsi > 70 ? 'var(--warn)' : r.rsi < 35 ? 'var(--green)' : 'var(--muted2)';
-  const hasUp   = (r.reasons||[]).some(x=>x.includes('uptrend'));
-  const hasMomt = (r.reasons||[]).some(x=>x.includes('MACD bullish'));
-  const hasGP   = r.in_golden_pocket || (r.reasons||[]).some(x=>x.includes('golden pocket'));
-  const hasOTE  = !hasGP && (r.reasons||[]).some(x=>x.includes('optimal trade zone'));
-  const medal   = i===0?'🏆':i===1?'🥈':i===2?'🥉':'';
-  const ic = r.score>=75?'#00c896':r.score>=65?'#22c55e':r.score>=55?'#f59e0b':'#64748b';
-  return `<tr style="${i<3?'background:rgba(0,200,150,.03)':''}">
-<td style="font-family:var(--mono);color:var(--muted);font-size:.7rem">${i+1}</td>
-<td style="font-weight:800;font-size:.85rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ic};box-shadow:0 0 6px ${ic};margin-right:6px;vertical-align:middle"></span>${r.ticker} ${medal}</td>
-<td style="font-size:.75rem;color:var(--muted2);min-width:200px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name||r.ticker}</td>
-<td style="text-align:center">${_stratBadge(r.strategy||'s1')}</td>
-<td>${(()=>{const cap=r.cap_label||'—';const c=cap==='Mega'?'#a78bfa':cap==='Large'?'var(--accent2)':cap==='Mid'?'var(--green)':cap==='Small'?'var(--warn)':cap==='Micro'?'var(--muted2)':'var(--muted)';return `<span style="font-size:.62rem;font-family:var(--mono);color:${c};padding:1px 5px;border-radius:3px;border:1px solid ${c}40">${cap}</span>`;})()}</td>
-<td style="font-family:var(--mono)">$${fn(r.price)}</td>
-<td>
-  <div style="display:flex;align-items:center;gap:5px">
-    <div style="width:42px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:${r.score}%;background:${scoreColor}"></div></div>
-    <span style="font-family:var(--mono);font-size:.75rem;font-weight:700;color:${scoreColor}">${r.score}</span>
-  </div>
-</td>
-<td style="max-width:100px">${badgeHtml}</td>
-<td style="font-family:var(--mono);color:${rsiColor}">${r.rsi!=null?fn(r.rsi,1):'—'}</td>
-<td style="font-family:var(--mono);font-size:.72rem;color:${(r.mom_3m||0)>0?'var(--green)':'var(--muted)'}">${r.mom_3m!=null?(r.mom_3m>0?'+':'')+r.mom_3m+'%':'—'}</td>
-<td style="font-size:.68rem"><span style="color:${hasGP?'var(--warn)':hasOTE?'var(--accent2)':'var(--muted)'}">${hasGP?'✓ GP':hasOTE?'✓ OTE':'—'}</span></td>
-<td style="font-family:var(--mono);font-size:.72rem;color:${(r.rel_strength||0)>0?'var(--green)':'var(--muted)'}">${r.rel_strength!=null?(r.rel_strength>0?'+':'')+r.rel_strength+'%':'—'}</td>
-<td style="display:flex;gap:4px">
-  <button class="btn b-acc b-xs" onclick="autoTrade('${r.ticker}',${r.price},'score${r.score}','UPTREND',${fn(r.rsi,1)})">Execute</button>
-</td>
-</tr>`;
-}
-
-// ── Batch-streamed market scan (SSE from backend) ────────────────────────────
-async function runMarketScan() {
-  const btn    = document.getElementById('scanBtn');
-  const tbody  = document.getElementById('sigBody');
-  const prog   = document.getElementById('scanProgress');
-  const stats  = document.getElementById('scanStats');
-
-  btn.textContent = '⏳ Scanning...';
-  btn.disabled    = true;
-  prog.style.display  = 'block';
-  stats.style.display = 'grid';
-  tbody.innerHTML = `<tr><td class="te" colspan="13"><span class="spin"></span> Batch-downloading universe — first results in ~5 s...</td></tr>`;
-
-  const allResults = [];
-  let scanned = 0, total = 0, firstResult = true;
-
-  await new Promise(resolve => {
-    const es = new EventSource('/api/scan/stream');
-
-    es.onmessage = e => {
-      const d = JSON.parse(e.data);
-
-      if (d.failed) {
-        es.close();
-        tbody.innerHTML = `<tr><td class="te" colspan="13" style="color:var(--red)">⚠ Scan failed: ${d.error}</td></tr>`;
-        prog.style.display = 'none';
-        btn.textContent = '⚡ Scan Market';
-        btn.disabled = false;
-        log(`Scan failed: ${d.error}`, 'err');
-        resolve();
-        return;
-      }
-
-      if (d.done) {
-        es.close();
-        allResults.sort((a, b) => b.score - a.score);
-        tbody.innerHTML = allResults.length
-          ? allResults.map((r, i) => _scanRow(r, i)).join('')
-          : '<tr><td class="te" colspan="13">No stocks above threshold — market may be in a mixed state</td></tr>';
-        prog.style.display = 'none';
-        btn.textContent = '⚡ Scan Market';
-        btn.disabled    = false;
-        if (allResults[0]) {
-          setEl('m-score', allResults[0].score);
-          document.getElementById('rNum').textContent = allResults[0].score;
-          document.getElementById('rLbl').textContent = 'STRONGEST SIGNAL';
-        }
-        const confident = allResults.filter(x => x.score >= 75);
-        if (confident.length) showConfidentBuy(confident);
-        log(`Scan done — ${d.scanned} screened, ${d.emitted ?? allResults.length} in confirmed uptrend, ${allResults.filter(x=>x.score>=60).length} actionable (score ≥ 60)`, 'ok');
-        resolve();
-        return;
-      }
-
-      if (d.status === 'downloading') {
-        total = d.total || total;
-        setEl('universeCount', total + '+');
-        return;
-      }
-
-      // Lightweight progress tick — advance the bar as tickers are screened.
-      if (d.progress) {
-        scanned = d.scanned || scanned;
-        total   = d.total || total;
-        const pct = Math.round(scanned / total * 100);
-        document.getElementById('scanBar').style.width    = pct + '%';
-        document.getElementById('scanCount').textContent  = `${scanned} / ${total}`;
-        document.getElementById('scanStatus').textContent = `Screening — ${scanned}/${total} (uptrend only)`;
-        document.getElementById('stScanned').textContent  = scanned;
-        return;
-      }
-
-      if (!d.ticker) return;
-
-      // Backend already filters: uptrend + score>=60 + MACD bullish + RSI<72.
-      if (d.ok && d.score >= 60) {
-        allResults.push(d);
-        allResults.sort((a, b) => b.score - a.score);
-        document.getElementById('stWinners').textContent = allResults.length;
-        document.getElementById('stBreakouts').textContent = allResults.filter(x=>x.in_golden_pocket||(x.reasons||[]).some(r=>r.includes('golden pocket')||r.includes('optimal trade zone'))).length;
-        document.getElementById('stAvg').textContent     = allResults.length ? Math.round(allResults.reduce((s,x)=>s+x.score,0)/allResults.length) : 0;
-        document.getElementById('scanStatus').textContent = `Found ${d.ticker} — ${d.score}/100`;
-        // Show results as they arrive (partial render)
-        firstResult = false;
-        tbody.innerHTML = allResults.map((r, i) => _scanRow(r, i)).join('');
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      btn.textContent = '⚡ Scan Market';
-      btn.disabled    = false;
-      prog.style.display = 'none';
-      if (!allResults.length)
-        tbody.innerHTML = '<tr><td class="te" colspan="13">Scan error — check server logs</td></tr>';
-      resolve();
-    };
-  });
-}
-
-// Keep runScan as alias for backward compatibility
-async function runScan() { return runMarketScan(); }
-
-function renderMarketReasons(results) {
-  if (!results.length) return;
-  document.getElementById('aiCard').style.display = 'block';
-  document.getElementById('aiReasons').innerHTML = results.map(r => {
-    const pts = [];
-    r.patterns.forEach(p => {
-      if (p.type === 'MOMENTUM') pts.push(`Strong momentum — RSI ${fn(r.rsiV,1)} in sweet spot, MACD positive and rising`);
-      if (p.type === 'BREAKOUT') pts.push(`Breakout pattern detected — price near 52-week high with volume confirmation`);
-      if (p.type === 'UPTREND') pts.push(`Perfect uptrend stack — price above EMA20 > EMA50 > EMA200`);
-      if (p.type === 'GOLDEN CROSS') pts.push(`Fresh golden cross — EMA50 just crossed above EMA200, historically bullish`);
-    });
-    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:7px">
-<div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap">
-  <span style="font-size:.9rem;font-weight:800">${r.s}</span>
-  <span class="bdg bdg-buy">SURE-SHOT BUY</span>
-  <span style="font-size:.63rem;font-family:var(--mono);color:var(--muted)">Score <strong style="color:var(--green)">${r.score}/100</strong></span>
-  <span style="font-size:.62rem;font-family:var(--mono);color:var(--muted);margin-left:auto">Entry ~$${fn(r.price)} | SL $${fn(r.price*.95)} | TP $${fn(r.price*1.1)}</span>
-</div>
-<div style="font-size:.71rem;font-family:var(--mono);color:var(--muted2);line-height:1.8">${pts.join('<br>')}</div>
-<div class="sbar" style="margin-top:6px"><div class="sfill" style="width:${r.score}%;background:var(--green)"></div></div>
-</div>`;
+function renderStrategy(){
+  const caps=S.cfg.per_trade_max_by_strategy||{}, lims=S.cfg.weekly_limit_by_strategy||{}, e=S.exit;
+  el('budgets').innerHTML = ['s1','s2','s3'].map(k=>{
+    const m=STRAT[k], atr=e['stop_atr_mult_'+k];
+    return `<div class="srow">
+      <div class="sname" style="border-left-color:${m.c}">${m.n}</div>
+      <div><div class="sk">Per trade</div><div class="sv num">${caps[k]!=null?money(caps[k]):'—'}</div></div>
+      <div><div class="sk">Weekly limit</div><div class="sv num">${lims[k]!=null?lims[k]:'—'}</div></div>
+      <div><div class="sk">Stop</div><div class="sv num">${atr!=null?atr+'×ATR':'—'}</div></div>
+      <div><div class="sk">Profit ladder</div><div class="sv">${e['profit_ladder_'+k]?'On':'Off'}</div></div></div>`;
   }).join('');
-}
 
-// ═══════════════════════════════════════
-//  INDICATOR TAB
-// ═══════════════════════════════════════
-let pCI=null,mCI=null;
-async function computeInd(){
-  const sym=document.getElementById('iSym').value.trim().toUpperCase();if(!sym)return;
-  log(`Computing: ${sym}`,'info');
-  const data=await fetchPrices(sym,200);
-  const c=data.closes,price=c[c.length-1];
-  const rsiV=calcRSI(c),macdV=calcMACD(c),bbV=calcBB(c);
-  const e50=calcEMA(c,50),e200=calcEMA(c,200);
-  const atr=calcATR(data.highs,data.lows,c);
-  const avgV=data.vols.slice(-20).reduce((a,b)=>a+b,0)/20,lastV=data.vols[data.vols.length-1];
-  const rs=rsScore(rsiV),ms=maScore(macdV),bs=bbV?bbScore(bbV,price):{sig:'—',c:'nu'},es=e50.length?emaScore(e50,e200,price):{sig:'—',c:'nu'};
-  document.getElementById('indVals').innerHTML=[
-    {n:'RSI (14)',v:rsiV!=null?fn(rsiV,1):'—',s:rs.sig,c:rs.c},
-    {n:'MACD',v:macdV.lm!=null?fn(macdV.lm,3):'—',s:ms.sig,c:ms.c},
-    {n:'BB Upper',v:bbV?fmtCur(bbV.upper):'—',s:'Resistance',c:'nu'},
-    {n:'BB Lower',v:bbV?fmtCur(bbV.lower):'—',s:bs.sig,c:bs.c},
-    {n:'EMA 50',v:e50[e50.length-1]?fmtCur(e50[e50.length-1]):'—',s:price>(e50[e50.length-1]||0)?'Price above ↑':'Price below ↓',c:price>(e50[e50.length-1]||Infinity)?'up':'down'},
-    {n:'EMA 200',v:e200[e200.length-1]?fmtCur(e200[e200.length-1]):'—',s:es.sig,c:es.c},
-    {n:'ATR (14)',v:atr?fmtCur(atr):'—',s:'Daily range',c:'nu'},
-    {n:'Vol. Ratio',v:lastV&&avgV?fn(lastV/avgV,2)+'×':'—',s:lastV>avgV*1.5?'High spike':'Normal',c:lastV>avgV*1.5?'up':'nu'},
-  ].map(x=>`<div class="ind"><div class="ind-n">${x.n}</div><div class="ind-v ${x.c}">${x.v}</div><div class="ind-s ${x.c}">${x.s}</div></div>`).join('');
-  const N=60,times=data.times.slice(-N),closes=c.slice(-N),e50s=e50.slice(-N),e200s=e200.slice(-N);
-  if(pCI)pCI.destroy();
-  pCI=new Chart(document.getElementById('priceC'),{type:'line',data:{labels:times,datasets:[
-    {label:'Price',data:closes,borderColor:'#00c896',borderWidth:2,pointRadius:0,tension:.3,fill:false},
-    {label:'EMA50',data:e50s,borderColor:'#3b82f6',borderWidth:1.5,borderDash:[4,2],pointRadius:0,tension:.3,fill:false},
-    {label:'EMA200',data:e200s,borderColor:'#f59e0b',borderWidth:1.5,borderDash:[6,3],pointRadius:0,tension:.3,fill:false},
-  ]},options:chartOpts(v=>'€'+v.toFixed(0))});
-  const hist=macdV.ml.slice(-N).map((v,i)=>{const s=macdV.sl[macdV.sl.length-N+i];return v!=null&&s!=null?v-s:null;});
-  if(mCI)mCI.destroy();
-  mCI=new Chart(document.getElementById('macdC'),{type:'bar',data:{labels:times,datasets:[{label:'MACD',data:hist,backgroundColor:hist.map(v=>v>=0?'rgba(34,197,94,.6)':'rgba(244,63,94,.6)'),borderWidth:0}]},options:chartOpts()});
-  log(`${sym}: RSI ${fn(rsiV,1)}, MACD ${ms.sig}, EMA ${es.sig}`,'ok');
-}
-function chartOpts(yFmt){
-  return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,backgroundColor:'#1a1e26',titleColor:'#5e6878',bodyColor:'#dde3ef',borderColor:'rgba(255,255,255,.06)',borderWidth:1}},scales:{x:{grid:{color:'rgba(255,255,255,.025)'},ticks:{color:'#5e6878',font:{family:'IBM Plex Mono',size:9},maxTicksLimit:8}},y:{grid:{color:'rgba(255,255,255,.025)'},ticks:{color:'#5e6878',font:{family:'IBM Plex Mono',size:9},callback:yFmt}}}};
-}
+  const kv=(k,v)=>`<div class="kv"><span class="mut">${k}</span><b class="num">${v}</b></div>`;
+  const atrMode = e.stop_mode==='atr';
+  el('exit').innerHTML =
+    kv('Stop mode', atrMode?'ATR-scaled':'Fixed %') +
+    (atrMode ? kv('Stop floor / ceiling', `${e.stop_min_pct}% / ${e.stop_max_pct}%`)
+             : kv('Stop loss', '-'+e.stop_loss_pct+'%')) +
+    kv('Trail', e.trail_mode==='atr'?`arms +${e.trail_activate_atr}×ATR, trails ${e.trail_atr_mult}×ATR`:`+${e.trail_activate_pct}% / ${e.trail_pct}%`) +
+    kv('Trail floors', `give-back ≥${e.trail_min_pct}%, arm ≥${e.trail_activate_min_pct}%`) +
+    kv('Hard take-profit', e.hard_take_profit_pct>0?'+'+e.hard_take_profit_pct+'%':'Disabled') +
+    kv('Daily crash exit', '-'+e.daily_crash_pct+'%') +
+    kv('Check interval', (e.check_interval||0)+'s');
 
-// ═══════════════════════════════════════
-//  EQUITY CHART
-// ═══════════════════════════════════════
-let eqCI=null;
-function drawEqChart(){
-  const ctx=document.getElementById('eqChart');if(!ctx)return;
-  if(eqCI)eqCI.destroy();
-  const labels=S.eqHistory.length?S.eqHistory.map(e=>e.t):['—'];
-  const vals=S.eqHistory.length?S.eqHistory.map(e=>e.v):[0];
-  eqCI=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Portfolio',data:vals,borderColor:'#00c896',backgroundColor:'rgba(0,200,150,.06)',borderWidth:2,pointRadius:0,tension:.4,fill:true}]},options:chartOpts(v=>'€'+v.toLocaleString())});
-}
-function switchChart(type,btn){document.querySelectorAll('.ctab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');drawEqChart();}
+  const c=S.cfg;
+  el('engineCfg').innerHTML =
+    kv('Auto-trade', S.auto&&S.auto.enabled?'On':'Off') +
+    kv('Mode', ((S.health.mode)||'—').toUpperCase()) +
+    kv('Min signal score', c.min_signal_score??'—') +
+    kv('Scan interval', c.scan_interval_sec?(c.scan_interval_sec/60)+' min':'—') +
+    kv('Universe', '472 curated') +
+    kv('Position sizing', 'min(strategy cap, 10% free cash)') +
+    // Surfaced because a non-persistent state dir silently breaks strategy
+    // attribution, the weekly limit and Kelly's sample.
+    kv('State dir', (S.health.state&&S.health.state.data_dir)||'—') +
+    kv('Trade log', (S.health.state&&S.health.state.trade_log_entries!=null)
+        ? S.health.state.trade_log_entries+' entries'+(S.health.state.persistent?'':' (NOT persistent)') : '—');
 
-// ═══════════════════════════════════════
-//  ENGINE
-// ═══════════════════════════════════════
-function toggleEngine(){
-  S.engineOn=!S.engineOn;
-  const btn=document.getElementById('engBtn'),dot=document.getElementById('engDot'),lbl=document.getElementById('engLbl');
-  if(S.engineOn){
-    if(!S.connected){log('Backend not connected — ensure server.py is running','err');S.engineOn=false;return;}
-    btn.textContent='■ Stop Engine';btn.className='btn b-red b-sm';
-    dot.className='dot dg';lbl.textContent='ENGINE LIVE';lbl.style.color='var(--green)';
-    setEl('sbNext','ON');document.getElementById('sbNext').style.color='var(--green)';
-    log('Auto-execute enabled — trades will be placed on qualifying signals','ok');
-    refreshAll();
-    startTimer();
-  }else{
-    clearInterval(S.engTimer);clearInterval(S.cdTimer);
-    btn.textContent='▶ Enable Auto-Trade';btn.className='btn b-eng b-sm';
-    dot.className='dot dm';lbl.textContent='SCANNING (no auto-trade)';lbl.style.color='var(--accent)';
-    setEl('sbNext','OFF');document.getElementById('sbNext').style.color='var(--muted)';
-    log('Auto-execute off — scans still run, no orders placed','warn');
-  }
-}
-
-async function refreshAll(){
-  await fetchAccount();
-  await fetchPositions();
-  await fetchOrders();
-  runScan();
-}
-
-function startTimer(){
-  clearInterval(S.engTimer);clearInterval(S.cdTimer);
-  const iv=parseInt(document.getElementById('scanInt')?.value||900)*1000;
-  let rem=iv/1000;
-  S.engTimer=setInterval(()=>{refreshAll();rem=iv/1000;},iv);
-  S.cdTimer=setInterval(()=>{rem--;if(rem<0)rem=iv/1000;const m=Math.floor(rem/60),sec=rem%60;setEl('sbNext',`${m}:${String(sec).padStart(2,'0')}`);},1000);
-}
-
-// ═══════════════════════════════════════
-//  CONFIG
-// ═══════════════════════════════════════
-function openM(id){document.getElementById(id).classList.add('open');loadCfg();}
-function closeM(id){document.getElementById(id).classList.remove('open');}
-function loadCfg(){
-  document.getElementById('c-claude').value=S.claudeKey;
-  document.getElementById('c-news').value=S.newsKey;
-  document.getElementById('c-backend').value=localStorage.getItem('backendUrl')||'';
-}
-function saveConfig(){
-  S.claudeKey=document.getElementById('c-claude').value.trim();
-  S.newsKey=document.getElementById('c-news').value.trim();
-  const backend=document.getElementById('c-backend').value.trim();
-  localStorage.setItem('claudek',S.claudeKey);
-  localStorage.setItem('newsk',S.newsKey);
-  if(backend) localStorage.setItem('backendUrl',backend);
-  else localStorage.removeItem('backendUrl');
-  closeM('cfgM');
-  log(`Settings saved — Backend: ${backend||'auto-detect'}`,'ok');
-  if(backend) fetchAccount();
-}
-async function testConn(){
-  showCT('info','Testing backend...');
-  try{
-    const r=await fetch(`${getBackendUrl()}/api/health`);
-    if(r.ok){const d=await r.json();showCT('ok',`✓ Connected — Alpaca ${d.mode?.toUpperCase()} — keys ${d.key_configured?'✓ loaded':'✗ NOT SET in .env'}`);}
-    else showCT('err',`✗ Backend HTTP ${r.status}`);
-  }catch(e){showCT('err',`Cannot reach backend: ${e.message} — Is server.py running?`);}
-}
-function showCT(t,msg){const el=document.getElementById('connTest');el.style.display='block';el.className=`al al-${t==='ok'?'ok':t==='info'?'info':'err'}`;el.textContent=msg;}
-function updateConnBadge(ok){
-  const dot=document.getElementById('connDot'),lbl=document.getElementById('connLbl');
-  if(ok){
-    dot.className='dot '+(S.mode==='live'?'dg':'dy');
-    lbl.textContent=S.mode==='live'?'LIVE':'PAPER';
-    lbl.style.color=S.mode==='live'?'var(--green)':'var(--warn)';
-    const mp=document.getElementById('modePill');
-    if(mp){mp.style.display='flex';document.getElementById('modeLbl').textContent=S.mode.toUpperCase();}
-  }else{
-    dot.className='dot dr';lbl.textContent='DISCONNECTED';lbl.style.color='var(--red)';
-  }
-}
-
-// ═══════════════════════════════════════
-//  STRATEGY PAGE HELPERS
-// ═══════════════════════════════════════
-async function loadStrategyConfig(){
-  try{
-    const r=await fetch(getBackendUrl()+'/api/health');
-    if(!r.ok)return;
-    const d=await r.json();
-    const cfg=d.config||{};
-    // Null-safe: stratSL/stratTrail/stratHardTP were removed when the ATR
-    // banner replaced the fixed-% rows, and the old el(...).textContent calls
-    // threw on the first line — the bare catch below then swallowed it, so
-    // NOTHING on this card was ever populated. Never dereference el() directly.
-    const el=id=>document.getElementById(id);
-    const set=(id,v)=>{const n=el(id); if(n) n.textContent=v;};
-    if(cfg.stop_loss_pct) set('stratSL','-'+cfg.stop_loss_pct+'%');
-    if(cfg.trail_activate_pct && cfg.trail_pct) set('stratTrail','+'+cfg.trail_activate_pct+'% arm, '+cfg.trail_pct+'% trail');
-    const htp=parseFloat(cfg.hard_take_profit_pct||0);
-    set('stratHardTP',htp>0?'+'+htp+'%':'disabled');
-    if(cfg.scan_interval_sec) set('stratScanInt',(cfg.scan_interval_sec/60)+' min');
-    if(cfg.min_signal_score) set('stratMinScore',cfg.min_signal_score);
-    // Per-strategy caps and weekly limits, each falling back to the global
-    // value when the backend predates the per-strategy breakdown.
-    const caps   = cfg.per_trade_max_by_strategy || {};
-    const limits = cfg.weekly_limit_by_strategy  || {};
-    ['s1','s2','s3'].forEach(k=>{
-      const K = k.toUpperCase();
-      const cap = caps[k] ?? cfg.per_trade_max_usd;
-      if(cap!=null){
-        // Config table row and the matching strategy card both show the cap.
-        [el('stratPerTrade'+K), el(k+'Cap')].forEach(n=>{ if(n) n.textContent=fmtCur(parseFloat(cap)); });
-      }
-      const lim = limits[k] ?? cfg.weekly_trade_limit;
-      if(lim!=null){
-        set('stratWeekly'+K, lim+'/week');
-        set(k+'Limit', lim+'/week');
-      }
-    });
-    if(cfg.profit_check_sec) set('stratProfitSec',cfg.profit_check_sec+'s');
-    set('stratTgStatus',d.telegram_configured?'Connected':'Not configured — set TELEGRAM_BOT_TOKEN in .env');
-    const tg=el('stratTgStatus');
-    if(tg) tg.style.color=d.telegram_configured?'var(--green)':'var(--warn)';
-  }catch(e){ console.warn('loadStrategyConfig failed:', e); }
-}
-async function loadExitConfig(){
-  try{
-    const r=await fetch(getBackendUrl()+'/api/exit-config');
-    if(!r.ok)return;
-    const d=await r.json();
-    document.getElementById('exitSL').value=d.stop_loss_pct||3;
-    document.getElementById('exitTrailAct').value=d.trail_activate_pct||5;
-    document.getElementById('exitTrailPct').value=d.trail_pct||2.5;
-    document.getElementById('exitHardTP').value=d.hard_take_profit_pct||0;
-    document.getElementById('exitDailyCrash').value=d.daily_crash_pct||8;
-
-    // When STOP_MODE=atr the fixed-% inputs control nothing. Say so rather
-    // than showing an editable "3%" that silently does nothing.
-    const atr = (d.stop_mode==='atr');
-    const banner=document.getElementById('atrModeBanner');
-    if(banner){
-      banner.style.display = atr?'block':'none';
-      if(atr){
-        setEl('atrS1',(d.stop_atr_mult_s1??'—')+'×ATR');
-        setEl('atrS2',(d.stop_atr_mult_s2??'—')+'×ATR');
-        setEl('atrS3',(d.stop_atr_mult_s3??'—')+'×ATR');
-        setEl('atrFloor',(d.stop_min_pct??'—')+'%');
-        setEl('atrCap',(d.stop_max_pct??'—')+'%');
-      }
-    }
-    ['fixedStopRow'].forEach(id=>{
-      const el=document.getElementById(id);
-      if(el){ el.style.opacity = atr?'0.4':'1'; }
-    });
-    const sl=document.getElementById('exitSL');
-    if(sl){ sl.disabled = atr; sl.title = atr?'Inactive while STOP_MODE=atr':''; }
-
-    // Sidebar was showing the stale fixed values too.
-    const sbSL=document.getElementById('sbSL');
-    if(sbSL) sbSL.textContent = atr ? `${d.stop_atr_mult_s1}–${d.stop_atr_mult_s2}×ATR` : (d.stop_loss_pct+'%');
-    const sbTrail=document.getElementById('sbTrail');
-    if(sbTrail) sbTrail.textContent = (d.trail_mode==='atr')
-      ? `${d.trail_atr_mult}×ATR (min ${d.trail_min_pct}%)`
-      : `+${d.trail_activate_pct}% arm / ${d.trail_pct}%`;
-  }catch(e){}
-}
-async function saveExitConfig(){
-  const body={
-    stop_loss_pct:parseFloat(document.getElementById('exitSL').value),
-    trail_activate_pct:parseFloat(document.getElementById('exitTrailAct').value),
-    trail_pct:parseFloat(document.getElementById('exitTrailPct').value),
-    hard_take_profit_pct:parseFloat(document.getElementById('exitHardTP').value),
-    daily_crash_pct:parseFloat(document.getElementById('exitDailyCrash').value),
-  };
-  try{
-    const r=await fetch(getBackendUrl()+'/api/exit-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d=await r.json();
-    if(d.ok){
-      log(`Exit config saved — SL ${d.config.stop_loss_pct}% | trail arms +${d.config.trail_activate_pct}%, gives back ${d.config.trail_pct}% | hard TP ${d.config.hard_take_profit_pct||'disabled'}`,'ok');
-      const sb=document.getElementById('sbSL');if(sb)sb.textContent=d.config.stop_loss_pct+'%';
-    }else{log('Failed to save exit config','err');}
-  }catch(e){log('Exit config save error: '+e.message,'err');}
-}
-async function testTelegram(){
-  const el=document.getElementById('stratTgStatus');
-  el.textContent='Sending test...';el.style.color='var(--warn)';
-  try{
-    const r=await fetch(getBackendUrl()+'/api/telegram/test',{method:'POST'});
-    const d=await r.json();
-    if(d.ok){el.textContent='Test sent — check Telegram';el.style.color='var(--green)';log('Telegram test message sent','ok');}
-    else{el.textContent='Failed: '+(d.error||'unknown');el.style.color='var(--red)';log('Telegram test failed: '+(d.error||'unknown'),'err');}
-  }catch(e){el.textContent='Error: '+e.message;el.style.color='var(--red)';log('Telegram test error: '+e.message,'err');}
-}
-
-// ═══════════════════════════════════════
-//  RECENT TRADES
-// ═══════════════════════════════════════
-function addRecent({ticker,dir,qty,price,status,reason}){
-  const tbody=document.getElementById('recTrades');
-  // Null-guard: this threw whenever the current page has no #recTrades table.
-  // placeTrade() calls it AFTER the order is already submitted, so the throw
-  // made a successful order look like a failure to any caller wrapping it in
-  // try/catch -- which invited re-submitting orders that had in fact filled.
-  if(!tbody) return;
-  const row=`<tr>
-<td style="color:var(--muted);font-size:.65rem">${new Date().toLocaleTimeString()}</td>
-<td style="font-weight:700">${ticker}</td>
-<td><span class="bdg bdg-${dir.toLowerCase()}">${dir}</span></td>
-<td>${fn(qty,0)}</td>
-<td>${fmtCur(price)}</td>
-<td><span class="bdg bdg-${status==='FILLED'?'ok':status==='REJECTED'?'err':'pend'}">${status}</span></td>
-<td class="nu">—</td>
-<td style="font-size:.63rem;color:var(--muted);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${reason}</td>
-</tr>`;
-  if(tbody.innerHTML.includes('Connect API')) tbody.innerHTML='';
-  tbody.insertAdjacentHTML('afterbegin',row);
-}
-
-// ═══════════════════════════════════════
-//  LOG
-// ═══════════════════════════════════════
-function log(msg,type='ok'){S.logs.unshift({t:new Date().toLocaleTimeString(),msg,type});if(S.logs.length>300)S.logs.pop();renderLogs();}
-let _toastTimer=null;
-function showToast(msg,ok=true){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(ok?'t-ok':'t-err');clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.className='',3500);}
-
-let _confBuyTimer=null;
-function showConfidentBuy(picks){
-  const el=document.getElementById('confBuy');
-  if(!picks.length){el.classList.remove('show');return;}
-  el.innerHTML=picks.map(p=>{
-    const gp=p.in_golden_pocket?`<span class="cb-gp">Golden Pocket</span>`:'';
-    const name=p.name||getStockName(p.ticker)||p.ticker;
-    return `<div class="cb-bar">
-      <span class="cb-dot"></span>
-      <span class="cb-ticker">${p.ticker}</span>
-      <span class="cb-name">${name}</span>
-      <span class="cb-score">${p.score}</span>
-      <span class="cb-detail">RSI ${Math.round(p.rsi||0)} | $${(p.price||0).toFixed(2)}</span>
-      ${gp}
-      <span class="cb-detail" style="color:var(--green)">CONFIDENT BUY</span>
-      <span class="cb-close" onclick="event.stopPropagation();document.getElementById('confBuy').classList.remove('show')">✕</span>
-    </div>`;
+  el('scoring').innerHTML = ['s1','s2','s3'].map(k=>{
+    const m=STRAT[k];
+    return `<div style="margin:14px 0 6px;font-weight:500;color:${m.c}">${m.n}</div>
+      <table><thead><tr><th>Component</th><th>Max</th><th style="text-align:left">What it measures</th></tr></thead>
+      <tbody>${SCORING[k].map(r=>`<tr><td>${r[0]}</td><td class="num">${r[1]}</td>
+        <td class="mut" style="text-align:left;white-space:normal">${r[2]}</td></tr>`).join('')}</tbody></table>`;
   }).join('');
-  el.classList.add('show');
-  clearTimeout(_confBuyTimer);
-  _confBuyTimer=setTimeout(()=>el.classList.remove('show'),30000);
-  try{new Audio('data:audio/wav;base64,UklGRl9LAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTtLAACAgICAgICAgICAgICA').play().catch(()=>{});}catch(e){}
-}
-function renderLogs(){
-  const f=document.getElementById('logFilt')?.value||'all';
-  const el=document.getElementById('logBox');if(!el)return;
-  const logs=f==='all'?S.logs:S.logs.filter(l=>l.type===f);
-  el.innerHTML=logs.slice(0,120).map(l=>`<div class="log-row"><span class="log-t">${l.t}</span><span class="c-${l.type}">${l.msg}</span></div>`).join('')||`<div style="color:var(--muted);font-size:.7rem;font-family:var(--mono);padding:.75rem 0">No entries.</div>`;
-}
 
-// ═══════════════════════════════════════
-//  PIN AUTH
-// ═══════════════════════════════════════
-let _pinUnlocked = false;   // cleared on page reload
-let _pinCallback = null;
+  el('backtest').innerHTML = `<table>
+    <thead><tr><th>Configuration</th><th>Return</th><th>Max DD</th><th>Win rate</th><th style="text-align:left">Stability</th></tr></thead>
+    <tbody>${BACKTEST.map(r=>`<tr><td style="color:${r[5]}">${r[0]}</td>
+      <td class="num ${r[1].startsWith('+')?'up':''}">${r[1]}</td><td class="num">${r[2]}</td>
+      <td class="num">${r[3]}</td><td class="mut" style="text-align:left">${r[4]}</td></tr>`).join('')}</tbody></table>
+    <p class="mut" style="margin-top:12px;font-size:12px;line-height:1.6">
+      Win rate is not the target. The highest win rate ever tested here (68.0%) <em>lost money</em> —
+      average wins were smaller than average losses. Expectancy is what decides profitability, and
+      no strategy has yet beaten buy &amp; hold.</p>`;
 
-function requirePin(cb){
-  if(_pinUnlocked){ cb(); return; }
-  _pinCallback = cb;
-  document.getElementById('pinInput').value='';
-  document.getElementById('pinHint').textContent='';
-  document.getElementById('pinBtn').disabled=true;
-  openM('pinM');
-  setTimeout(()=>document.getElementById('pinInput').focus(),120);
+  el('exitRef').innerHTML = `<p class="mut" style="font-size:12px;line-height:1.7">
+    Stops are ATR-scaled because a fixed -3% stop was <em>smaller than the median daily true range</em>
+    of the stocks being traded. Live, that made 70% of all exits stop-outs and meant the trailing stop
+    never once armed across 50 losing trades.<br><br>
+    The trail floors are not optional: without them a 0.10%-ATR instrument arms its trail at +0.20% and
+    exits on a 0.15% give-back.<br><br>
+    The profit ladder is per strategy because it is not universally good — it helped S2
+    (+13.26% → +15.55%) and hurt S3 (+33.89% → +22.34%), lifting S3's win rate while collapsing its payoff.</p>`;
 }
 
-function pinOnInput(el){
-  const v = el.value.toUpperCase();
-  el.value = v;
-  // Validate: first 2 chars letters, next 6 digits
-  const ok = /^[A-Z]{2}[0-9]{6}$/.test(v);
-  document.getElementById('pinBtn').disabled = !ok;
-  if(v.length===0) document.getElementById('pinHint').textContent='';
-  else if(v.length<2) document.getElementById('pinHint').textContent='Enter 2 letters first';
-  else if(v.length<8) document.getElementById('pinHint').textContent=`${8-v.length} more digit(s)`;
-  else if(ok) document.getElementById('pinHint').textContent='';
-  else document.getElementById('pinHint').textContent='Format: 2 letters + 6 digits';
-}
-
-async function pinSubmit(){
-  const pin = document.getElementById('pinInput').value.trim().toUpperCase();
-  if(!/^[A-Z]{2}[0-9]{6}$/.test(pin)) return;
-  document.getElementById('pinBtn').disabled=true;
-  document.getElementById('pinHint').textContent='Verifying...';
+/* ── engine control ────────────────────────────────────── */
+// The old dashboard had a Stop Engine button in its header; without an
+// equivalent there is no way to halt trading from the UI. This toggles the
+// running instance only — AUTO_TRADE_ENABLED still decides the state it boots
+// into, so a restart reverts to whatever the environment says.
+el('engine').onclick = async () => {
+  const on = !!(S.auto && S.auto.enabled);
+  const verb = on ? 'STOP' : 'START';
+  if(!confirm(`${verb} the auto-trader?\n\n`+
+      (on ? 'No new orders will be placed. Open positions keep their exit rules.'
+          : 'The bot will place orders on its next scheduled scan.')+
+      '\n\nThis affects the running instance only; AUTO_TRADE_ENABLED decides what it boots into.')) return;
+  logLine(`${verb} auto-trader requested`);
   try{
-    const res = await api('/api/auth/pin','POST',{pin});
-    if(res && res.ok){
-      _pinUnlocked=true;
-      closeM('pinM');
-      if(_pinCallback){ const cb=_pinCallback; _pinCallback=null; cb(); }
-    } else {
-      document.getElementById('pinHint').style.color='var(--red)';
-      document.getElementById('pinHint').textContent='Wrong PIN — try again';
-      document.getElementById('pinInput').value='';
-      document.getElementById('pinBtn').disabled=true;
-      setTimeout(()=>{
-        document.getElementById('pinHint').style.color='var(--muted)';
-        document.getElementById('pinHint').textContent='';
-      },2000);
-    }
-  } catch(e){
-    document.getElementById('pinHint').textContent='Error verifying PIN';
-  }
-}
+    const r = await fetch(API+(on?'/api/auto/stop':'/api/auto/start'), {method:'POST'});
+    const d = await r.json().catch(()=>({}));
+    if(r.ok) logLine(`Auto-trader ${on?'stopped':'started'}`, 'ok');
+    else     logLine(`Failed: ${d.detail||r.status}`, 'err');
+  }catch(err){ logLine('Engine toggle failed: '+err.message,'err'); }
+  load();
+};
 
-function pinCancel(){
-  _pinCallback=null;
-  closeM('pinM');
-}
-
-// ═══════════════════════════════════════
-//  CONFIRM DIALOG
-// ═══════════════════════════════════════
-function confirm2(msg,title,cb){
-  setEl('confTtl',title);
-  document.getElementById('confBody').innerHTML=msg.replace(/\n/g,'<br>');
-  document.getElementById('confBtn').onclick=()=>{closeM('confM');cb();};
-  openM('confM');
-}
-
-// ═══════════════════════════════════════
-//  NAV
-// ═══════════════════════════════════════
-function nav(id,el){
-  document.querySelectorAll('.sec').forEach(s=>s.classList.remove('on'));
-  document.getElementById('s-'+id)?.classList.add('on');
-  if(el){document.querySelectorAll('.sb-item').forEach(n=>n.classList.remove('on'));el.classList.add('on');}
-  if(id==='ov'){fetchAccount();fetchPositions();}
-  if(id==='port'){fetchPositions();}
-  if(id==='ord'){fetchOrders();}
-  if(id==='perf'){fetchOrders();loadStrategyComparison();}
-  if(id==='strat'){loadStrategyComparison();}
-  if(id==='logs'){renderLogs();}
-}
-
-// ═══════════════════════════════════════
-//  TRADE PERFORMANCE SUB-TABS
-// ═══════════════════════════════════════
-function perfSub(sub,btn){
-  document.querySelectorAll('.perfTab').forEach(b=>{b.classList.remove('b-acc');b.classList.add('b-out');});
-  btn.classList.remove('b-out');btn.classList.add('b-acc');
-  document.getElementById('perfSub-closed').style.display=sub==='closed'?'':'none';
-  document.getElementById('perfSub-stratbuys').style.display=sub==='stratbuys'?'':'none';
-  if(sub==='stratbuys')loadStrategyComparison();
-  if(sub==='closed')renderPerf();
-}
-
-// ═══════════════════════════════════════
-//  STRATEGY A/B COMPARISON
-// ═══════════════════════════════════════
-let _stratData=null;
-let _stratFilter='all';
-
-async function loadStrategyComparison(){
-  try{
-    const r=await fetch('/api/strategy/compare');
-    _stratData=await r.json();
-    renderStratComparison();
-  }catch(e){console.error('Strategy compare failed:',e);}
-}
-
-function filterStratTrades(period,btn){
-  _stratFilter=period;
-  document.querySelectorAll('.stratFilter').forEach(b=>b.classList.remove('on'));
-  btn.classList.add('on');
-  renderStratComparison();
-}
-
-function renderStratComparison(){
-  if(!_stratData)return;
-  const d=_stratData;
-
-  // Real stats now come from the backend's FIFO round-trip matching — these
-  // used to be hardcoded "tracking..." placeholders.
-  const STRATS = [
-    {k:'s1', colour:'var(--s1)'},
-    {k:'s2', colour:'var(--s2)'},
-    {k:'s3', colour:'var(--s3)'},
-  ];
-
-  STRATS.forEach(({k, colour})=>{
-    const s = d[k] || {};
-    setEl(k+'Trades', s.total_trades ?? 0);
-
-    const closed = s.closed_trades ?? 0;
-    if(closed){
-      setEl(k+'WinRate', fn(s.win_rate,1)+'%');
-      const wrEl=document.getElementById(k+'WinRate');
-      if(wrEl) wrEl.style.color = s.win_rate>=50?'var(--green)':'var(--red)';
-
-      setEl(k+'Wins', s.profitable ?? 0);
-      // Payoff matters as much as win rate: below 1.00 the average win is
-      // smaller than the average loss, so a high win rate still loses.
-      setEl(k+'Payoff', fn(s.avg_return_pct,2)+'%');
-
-      setEl(k+'PnL', (s.net_pnl>=0?'+':'')+fmtCur(s.net_pnl));
-      const pl=document.getElementById(k+'PnL');
-      if(pl) pl.style.color = s.net_pnl>=0?'var(--green)':'var(--red)';
-    }else{
-      setEl(k+'WinRate','—'); setEl(k+'Wins','0');
-      setEl(k+'Payoff','—');  setEl(k+'PnL','—');
-    }
-
-    const picks = d[k+'_picks']||[];
-    const el = document.getElementById(k+'PicksList');
-    if(!el) return;
-    if(picks.length){
-      el.innerHTML = picks.map(p=>`<span style="color:${p.score>=75?'var(--green)':colour}">`+
-        `${p.ticker} ${p.score}/100</span>`).join(' &middot; ');
-    }else{ el.textContent='No picks above threshold'; }
-  });
-
-  const s1t=d.s1.trades||[], s2t=d.s2.trades||[], s3t=(d.s3&&d.s3.trades)||[];
-
-  // Trade history table
-  const all=[...s1t.map(t=>({...t,_strat:'s1'})),...s2t.map(t=>({...t,_strat:'s2'})),
-             ...s3t.map(t=>({...t,_strat:'s3'}))];
-  all.sort((a,b)=>(b.timestamp||'').localeCompare(a.timestamp||''));
-
-  // Apply time filter
-  const now=Date.now();
-  const cutoffs={all:0,'1w':7*864e5,'1m':30*864e5,'3m':90*864e5,'6m':180*864e5};
-  const cut=cutoffs[_stratFilter]||0;
-  const filtered=cut?all.filter(t=>{
-    const ts=new Date(t.timestamp).getTime();
-    return(now-ts)<=cut;
-  }):all;
-
-  const tbody=document.getElementById('stratTradeBody');
-  if(!filtered.length){
-    tbody.innerHTML='<tr><td colspan="6" style="color:var(--muted2);text-align:center;padding:20px">No trades in this period</td></tr>';
-    return;
-  }
-  tbody.innerHTML=filtered.map(t=>{
-    const dt=t.timestamp?new Date(t.timestamp).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—';
-    const STRAT_HTML={s1:'<span style="color:var(--s1)">S1 Pullback</span>',
-                      s2:'<span style="color:var(--s2)">S2 Breakout</span>',
-                      s3:'<span style="color:var(--s3)">S3 Leader Dip</span>'};
-    const strat=STRAT_HTML[t._strat]||t._strat;
-    const sig=(t.reasons||[]).slice(0,2).join(' | ');
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:.68rem">${dt}</td>
-      <td>${strat}</td>
-      <td style="font-weight:600">${t.ticker||'—'}</td>
-      <td style="text-align:right;font-family:var(--mono)">$${(t.notional_usd||0).toFixed(2)}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--green)">${t.score||'—'}</td>
-      <td style="font-size:.65rem;color:var(--muted2)">${sig||'—'}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ═══════════════════════════════════════
-//  HELPERS
-// ═══════════════════════════════════════
-function setEl(id,v){const el=document.getElementById(id);if(el)el.textContent=v;}
-function fn(n,d=2){return typeof n==='number'?n.toFixed(d):'—';}
-// Currency follows the broker account. This was hardcoded to '€' from the
-// Trade212 original, so a USD Alpaca account rendered every figure in euros.
-const CUR_SYMBOLS = { USD:'$', EUR:'€', GBP:'£' };
-function curSymbol(){
-  const c = (typeof S!=='undefined' && S.account && S.account.currency) || 'USD';
-  return CUR_SYMBOLS[c] || (c + ' ');
-}
-function fmtCur(n){
-  if(typeof n!=='number')return'—';
-  const sym = curSymbol();
-  return(n<0?'-'+sym:sym)+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-}
-function getSL(){return parseInt(document.getElementById('slR')?.value||5);}
-function getTP(){return parseInt(document.getElementById('tpR')?.value||8);}
-
-// ═══════════════════════════════════════
-//  AUTO-LOAD CONFIG FROM BACKEND
-//  Reads API key + mode from server.py
-//  No manual configuration needed
-// ═══════════════════════════════════════
-async function loadConfigFromBackend(){
-  // Try to fetch config from local backend server
-  // Works when served via python server.py at localhost:8000
-  const origins = [
-    window.location.origin,         // same origin (localhost:8000 or cloudflare URL)
-    'http://localhost:8000',         // fallback direct
-    'http://127.0.0.1:8000',         // fallback direct IP
-  ];
-  for(const origin of origins){
-    try{
-      const res = await fetch(`${origin}/api/config`, {signal: AbortSignal.timeout(3000)});
-      if(res.ok){
-        const cfg = await res.json();
-        if(cfg.key_configured){
-          S.connected = true;
-          S.mode      = cfg.mode || 'paper';
-          log(`Auto-connected — Alpaca ${S.mode.toUpperCase()}`,'ok');
-          return true;
-        }
-      }
-    }catch(e){
-      // Try next origin
-    }
-  }
-  return false;
-}
-
-// ═══════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════
-document.addEventListener('DOMContentLoaded', async ()=>{
-  loadStrategyConfig();
-  loadExitConfig();
-  drawEqChart();
-
-  log('RaanuTradingBot v2.1 starting...','info');
-  log('Auto-loading config from backend...','info');
-
-  // Try to load API key from backend automatically
-  const connected = await loadConfigFromBackend();
-
-  if(document.getElementById('sbMode')) setEl('sbMode', S.mode.toUpperCase());
-
-  if(connected){
-    updateConnBadge(true);
-    await fetchAccount();
-    await fetchPositions();
-    await fetchOrders();
-    // Sync auto-trader state from backend
-    try{
-      const ar=await fetch(getBackendUrl()+'/api/auto/status');
-      if(ar.ok){const ad=await ar.json();if(ad.enabled && !S.engineOn){toggleEngine();}}
-    }catch(e){}
-    log('All data loaded successfully','ok');
-  }else{
-    log('Backend not reachable — ensure server.py is running and .env has Alpaca keys','warn');
-    ['m-wr','m-avg','m-sl'].forEach(id=>{
-      setEl(id,'—');
-      document.getElementById(id).className='mval nu';
-    });
-    setEl('m-wr-sub','Awaiting connection');
-    setEl('m-avg-sub','Awaiting connection');
-    setEl('m-sl-sub','Awaiting connection');
-  }
-
-  log('RaanuTradingBot — RSI(14), MACD(12,26,9), BB(20,2σ), EMA(50/200), ATR(14)','info');
-
-  document.querySelectorAll('.modal-bg').forEach(m=>
-    m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');})
-  );
-});
-
+/* ── boot ──────────────────────────────────────────────── */
+if(location.hash) go(location.hash.slice(1));
+load().then(()=>logLine('Dashboard loaded','ok'));
+setInterval(load, 30000);
 </script>
-</body>
-</html>
