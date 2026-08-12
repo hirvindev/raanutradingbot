@@ -73,6 +73,16 @@ tbody tr:hover{background:#fcfcfc}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
 .empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:12px}
 
+.tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+.tab{--tc:var(--blue);color:var(--muted);font-size:13px;padding:9px 0;border-bottom:2px solid transparent;
+     cursor:pointer;user-select:none;margin-bottom:-1px;white-space:nowrap}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--tc);border-bottom-color:var(--tc)}
+.tab b{font-weight:400;color:var(--muted);font-size:11px;margin-left:3px}
+.tab.on b{color:var(--tc)}
+.tab i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--tc);
+       margin-right:7px;vertical-align:0;opacity:.45}
+.tab.on i,.tab:hover i{opacity:1}
 .bar{display:flex;gap:7px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .chip{font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:3px;padding:5px 11px;cursor:pointer;user-select:none}
 .chip:hover{color:var(--text)}
@@ -164,14 +174,19 @@ details .inner{padding:0 18px 16px}
       <div class="stat"><div class="k">Orders</div><div class="v num" id="oCnt">—</div><div class="s">In history</div></div>
     </div>
 
-    <div class="bar">
+    <!-- Strategy is the primary axis here, so it gets real tabs rather than
+         filter chips off to one side. The active tab underlines in that
+         strategy's colour, which is the one place colour beats a label. -->
+    <div class="tabs" id="ordTabs">
+      <a class="tab on" data-of="all">All <b id="tc-all"></b></a>
+      <a class="tab" data-of="s1" style="--tc:var(--s1)"><i></i>S1 Pullback <b id="tc-s1"></b></a>
+      <a class="tab" data-of="s2" style="--tc:var(--s2)"><i></i>S2 Breakout <b id="tc-s2"></b></a>
+      <a class="tab" data-of="s3" style="--tc:var(--s3)"><i></i>S3 Leader Dip <b id="tc-s3"></b></a>
+    </div>
+
+    <div class="bar" id="ordView">
       <span class="chip on" data-view="closed">Closed P&amp;L</span>
       <span class="chip" data-view="orders">Order history</span>
-      <span style="flex:1"></span>
-      <span class="chip on" data-of="all">All</span>
-      <span class="chip" data-of="s1">S1</span>
-      <span class="chip" data-of="s2">S2</span>
-      <span class="chip" data-of="s3">S3</span>
     </div>
 
     <div class="card scroll" id="closedWrap">
@@ -379,12 +394,16 @@ function renderStrats(){
 }
 
 /* ── orders / closed P&L ───────────────────────────────── */
-document.querySelector('#p-orders .bar').addEventListener('click', e=>{
+el('ordTabs').addEventListener('click', e=>{
+  const t=e.target.closest('.tab'); if(!t) return;
+  S.filt = t.dataset.of;
+  document.querySelectorAll('#ordTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
+  renderOrders();
+});
+el('ordView').addEventListener('click', e=>{
   const c=e.target.closest('.chip'); if(!c) return;
-  if(c.dataset.view){ S.view=c.dataset.view;
-    document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('on',x===c)); }
-  if(c.dataset.of){ S.filt=c.dataset.of;
-    document.querySelectorAll('[data-of]').forEach(x=>x.classList.toggle('on',x===c)); }
+  S.view = c.dataset.view;
+  document.querySelectorAll('#ordView .chip').forEach(x=>x.classList.toggle('on',x===c));
   renderOrders();
 });
 
@@ -406,6 +425,12 @@ function renderOrders(){
   el('oPnl').textContent  = shown.length?signed(net):'—';
   el('oPnl').className    = 'v num '+(shown.length?cls(net):'');
   el('oCnt').textContent  = S.orders.length||'—';
+
+  // Counts live in the tabs so "S3 has nothing" is legible without clicking.
+  // Which set is counted follows the view, or the numbers contradict the table.
+  const src = S.view==='closed' ? closed : S.orders;
+  const cnt = k => k==='all' ? src.length : src.filter(r=>(r.strategy||'')===k).length;
+  for(const k of ['all','s1','s2','s3']) el('tc-'+k).textContent = cnt(k);
 
   el('closedWrap').style.display = S.view==='closed'?'':'none';
   el('ordWrap').style.display    = S.view==='orders'?'':'none';
