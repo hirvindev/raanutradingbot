@@ -71,6 +71,8 @@ tbody tr:hover{background:#fcfcfc}
 .sym{font-weight:500;color:var(--head)}
 .sub{font-size:11px;color:var(--muted);font-weight:400}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
+.lots{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:2px;
+       padding:1px 5px;margin-left:7px;vertical-align:1px;white-space:nowrap;cursor:help}
 .empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:12px}
 
 .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
@@ -436,16 +438,40 @@ function renderOrders(){
   el('ordWrap').style.display    = S.view==='orders'?'':'none';
 
   if(S.view==='closed'){
-    el('closed').innerHTML = shown.length ? shown.map(r=>`<tr>
+    // Identical lots are merged into one row with a ×N count.
+    //
+    // They are not a rendering bug: the bot really did buy the same ticker
+    // several times in a day (NTRA three times on 8 Aug, $500 each, all filled
+    // at the open), so FIFO closes several lots against one sell and produces
+    // several round-trips with identical prices. Correct data that reads as
+    // broken. Merging keeps every figure — qty and P&L are summed, and the
+    // count is shown — while making the repetition legible instead of
+    // looking like the same trade printed twice.
+    const groups = [];
+    const byKey = new Map();
+    for(const r of shown){
+      const k = [r.symbol, r.strategy, r.buy_price, r.sell_price,
+                 String(r.sell_date||'').slice(0,10)].join('|');
+      const g = byKey.get(k);
+      if(g){ g.n++; g.qty += r.qty||0; g.pnl += r.pnl||0; }
+      else { const ng = {...r, n:1, qty:r.qty||0, pnl:r.pnl||0}; byKey.set(k,ng); groups.push(ng); }
+    }
+    el('closed').innerHTML = groups.length ? groups.map(r=>`<tr>
         <td class="mut">${r.sell_date?new Date(r.sell_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'—'}</td>
-        <td><span class="sym">${r.symbol}</span></td>
+        <td><span class="sym">${r.symbol}</span>${r.n>1
+            ? `<span class="lots" title="${r.n} separate buy lots closed by one sell, all filled at the same price">×${r.n} lots</span>`
+            : ''}</td>
         <td>${tag(sof(r))}</td>
-        <td class="num">${(r.qty||0).toFixed(2)}</td>
+        <td class="num">${r.qty.toFixed(2)}</td>
         <td class="num">${money(r.buy_price||0)}</td>
         <td class="num">${money(r.sell_price||0)}</td>
         <td class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
         <td class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`).join('')
       : `<tr><td class="empty" colspan="8">${S.filt==='all'?'No closed trades yet':STRAT[S.filt].n+' has no closed trades yet'}</td></tr>`;
+    // Say so when rows were merged, or the row count contradicts the strip.
+    const merged = shown.length - groups.length;
+    el('oTotS').textContent = (S.filt==='all'?'All strategies':STRAT[S.filt].n)
+      + (merged>0 ? ` · ${groups.length} rows` : '');
   } else {
     const o = S.filt==='all' ? S.orders : S.orders.filter(x=>(x.strategy||'')===S.filt);
     el('orders').innerHTML = o.length ? o.slice(0,300).map(x=>{
