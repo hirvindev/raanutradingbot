@@ -47,6 +47,7 @@ import pandas as pd
 from strategy import batch_download, score_from_df, ema
 from strategy2 import score_from_df_s2
 from strategy3 import score_from_df_s3
+from strategy5 import score_from_df_s5, market_regime_on
 
 log = logging.getLogger("raanu.backtest")
 
@@ -186,13 +187,27 @@ def build_signals(strategy: str, universe: list[str], years: int,
     start_i = max(WARMUP_BARS, len(calendar) - years * 252)
     scan_dates = calendar[start_i::scan_every]
 
-    scorer = {"s2": score_from_df_s2, "s3": score_from_df_s3}.get(strategy, score_from_df)
-    gate   = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
+    scorer = {"s2": score_from_df_s2, "s3": score_from_df_s3,
+              "s5": score_from_df_s5}.get(strategy, score_from_df)
+    gate   = {"s2": "stage2", "s3": "leader_dip",
+              "s5": "momentum_leader"}.get(strategy, "uptrend")
+
+    # S5 carries an ABSOLUTE momentum gate on top of its per-ticker scoring:
+    # when SPY is below its own 200-day SMA the whole strategy stands down and
+    # emits nothing. Evaluated on SPY history up to and including the scan day,
+    # so it reads only trailing data like every other indicator here.
+    regime_gated = strategy == "s5"
 
     signals: dict[str, list] = {}
     for n, date in enumerate(scan_dates):
         bench = spy_roc.get(date)
         bench = float(bench) if bench is not None and not pd.isna(bench) else None
+
+        if regime_gated and not market_regime_on(spy_close[spy_close.index <= date]):
+            signals[date.strftime("%Y-%m-%d")] = []      # market regime off
+            if n % 25 == 0:
+                log.info(f"  {date.date()}  ({n}/{len(scan_dates)})  regime OFF — standing down")
+            continue
 
         hits = []
         for ticker, df in data.items():
@@ -548,7 +563,7 @@ def print_stats(label: str, s: dict) -> None:
 # ──────────────────────────────── CLI ────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="RaanuTradingBot backtester")
-    ap.add_argument("--strategy", default="s1", choices=["s1", "s2", "s3"])
+    ap.add_argument("--strategy", default="s1", choices=["s1", "s2", "s3", "s5"])
     ap.add_argument("--years", type=int, default=3)
     ap.add_argument("--min-score", type=int, default=60)
     ap.add_argument("--scan-every", type=int, default=1)
