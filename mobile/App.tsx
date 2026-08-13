@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
 
 import { api, loadCreds, setPass, hasPass, Unauthorized } from './src/api';
@@ -143,23 +143,55 @@ export default function App() {
     );
   }
 
-  const navTheme = {
-    ...(t.dark ? DarkTheme : DefaultTheme),
-    colors: { ...(t.dark ? DarkTheme : DefaultTheme).colors,
-      background: t.bg, card: t.card, text: t.head, border: t.line, primary: t.accent },
-  };
   const props = { refreshing, onRefresh, data };
 
   return (
     <SafeAreaProvider>
       <ThemeCtx.Provider value={t}>
         <StatusBar barStyle={t.dark ? 'light-content' : 'dark-content'} />
+        <Tabs t={t} props={props} />
+      </ThemeCtx.Provider>
+    </SafeAreaProvider>
+  );
+}
+
+/**
+ * Separate component so useSafeAreaInsets() can run — the hook must sit below
+ * SafeAreaProvider, which App itself renders.
+ *
+ * Android 16 makes edge-to-edge mandatory, so the tab bar draws underneath the
+ * system navigation bar unless its height and padding account for the bottom
+ * inset. Without this the labels collide with the gesture pill or the
+ * three-button nav.
+ */
+function Tabs({ t, props }: any) {
+  const insets = useSafeAreaInsets();
+  const barBase = Platform.OS === 'ios' ? 56 : 60;
+
+  const navTheme = {
+    ...(t.dark ? DarkTheme : DefaultTheme),
+    colors: { ...(t.dark ? DarkTheme : DefaultTheme).colors,
+      background: t.bg, card: t.card, text: t.head, border: t.line, primary: t.accent },
+  };
+
+  return (
         <NavigationContainer theme={navTheme}>
           <Tab.Navigator
             screenOptions={({ route }) => ({
               headerStyle: { backgroundColor: t.card, borderBottomColor: t.line },
-              headerTitleStyle: { color: t.head, fontSize: 18, fontWeight: '600' },
-              headerTitleAlign: 'left',
+              // The brand reads better than the screen name — every tab is
+              // already labelled in the bar below, so repeating it up here
+              // said nothing.
+              // Two-tone wordmark rather than a plain string: "Raanu" in the
+              // heading colour, "Bot" in the brand purple, matching the logo
+              // and the web header.
+              headerTitle: () => (
+                <Text style={{ fontSize: 23, fontWeight: '800', letterSpacing: -0.3 }}>
+                  <Text style={{ color: t.head }}>Raanu</Text>
+                  <Text style={{ color: t.accent }}>Bot</Text>
+                </Text>
+              ),
+              headerTitleAlign: 'center',
               // Brand mark top-left on every screen. The robot alone, not the
               // full badge — the wordmark is unreadable at 34px.
               headerLeft: () => (
@@ -170,7 +202,9 @@ export default function App() {
               // Android, which looked like a rendering fault rather than a
               // layout one.
               tabBarStyle: { backgroundColor: t.card, borderTopColor: t.line,
-                             height: Platform.OS === 'ios' ? 88 : 72, paddingTop: 8, paddingBottom: 10 },
+                             height: barBase + insets.bottom,
+                             paddingTop: 8,
+                             paddingBottom: insets.bottom > 0 ? insets.bottom : 10 },
               tabBarActiveTintColor: t.accent,
               tabBarInactiveTintColor: t.muted,
               tabBarLabelStyle: { fontSize: 12.5, marginBottom: 2 },
@@ -184,7 +218,5 @@ export default function App() {
             <Tab.Screen name="Logs">{() => <Logs {...props} />}</Tab.Screen>
           </Tab.Navigator>
         </NavigationContainer>
-      </ThemeCtx.Provider>
-    </SafeAreaProvider>
   );
 }

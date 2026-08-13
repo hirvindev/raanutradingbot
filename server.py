@@ -836,7 +836,8 @@ async def api_auth_gate(request: Request, call_next):
     # Push registration and its self-test move no money and change no bot
     # behaviour; gating them behind the trade PIN made "is push working?"
     # unanswerable without placing a trade.
-    _READ_TOKEN_POSTS = {"/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test"}
+    _READ_TOKEN_POSTS = {"/api/push/subscribe", "/api/push/unsubscribe",
+                         "/api/push/test", "/api/push/native/register"}
 
     if method not in ("GET", "HEAD") and path not in _READ_TOKEN_POSTS:
         expected = os.getenv("TRADE_PIN", "").strip()
@@ -1926,6 +1927,15 @@ async def push_unsubscribe(request: Request):
     return push.unsubscribe((await request.json()).get("endpoint", ""))
 
 
+@app.post("/api/push/native/register")
+async def push_native_register(request: Request):
+    """Register a native (FCM) device token. Read-token only, like web push —
+    registering a phone for notifications moves no money."""
+    import push
+    b = await request.json()
+    return push.register_native(b.get("token", ""), b.get("platform", "android"))
+
+
 @app.post("/api/push/test")
 async def push_test():
     """Fire a test notification. Deliberately a READ-token action.
@@ -1936,7 +1946,9 @@ async def push_test():
     broken rather than untested.
     """
     import push
-    return push.send("RaanuBot", "Notifications are working.", tag="test")
+    web = push.send("RaanuBot", "Notifications are working.", tag="test")
+    nat = push.send_native("RaanuBot", "Notifications are working.")
+    return {**web, "native_sent": nat, "sent": web.get("sent", 0) + nat}
 
 
 @app.get("/api/picks/outcomes")

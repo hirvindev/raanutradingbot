@@ -1,9 +1,11 @@
-import React from 'react';
-import { View, Text, ScrollView, RefreshControl, Platform, useWindowDimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, RefreshControl, Platform, useWindowDimensions,
+         Pressable, Alert } from 'react-native';
 import Constants from 'expo-constants';
 import { Card, H2, Muted, useTheme, styles } from '../ui';
 import { shortTime } from '../format';
 import { host } from '../api';
+import { pushState, enablePush, sendTest, PushState } from '../push';
 
 /**
  * Logs — the bot's recent events, plus what this device is actually doing.
@@ -20,6 +22,21 @@ export default function Logs({ refreshing, onRefresh, data }: any) {
   const auto = data?.auto || {};
   const health = data?.health || {};
   const events: any[] = auto.recent_events || [];
+
+  const [ps, setPs] = useState<PushState>('off');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { pushState().then(setPs); }, []);
+
+  const onPush = async () => {
+    setBusy(true);
+    const r = await enablePush();
+    setPs(await pushState());
+    setBusy(false);
+    // Say what happened either way. Silent success is indistinguishable from
+    // silent failure, which is precisely how the web attempt looked broken.
+    Alert.alert(r.ok ? 'Notifications on' : 'Not enabled', r.msg);
+    if (r.ok) Alert.alert('Test', await sendTest());
+  };
 
   const Row = ({ k, v, ok }: any) => (
     <View style={[styles.rowBetween, { paddingVertical: 6 }]}>
@@ -43,6 +60,26 @@ export default function Logs({ refreshing, onRefresh, data }: any) {
           <Row k="Host" v={host().replace('https://', '')} />
           <Row k="Screen" v={`${Math.round(width)} x ${Math.round(height)}`} />
           <Row k="App" v={`${Constants.expoConfig?.version || '1.0.0'} · ${Platform.OS}`} />
+        </View>
+      </Card>
+
+      <H2 sub="buys, exits and errors only">Notifications</H2>
+      <Card>
+        <View style={{ padding: 14 }}>
+          <Row k="Status" v={{on:'On', off:'Off', blocked:'Blocked in settings',
+                              unsupported:'Not available', 'no-fcm':'Needs Firebase config'}[ps]}
+               ok={ps === 'on'} />
+          <Muted style={{ fontSize: 14, marginTop: 6, lineHeight: 20 }}>
+            Only buys, exits and errors are pushed. Scans and quiet days are not —
+            Telegram keeps the full record.
+          </Muted>
+          <Pressable onPress={onPush} disabled={busy}
+            style={{ marginTop: 12, backgroundColor: busy ? t.muted : t.accent,
+                     borderRadius: 10, padding: 13, alignItems: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 15.5, fontWeight: '600' }}>
+              {busy ? 'Working…' : ps === 'on' ? 'Send a test notification' : 'Turn on notifications'}
+            </Text>
+          </Pressable>
         </View>
       </Card>
 

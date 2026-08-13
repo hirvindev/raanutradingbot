@@ -75,6 +75,28 @@ export async function post<T = any>(path: string, body?: any): Promise<T> {
   return (await r.json().catch(() => ({}))) as T;
 }
 
+/**
+ * Actions that move money. The trade PIN is passed in per call and NEVER
+ * stored — not in AsyncStorage, not in a module variable that outlives the
+ * request. A borrowed or stolen phone should not be able to sell a position,
+ * which is the whole reason the two secrets are separate.
+ */
+export async function tradeAction<T = any>(path: string, pin: string, body?: any): Promise<{
+  ok: boolean; status: number; data: T | null;
+}> {
+  const r = await fetch(host() + path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(_pass ? { Authorization: `Bearer ${_pass}` } : {}),
+      'X-Trade-Token': pin,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => null);
+  return { ok: r.ok, status: r.status, data };
+}
+
 // ---- endpoint shapes actually used by the screens ----
 export const api = {
   health: () => get('/api/health'),

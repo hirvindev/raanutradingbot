@@ -19,6 +19,7 @@ mobile/.expo/
 mobile/android/
 mobile/android/gradle.properties
 mobile/dist/
+mobile/google-services.json
 mobile/node_modules/
 picks_log.json
 position_peaks.json

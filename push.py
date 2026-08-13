@@ -127,18 +127,108 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/") -> dict:
     return {"sent": sent, "pruned": len(dead), "devices": len(subs) - len(dead)}
 
 
+# ---------- native (FCM / Expo) ----------
+# The web path above uses VAPID and speaks to browser push services. A native
+# Android app cannot use that: it needs FCM. Tokens therefore live in their own
+# file and are sent through a different transport, but BOTH are fanned out by
+# the same notify_* helpers, so a buy reaches every registered client without
+# the trading code knowing which kind each one is.
+NATIVE_PATH = state_path("push_native.json")
+
+
+def _load_native() -> list:
+    if NATIVE_PATH.exists():
+        try:
+            return json.loads(NATIVE_PATH.read_text()).get("tokens", [])
+        except Exception:
+            log.warning("[push] native token file unreadable")
+    return []
+
+
+def _save_native(toks: list):
+    try:
+        NATIVE_PATH.write_text(json.dumps({"tokens": toks}, indent=2))
+    except Exception as e:
+        log.error(f"[push] could not save native tokens: {e}")
+
+
+def register_native(token: str, platform: str = "android") -> dict:
+    if not token:
+        return {"ok": False, "error": "no token"}
+    toks = [t for t in _load_native() if t.get("token") != token]
+    toks.append({"token": token, "platform": platform,
+                 "added": datetime.now(timezone.utc).isoformat()})
+    _save_native(toks)
+    log.info(f"[push] native device registered ({len(toks)} total)")
+    return {"ok": True, "devices": len(toks)}
+
+
+def send_native(title: str, body: str) -> int:
+    """Deliver via FCM v1. Returns how many devices were reached.
+
+    Requires FCM_SERVICE_ACCOUNT_JSON — the service-account key from the
+    Firebase project. Without it this is a no-op that says so, rather than
+    failing somewhere deep in a trade path.
+    """
+    toks = _load_native()
+    if not toks:
+        return 0
+    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        log.info("[push] native skipped — FCM_SERVICE_ACCOUNT_JSON not set")
+        return 0
+    try:
+        import httpx
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request as GRequest
+
+        info = json.loads(raw)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
+        creds.refresh(GRequest())
+        url = f"https://fcm.googleapis.com/v1/projects/{info['project_id']}/messages:send"
+        headers = {"Authorization": f"Bearer {creds.token}"}
+        sent, dead = 0, []
+        for t in toks:
+            payload = {"message": {"token": t["token"],
+                                   "notification": {"title": title, "body": body},
+                                   "android": {"priority": "high",
+                                               "notification": {"channel_id": "trades"}}}}
+            r = httpx.post(url, headers=headers, json=payload, timeout=15)
+            if r.status_code == 200:
+                sent += 1
+            elif r.status_code in (400, 404):
+                dead.append(t["token"])      # unregistered; stop trying
+            else:
+                log.warning(f"[push] FCM {r.status_code}: {r.text[:120]}")
+        if dead:
+            _save_native([t for t in toks if t["token"] not in dead])
+            log.info(f"[push] pruned {len(dead)} dead native token(s)")
+        return sent
+    except Exception as e:
+        log.warning(f"[push] native send failed: {e}")
+        return 0
+
+
 # ---------- event helpers (call these, not send()) ----------
+def _fanout(title: str, body: str, tag: str):
+    """One call, every registered client — browser and native alike."""
+    web = send(title, body, tag=tag)
+    nat = send_native(title, body)
+    log.info(f"[push] {tag}: {web.get('sent', 0)} web, {nat} native")
+
+
 def notify_buy(ticker: str, usd: float, strategy: str, score=None):
-    send(f"Bought {ticker}",
-         f"${usd:,.0f} · {strategy.upper()}" + (f" · score {score}" if score else ""),
-         tag=f"buy-{ticker}")
+    _fanout(f"Bought {ticker}",
+            f"${usd:,.0f} · {strategy.upper()}" + (f" · score {score}" if score else ""),
+            f"buy-{ticker}")
 
 
 def notify_exit(ticker: str, pnl: float, pct: float, reason: str):
     sign = "+" if pnl >= 0 else ""
-    send(f"Exited {ticker} {sign}{pct:.1f}%",
-         f"{sign}${pnl:,.2f} · {reason}", tag=f"exit-{ticker}")
+    _fanout(f"Exited {ticker} {sign}{pct:.1f}%",
+            f"{sign}${pnl:,.2f} · {reason}", f"exit-{ticker}")
 
 
 def notify_error(what: str):
-    send("RaanuBot problem", what[:180], tag="error")
+    _fanout("RaanuBot problem", what[:180], "error")
