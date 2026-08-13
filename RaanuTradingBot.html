@@ -288,15 +288,15 @@ details .inner{padding:0 18px 16px}
      the others stay as a compact 3-up row beneath it. */
   #p-dash .strip.hero{grid-template-columns:repeat(3,1fr);border:0;background:transparent;
                  box-shadow:none;gap:8px;margin-bottom:18px}
-  #p-dash .hero .stat{background:var(--card);border:1px solid var(--line);border-radius:8px;
-                padding:11px 12px;border-right:1px solid var(--line)}
+  #p-dash .hero .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;
+                padding:14px 12px;border-right:1px solid var(--line)}
   #p-dash .hero .stat:first-child{grid-column:1/-1;padding:20px 18px;text-align:center}
-  #p-dash .hero .stat:first-child .k{font-size:11px;letter-spacing:.8px}
+  #p-dash .hero .stat:first-child .k{font-size:12px;letter-spacing:.9px}
   #p-dash .hero .stat:first-child .v{font-size:38px;letter-spacing:-1px;line-height:1.1}
-  #p-dash .hero .stat:first-child .s{font-size:12px;margin-top:5px}
-  #p-dash .hero .stat .k{font-size:9.5px;letter-spacing:.4px;margin-bottom:4px}
-  #p-dash .hero .stat .v{font-size:16px}
-  #p-dash .hero .stat .s{font-size:10px;line-height:1.35;
+  #p-dash .hero .stat:first-child .s{font-size:13px;margin-top:6px}
+  #p-dash .hero .stat .k{font-size:11.5px;letter-spacing:.4px;margin-bottom:5px}
+  #p-dash .hero .stat .v{font-size:19px}
+  #p-dash .hero .stat .s{font-size:11.5px;line-height:1.35;
                          display:-webkit-box;-webkit-line-clamp:2;
                          -webkit-box-orient:vertical;overflow:hidden}
   /* Long explanatory captions elsewhere get room rather than a clamp —
@@ -350,6 +350,54 @@ details .inner{padding:0 18px 16px}
                    max-width:none;padding-bottom:11px}
   .cards td.empty{display:block;text-align:center}
   .cards td.empty:before{content:none}
+
+  /* ── Mobile type scale ────────────────────────────────────────────────
+     The desktop sheet is built for a 1180px canvas read at arm's length on a
+     monitor: 13px body, 9.5-11px uppercase labels. Shrunk onto a 375px phone
+     held closer but glanced at faster, that reads as small and cramped. Every
+     size below is raised to a phone-appropriate floor — nothing under 12px —
+     and the spacing opened up to match, because larger type in the same boxes
+     just looks tighter, not clearer. */
+  body{font-size:15px}
+  h2{font-size:16px;margin-bottom:11px}
+  h2 em{font-size:12.5px}
+  .stat .k{font-size:11.5px;letter-spacing:.4px;margin-bottom:5px}
+  .stat .s{font-size:12px;margin-top:4px}
+  .sub{font-size:12.5px}
+  .tag{font-size:11px}
+  .dmeta{font-size:12px}
+  .mname{font-size:15px}
+  .tab{font-size:14px}
+  .tab b{font-size:12px}
+  .chip,.btn{font-size:13.5px}
+  .empty{font-size:13px;padding:30px 14px}
+  .sk{font-size:11px}
+  .sv{font-size:14px}
+  .pill{font-size:11px}
+
+  /* Compact rows carry the actual data — these are the numbers being scanned,
+     so they get the largest jump. */
+  .cards td[data-label="Instrument"]{font-size:16px;min-width:0;overflow:hidden}
+  /* Alpaca returns full legal names — "Merit Medical Systems, Inc. Common
+     Stock" wraps to two lines and shoves the row out of rhythm. One line,
+     ellipsised; the ticker above it already identifies the holding. */
+  .cards td[data-label="Instrument"] .sub{display:block;white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .cards td.pri{font-size:16px}
+  .cards td.pri ~ td.pri{font-size:13px}
+  .cards tbody tr:not(.dgroup):not(.sgroup){padding:13px 15px}
+  .cards tbody tr.open:not(.dgroup):not(.sgroup) td:not(.pri):not([data-label="Instrument"]){
+      font-size:13.5px;padding:6px 0 0}
+  .cards tbody tr.open:not(.dgroup):not(.sgroup) td:not(.pri):not([data-label="Instrument"]):before{
+      font-size:12px}
+  .cards tr.dgroup td,.cards tr.sgroup td{padding:13px 15px}
+
+  /* Explanatory captions are desktop annotations. On a phone they wrap to three
+     lines and turn a stat block into a paragraph — the figure and its label are
+     the content, the commentary is not. */
+  #p-dash .strip:not(.hero) .stat .s{display:none}
+  #p-dash .strip:not(.hero) .stat{padding:15px 14px}
+  #p-dash .strip:not(.hero) .stat .v{font-size:21px}
 
   /* ── Kite-style compact rows ──────────────────────────────────────────
      The first pass showed every field as its own labelled line, which is
