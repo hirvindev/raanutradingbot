@@ -1983,6 +1983,39 @@ def kite_alias():
     return RedirectResponse("/", status_code=307)
 
 
+@app.get("/.well-known/assetlinks.json")
+def asset_links():
+    """Digital Asset Links — proves this site and the Android app are the same owner.
+
+    Without it the TWA still runs but opens with a browser address bar across the
+    top, which is the giveaway that it is a wrapped web page rather than an app.
+    Chrome fetches this over HTTPS at install and verifies the certificate
+    fingerprint of the APK against the list here.
+
+    TWA_SHA256_FINGERPRINT comes from the signing key created at build time, and
+    from Play itself once Play App Signing re-signs the upload — those are
+    DIFFERENT fingerprints, and both must be listed or the app verifies in
+    testing and then shows the address bar in production. Comma-separate them.
+    """
+    fps = [f.strip().upper() for f in
+           os.getenv("TWA_SHA256_FINGERPRINT", "").split(",") if f.strip()]
+    pkg = os.getenv("TWA_PACKAGE_NAME", "app.raanu.twa").strip()
+    if not fps:
+        # Explicit over an empty list: an empty [] looks like a valid answer to
+        # Chrome and fails verification silently.
+        return JSONResponse(
+            {"error": "TWA_SHA256_FINGERPRINT is not set — run the bubblewrap "
+                      "build, then set it to the signing key's SHA-256"},
+            status_code=503,
+        )
+    return JSONResponse([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "android_app",
+                   "package_name": pkg,
+                   "sha256_cert_fingerprints": fps},
+    }])
+
+
 # ---------- PWA ----------
 # These sit outside /api/ so they are not behind the token gate: a service
 # worker and a manifest must be fetchable before the user has authenticated,
