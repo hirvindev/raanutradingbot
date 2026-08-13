@@ -16,6 +16,7 @@ last_picks_s2.json
 last_picks_s3.json
 picks_log.json
 position_peaks.json
+push_subs.json
 raanu.db*
 server_run.log
 trades_log.json

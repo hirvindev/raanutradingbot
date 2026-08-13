@@ -506,6 +506,11 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 "alpaca_response": result,
             })
             trader.event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
+            # Push is best-effort and must never break an order that already filled.
+            try:
+                import push; push.notify_buy(ticker, notional, strategy, pick.get("score"))
+            except Exception as e:
+                log.warning(f"[push] buy notify skipped: {e}")
             send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy), strategy=strategy)
 
             held.add(ticker)
@@ -1895,6 +1900,31 @@ async def _monthly_report_loop():
             log.info(f"Monthly report sent for {rep['period']}")
         except Exception as e:
             log.exception(f"Monthly report failed: {e}")
+
+
+@app.get("/api/push/key")
+async def push_key():
+    """Public VAPID key. Safe to hand out — it only lets a browser subscribe."""
+    import push
+    return {"key": push.public_key(), "configured": push.configured()}
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: Request):
+    import push
+    return push.subscribe(await request.json())
+
+
+@app.post("/api/push/unsubscribe")
+async def push_unsubscribe(request: Request):
+    import push
+    return push.unsubscribe((await request.json()).get("endpoint", ""))
+
+
+@app.post("/api/push/test")
+async def push_test():
+    import push
+    return push.send("RaanuBot", "Notifications are working.", tag="test")
 
 
 @app.get("/api/picks/outcomes")

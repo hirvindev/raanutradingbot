@@ -386,6 +386,14 @@ def _record_exit(symbol: str, entry: float, exit_price: float,
                 strategy = t.get("strategy", "s1")
                 break
 
+        # Exits are the events most worth interrupting someone for — a stop or
+        # trail firing is news. Wrapped: the position is already closed.
+        try:
+            import push
+            push.notify_exit(symbol.upper(), pnl, pct, reason)
+        except Exception as e:
+            log.warning(f"[push] exit notify skipped: {e}")
+
         trader.tradelog.record({
             "action":       "SELL",
             "ticker":       symbol.upper(),

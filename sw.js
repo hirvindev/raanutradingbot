@@ -13,7 +13,7 @@
  * icons — so the app opens instantly and works as an installed app rather than
  * a browser tab that needs a connection to show anything at all.
  */
-const SHELL = 'raanu-shell-v2';   // v2: new logo assets
+const SHELL = 'raanu-shell-v3';   // v3: push handlers
 const SHELL_URLS = [
   '/',
   '/manifest.webmanifest',
@@ -71,5 +71,40 @@ self.addEventListener('fetch', event => {
       }
       return res;
     }))
+  );
+});
+
+
+/* ── Web Push ──────────────────────────────────────────────────────────────
+   The service worker receives pushes even when the app is closed — that is the
+   whole point of routing them through here rather than the page. */
+self.addEventListener('push', event => {
+  let d = {title: 'RaanuBot', body: '', tag: 'raanu', url: '/'};
+  try { d = Object.assign(d, event.data ? event.data.json() : {}); } catch (e) {}
+  event.waitUntil(
+    self.registration.showNotification(d.title, {
+      body: d.body,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      // Same tag replaces rather than stacks: three exits should not leave
+      // three separate notifications for the same symbol.
+      tag: d.tag,
+      data: {url: d.url},
+      vibrate: [80, 40, 80],
+    })
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  // Focus an open window if there is one, rather than opening a second copy.
+  event.waitUntil(
+    clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
+      for (const c of list) {
+        if (c.url.includes(self.location.origin) && 'focus' in c) return c.focus();
+      }
+      return clients.openWindow(url);
+    })
   );
 });
