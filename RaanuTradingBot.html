@@ -30,6 +30,13 @@
 <meta name="apple-mobile-web-app-title" content="RaanuBot">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+/* Runs before the stylesheet so a saved dark preference never flashes white.
+   No stored choice = follow the system, which is why the attribute is only set
+   when the user has actually chosen. */
+(function(){try{var t=localStorage.getItem('raanu.theme');
+  if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
+</script>
 <style>
 :root{
   --bg:#f7f4fc; --card:#fff; --line:#e0d7f2; --line2:#eee8fa;
@@ -47,6 +54,41 @@
   /* S3 moves off violet — it would now be indistinguishable from the accent.
      Blue is free precisely because the accent stopped being blue. */
   --s1:#2f9e44; --s2:#f0a02e; --s3:#2f80ed;
+  --hover:#efe7fc; --btn-off:#cabbe8;
+  --shadow:rgba(105,65,198,.06); --shadow-lg:rgba(105,65,198,.12);
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────────
+   Follows the system by default; the header toggle overrides it and the choice
+   persists. Both directions are explicit (:root[data-theme=...]) so the toggle
+   can force light on a dark phone as well as the reverse.
+
+   Not a straight inversion. The brand purple (#6941c6) fails contrast on a dark
+   ground, so the accent lightens to #a189f0; profit/loss shift to slightly
+   brighter, less saturated variants that stay legible without glowing. Surfaces
+   are a very dark aubergine rather than pure black — an OLED true black makes
+   the thin card borders that carry this layout disappear entirely. */
+:root[data-theme="dark"]{
+  --bg:#0e0c14; --card:#17141f; --line:#2b2438; --line2:#221c2e;
+  --wash:#1b1626;
+  --text:#c5bdd6; --head:#f2eefa; --muted:#8a819e;
+  --accent:#a189f0; --accent-bg:#241d38; --accent-dark:#b9a6f5;
+  --green:#3ecf6a; --red:#ff6a4d;
+  --s1:#3ecf6a; --s2:#f5b942; --s3:#5b9cf5;
+  --hover:#241d38; --btn-off:#3a3350;
+  --shadow:rgba(0,0,0,.45); --shadow-lg:rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e0c14; --card:#17141f; --line:#2b2438; --line2:#221c2e;
+    --wash:#1b1626;
+    --text:#c5bdd6; --head:#f2eefa; --muted:#8a819e;
+    --accent:#a189f0; --accent-bg:#241d38; --accent-dark:#b9a6f5;
+    --green:#3ecf6a; --red:#ff6a4d;
+    --s1:#3ecf6a; --s2:#f5b942; --s3:#5b9cf5;
+    --hover:#241d38; --btn-off:#3a3350;
+    --shadow:rgba(0,0,0,.45); --shadow-lg:rgba(0,0,0,.6);
+  }
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:400 13px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
@@ -54,7 +96,7 @@ body{background:var(--bg);color:var(--text);font:400 13px/1.5 Inter,-apple-syste
 .mut{color:var(--muted)}
 
 header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;
-       box-shadow:0 1px 3px rgba(105,65,198,.06)}
+       box-shadow:0 1px 3px var(--shadow)}
 .hwrap{max-width:1180px;margin:0 auto;padding:0 20px;height:56px;display:flex;align-items:center}
 .logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;
       color:var(--head);letter-spacing:-.2px}
@@ -69,12 +111,15 @@ nav a.on{color:var(--accent);border-bottom-color:var(--accent)}
 .pill{margin-left:18px;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:3px 8px;white-space:nowrap}
 .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:1px}
 .dot.off{background:var(--muted)}
+.themebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+          color:var(--muted);background:var(--card);font:inherit;padding:4px 7px;line-height:0}
+.themebtn:hover{color:var(--accent);border-color:var(--accent)}
 
 main{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
 .page{display:none} .page.on{display:block}
 
 .strip{background:var(--card);border:1px solid var(--line);border-radius:4px;
-       box-shadow:0 1px 2px rgba(105,65,198,.05);display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:22px}
+       box-shadow:0 1px 2px var(--shadow);display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:22px}
 .stat{padding:16px 20px;border-right:1px solid var(--line2)}
 .stat:last-child{border-right:0}
 .stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
@@ -84,7 +129,7 @@ main{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
 h2{font-size:14px;font-weight:500;color:var(--head);margin:0 0 10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 h2 em{font-style:normal;font-size:12px;color:var(--muted);font-weight:400}
 .card{background:var(--card);border:1px solid var(--line);border-radius:4px;margin-bottom:22px;
-      box-shadow:0 1px 2px rgba(105,65,198,.05)}
+      box-shadow:0 1px 2px var(--shadow)}
 .pad{padding:16px 18px}
 .scroll{overflow-x:auto}
 
@@ -99,15 +144,15 @@ tbody tr:hover{background:var(--wash)}
 .sub{font-size:11px;color:var(--muted);font-weight:400}
 .tag{font-size:10px;color:var(--muted);border-left:2px solid var(--line);padding-left:6px;white-space:nowrap}
 .mbox{background:var(--card);border:1px solid var(--line);border-radius:4px;margin-bottom:14px;
-      overflow:hidden;box-shadow:0 1px 2px rgba(105,65,198,.05)}
+      overflow:hidden;box-shadow:0 1px 2px var(--shadow)}
 .mhead{display:flex;align-items:center;gap:9px;padding:12px 16px;cursor:pointer;user-select:none;
        background:var(--accent-bg);border-bottom:1px solid var(--line)}
 .mbox:has(.mhead:only-child) .mhead,.mhead.solo{border-bottom:0}
-.mhead:hover{background:#efe7fc}
+.mhead:hover{background:var(--hover)}
 .mname{font-weight:600;font-size:13.5px;color:var(--head)}
 .dgroup td{background:var(--wash);border-bottom:1px solid var(--line);cursor:pointer;
            font-weight:500;color:var(--head);padding-top:9px;padding-bottom:9px;user-select:none}
-.dgroup:hover td{background:#f2ecfc}
+.dgroup:hover td{background:var(--hover)}
 /* Strategy sits one level below the day: same affordance, quieter, indented so
    the three levels read as a hierarchy rather than as three kinds of header. */
 .sgroup td{background:transparent;border-bottom:1px solid var(--line);cursor:pointer;
@@ -136,7 +181,7 @@ tbody tr:hover{background:var(--wash)}
 .chip.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
 .btn{font:inherit;font-size:12px;color:#fff;background:var(--accent);border:0;border-radius:3px;padding:7px 14px;cursor:pointer}
 .btn:hover{background:var(--accent-dark)}
-.btn:disabled{background:#cabbe8;cursor:default}
+.btn:disabled{background:var(--btn-off);cursor:default}
 .btn.ghost{color:var(--muted);background:var(--card);border:1px solid var(--line)}
 .btn.ghost:hover{color:var(--text)}
 .btn.sm{padding:4px 10px;font-size:11px}
@@ -191,7 +236,7 @@ details .inner{padding:0 18px 16px}
    a see-through overlay would leave them legible. */
 #tokenGate .box{background:var(--card);border:1px solid var(--line);border-radius:6px;
                 padding:26px 24px;max-width:380px;width:100%;
-                box-shadow:0 4px 20px rgba(105,65,198,.12)}
+                box-shadow:0 4px 20px var(--shadow-lg)}
 #tokenGate h3{font-size:15px;color:var(--head);font-weight:600;margin-bottom:8px}
 #tokenGate p{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.55;text-align:center}
 #tokenGate input{width:100%;font:inherit;font-size:14px;padding:11px 12px;
@@ -224,7 +269,7 @@ details .inner{padding:0 18px 16px}
       border-top:1px solid var(--line);
       /* Keeps the bar above the iPhone home indicator. */
       padding-bottom:env(safe-area-inset-bottom,0);
-      box-shadow:0 -1px 4px rgba(105,65,198,.07)}
+      box-shadow:0 -1px 4px var(--shadow)}
   nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
         text-align:center;font-size:10px;padding:8px 2px 7px;
         border-bottom:0;border-top:2px solid transparent;min-height:48px}
@@ -387,6 +432,7 @@ details .inner{padding:0 18px 16px}
       <a data-p="strategy"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></i><span class="lb">Strategy</span></a>
       <a data-p="logs"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></i><span class="lb">Logs</span></a>
     </nav>
+    <button class="pill themebtn" id="themeBtn" title="Light / dark" aria-label="Toggle theme"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
     <span class="pill" id="mode">—</span>
     <span class="pill" id="engine" style="cursor:pointer" title="Click to start or stop the auto-trader">—</span>
   </div>
@@ -1283,6 +1329,27 @@ el('engine').onclick = async () => {
   }catch(err){ logLine('Engine toggle failed: '+err.message,'err'); }
   load();
 };
+
+/* ── theme ─────────────────────────────────────────────── */
+const themeMeta = document.querySelector('meta[name=theme-color]');
+function currentTheme(){
+  const set = document.documentElement.getAttribute('data-theme');
+  if(set) return set;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  try{ localStorage.setItem('raanu.theme', t); }catch(e){}
+  // The installed app's status bar reads this; leaving it purple in dark mode
+  // puts a bright band above a dark screen.
+  if(themeMeta) themeMeta.setAttribute('content', t==='dark' ? '#17141f' : '#6941c6');
+  const ic = document.getElementById('themeIcon');
+  if(ic) ic.setAttribute('d', t==='dark'
+    ? 'M12 4v1m0 14v1m8-8h-1M5 12H4m13.7-5.7l-.7.7M7 17l-.7.7m0-11.4l.7.7m10 10l.7.7M16 12a4 4 0 11-8 0 4 4 0 018 0z'
+    : 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z');
+}
+applyTheme(currentTheme());
+el('themeBtn').onclick = () => applyTheme(currentTheme()==='dark' ? 'light' : 'dark');
 
 /* ── boot ──────────────────────────────────────────────── */
 el('tokenSave').onclick = () => {
