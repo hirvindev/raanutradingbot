@@ -474,6 +474,45 @@ ALPACA_DATA_FEED=iex        # iex | sip
 
 ---
 
+## 🔐 API Authentication — server.py
+
+Before this the deployed API was **completely open**: `curl .../api/account/cash`
+with no credentials returned the live balance, and `/api/orders/buy`,
+`/api/orders/sell` and `/api/auto/start` took no auth at all. CORS was
+`allow_origins=["*"]`. The only protection was that nobody knew the URL.
+
+**Two tokens, not one.** A phone is the most losable device in this system, so
+the token it carries must not be able to move money.
+
+| Token | Header | Covers |
+|-------|--------|--------|
+| `API_READ_TOKEN` | `Authorization: Bearer …` | every `/api/**` request |
+| `TRADE_PIN` | `X-Trade-Token: …` | **additionally** every non-GET `/api/**` |
+
+- Non-GET is denied **by method, not by a path list** — a new POST route is
+  protected the day it is written, not the day someone remembers to add it.
+- `GET /` (the HTML shell) stays public; it holds no data.
+- `/webhook/whatsapp` is outside `/api/` so Twilio can still reach it.
+- `/api/scan/stream` also accepts `?token=` because **EventSource cannot set
+  headers**. That is the only place a token rides in a URL, and it is why the
+  read token can never authorise an order — it will appear in access logs.
+- **The gate is skipped entirely when `API_READ_TOKEN` is unset**, logging a
+  warning on every request. A deploy must not lock the owner out before the
+  variable exists, but "temporarily open" must not go quiet either.
+- `ALLOWED_ORIGINS` replaces `"*"`. With tokens in play, a wildcard origin lets
+  any page the user visits read their account.
+
+Dashboard: `j()` attaches the read token to every read so a 401 always surfaces
+as the token prompt rather than empty panels; `action()` prompts for the trade
+PIN per action and **never stores it**. The gate runs before the first data
+request, so account figures never render behind a login prompt.
+
+⚠️ **`POST /api/auto/stop` really does stop the live bot.** A verification call
+during this work disabled production and had to be re-enabled — test against
+localhost, or use a GET, unless you mean it.
+
+---
+
 ## 🌐 Alpaca API
 | Mode | Broker Base URL |
 |------|----------------|
