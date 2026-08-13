@@ -833,7 +833,12 @@ async def api_auth_gate(request: Request, call_next):
     # Anything that is not a read needs the second secret. Deny-by-method rather
     # than by a path list: a new POST route is then protected the day it is
     # written, instead of the day someone remembers to add it here.
-    if method not in ("GET", "HEAD"):
+    # Push registration and its self-test move no money and change no bot
+    # behaviour; gating them behind the trade PIN made "is push working?"
+    # unanswerable without placing a trade.
+    _READ_TOKEN_POSTS = {"/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test"}
+
+    if method not in ("GET", "HEAD") and path not in _READ_TOKEN_POSTS:
         expected = os.getenv("TRADE_PIN", "").strip()
         presented = (request.headers.get("x-trade-token") or "").strip()
         if not expected or not secrets.compare_digest(presented, expected):
@@ -1923,6 +1928,13 @@ async def push_unsubscribe(request: Request):
 
 @app.post("/api/push/test")
 async def push_test():
+    """Fire a test notification. Deliberately a READ-token action.
+
+    Confirming your own phone receives notifications is not a money-moving
+    operation, and requiring the trade PIN for it meant the only way to find out
+    whether push worked was to wait for a real trade — which is why it looked
+    broken rather than untested.
+    """
     import push
     return push.send("RaanuBot", "Notifications are working.", tag="test")
 

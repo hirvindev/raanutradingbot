@@ -13,9 +13,12 @@
  * icons — so the app opens instantly and works as an installed app rather than
  * a browser tab that needs a connection to show anything at all.
  */
-const SHELL = 'raanu-shell-v3';   // v3: push handlers
+const SHELL = 'raanu-shell-v4';   // v4: stop precaching '/', auto-reload clients
 const SHELL_URLS = [
-  '/',
+  // "/" is deliberately NOT precached. It is the one file that changes on every
+  // deploy, and precaching it meant a device could sit on an old copy — the app
+  // showed the previous layout while the server had shipped a new one. It is
+  // fetched network-first below and cached on each success instead.
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -36,6 +39,8 @@ self.addEventListener('activate', event => {
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== SHELL).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({type: 'window'}))
+      .then(cs => cs.forEach(c => c.postMessage({type: 'sw-updated'})))
   );
 });
 

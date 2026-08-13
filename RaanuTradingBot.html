@@ -1615,7 +1615,19 @@ async function toggleBell(){
   const r = await fetch(API+'/api/push/subscribe',{method:'POST',
       headers:{'Content-Type':'application/json',...authHeaders()},
       body:JSON.stringify(sub.toJSON())});
-  logLine(r.ok?'Notifications on — buys, exits and errors':'Could not register device', r.ok?'ok':'err');
+  if(r.ok){
+    logLine('Notifications on — buys, exits and errors','ok');
+    // Prove it immediately. Silent success is indistinguishable from failure,
+    // which is exactly how this looked broken the first time.
+    const t = await fetch(API+'/api/push/test',{method:'POST',headers:authHeaders()});
+    const res = await t.json().catch(()=>({}));
+    if(res.sent) logLine('Test notification sent — check your phone','ok');
+    else { logLine('Registered, but the test push failed: '+(res.error||res.skipped||t.status),'err');
+           alert('Registered, but the test notification could not be sent.\n\n'+(res.error||res.skipped||'')); }
+  } else {
+    logLine('Could not register device','err');
+    alert('Could not register this device for notifications.');
+  }
   paintBell();
 }
 el('bellBtn').onclick = toggleBell;
@@ -1672,8 +1684,20 @@ setInterval(() => { if(el('tokenGate').style.display!=='flex') load(); }, 30000)
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then(r => logLine('Offline shell ready','ok'))
+      .then(r => { logLine('Offline shell ready','ok'); r.update(); })
       .catch(e => logLine('Service worker failed: '+e.message,'err'));
+
+    /* A new worker means new markup — reload once so a deploy actually lands.
+       Without this a device kept showing the previous layout indefinitely and
+       the only fix was clearing site data, which is not something to ask of
+       anyone. Guarded so the reload cannot loop. */
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('message', e => {
+      if(e.data && e.data.type === 'sw-updated' && !reloaded){ reloaded = true; location.reload(); }
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if(!reloaded){ reloaded = true; location.reload(); }
+    });
   });
 }
 </script>
