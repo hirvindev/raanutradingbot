@@ -443,6 +443,7 @@ PER_TRADE_MAX_USD=2500      # hard cap; overrides Kelly risk sizing when it bind
 PER_TRADE_MAX_USD_S1=1000
 PER_TRADE_MAX_USD_S2=100
 PER_TRADE_MAX_USD_S3=5000
+CASH_RESERVE_PCT=30         # keep 30% of EQUITY liquid; see below
 MIN_SIGNAL_SCORE=60
 PROFIT_CHECK_SEC=300
 
@@ -471,6 +472,30 @@ KELLY_MAX_RISK_PCT=2.0      # hard ceiling on per-trade risk
 MAX_POSITION_PCT=10.0       # cap any single position at this % of equity
 ALPACA_DATA_FEED=iex        # iex | sip
 ```
+
+---
+
+## 💵 Cash Reserve — CASH_RESERVE_PCT
+
+On the first slot that could actually execute (13 Aug 2026, 09:35 ET) the bot
+deployed **$99,414 of a $99,414 account and left $0.01**. Every gate passed —
+per-trade cap, weekly limit, Kelly sizing — because **none of them limits the
+total committed at once**. Consequences: no capacity for the 11:00 slot, none
+for a better signal the next day, and the whole account in whichever strategies
+happened to fire first that morning (13 buys: S1 x8, S2 x5, S3 x0 — i.e. all of
+it in the two strategies that fail the second-half backtest, none in the one
+that survives it).
+
+`CASH_RESERVE_PCT` (default 30) is measured against **equity, not free cash**,
+so it means "keep this share of the account liquid" rather than a share of
+whatever happens to be left. When the account is already over-deployed it simply
+yields nothing to spend — **it never forces a sale** to rebuild the buffer.
+
+    reserve    = equity * CASH_RESERVE_PCT / 100
+    deployable = max(0, free_cash - reserve)
+
+Orders size against `deployable` and draw it down as they go; the slot stops
+when it falls below $1. Do not size against raw `free_cash` again.
 
 ---
 

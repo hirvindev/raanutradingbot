@@ -260,7 +260,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     from scanner import find_top_picks, find_top_picks_s2, find_top_picks_s3
     from auto_trader import (
         get_free_cash, get_held_symbols, alpaca_buy_notional, market_is_open,
-        MIN_SIGNAL_SCORE, per_trade_max_for,
+        MIN_SIGNAL_SCORE, per_trade_max_for, _float_env,
     )
     # The cap is per strategy — see auto_trader.per_trade_max_for().
     per_trade_cap = per_trade_max_for(strategy)
@@ -368,9 +368,36 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     except Exception:
         equity = free_cash
 
+    # ── Cash reserve ─────────────────────────────────────────────────────────
+    # On the first slot that could actually execute, the bot deployed $99,414 of
+    # a $99,414 account and left $0.01. Every gate passed — per-trade cap, weekly
+    # limit, Kelly sizing — because none of them limits the TOTAL committed at
+    # once. The result: no capacity for the 11:00 slot, none for a better signal
+    # tomorrow, and the whole account in whichever strategies happened to fire
+    # first that morning.
+    #
+    # Measured against EQUITY, not free cash, so the reserve means "keep this
+    # share of the account liquid" rather than a share of whatever is left. When
+    # the account is already over-deployed this simply yields nothing to spend —
+    # it never forces a sale to rebuild the buffer.
+    reserve_pct = _float_env("CASH_RESERVE_PCT", 30.0)
+    reserve = equity * reserve_pct / 100.0
+    deployable = max(0.0, free_cash - reserve)
+    log.info(f"[{label}][{strategy.upper()}] cash {free_cash:,.0f} | "
+             f"reserve {reserve_pct:.0f}% = {reserve:,.0f} | deployable {deployable:,.0f}")
+    if deployable < 1.0:
+        msg = (f"Cash reserve reached — {free_cash:,.0f} free vs a "
+               f"{reserve_pct:.0f}% reserve of {reserve:,.0f}. No new positions.")
+        log.info(f"[{label}][{strategy.upper()}] {msg}")
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{msg}", strategy=strategy)
+        return
+
     placed = 0
     for pick in actionable:
         if placed >= n_orders:
+            break
+        if deployable < 1.0:
+            log.info(f"[{label}][{strategy.upper()}] reserve reached after {placed} order(s)")
             break
         ticker = pick["ticker"].upper()
         if ticker in held:
@@ -400,7 +427,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                          entry_px * (1 - stop_pct / 100),
                          max_position_pct=max_pos_pct)
         risk_sized = qty * entry_px
-        notional = round(min(risk_sized, per_trade_cap, free_cash), 2)
+        notional = round(min(risk_sized, per_trade_cap, deployable), 2)
         if notional < 1.0:
             log.info(
                 f"[{label}][{strategy.upper()}] {ticker} sized to ${notional} "
@@ -450,6 +477,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
 
             held.add(ticker)
             free_cash -= notional
+            deployable -= notional
             placed += 1
         except Exception as e:
             log.error(f"[{label}][{strategy.upper()}] Order failed for {ticker}: {e}")
