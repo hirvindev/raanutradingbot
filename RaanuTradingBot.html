@@ -234,6 +234,15 @@ details .inner{padding:0 18px 16px}
   h2{font-size:13.5px}
   .card,.mbox{border-radius:6px;margin-bottom:14px}
 
+  /* Phone-only chrome ends here. The CARD layout moved to its own, wider
+     breakpoint below: an installed app window on a desktop is far narrower
+     than a browser but much wider than a phone, and was landing in the gap —
+     nine-column tables squeezed into a small window. Cards now start at
+     820px so that window is readable, while the bottom tab bar and the
+     safe-area padding stay at 560px, where they actually belong. */
+}
+
+@media(max-width:820px){
   /* ── wide tables become cards ── */
   /* width:100% deliberately NOT on td. A block-level td already fills its row,
      and setting it explicitly makes flex-basis:auto resolve to the full row
