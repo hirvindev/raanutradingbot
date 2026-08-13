@@ -64,6 +64,8 @@ nav{display:flex;gap:22px;margin-left:auto}
 nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:19px 0;border-bottom:2px solid transparent;cursor:pointer}
 nav a:hover{color:var(--text)}
 nav a.on{color:var(--accent);border-bottom-color:var(--accent)}
+.ic{display:none}
+.ic svg{width:21px;height:21px;display:block}
 .pill{margin-left:18px;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:3px 8px;white-space:nowrap}
 .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:1px}
 .dot.off{background:var(--muted)}
@@ -223,10 +225,29 @@ details .inner{padding:0 18px 16px}
       /* Keeps the bar above the iPhone home indicator. */
       padding-bottom:env(safe-area-inset-bottom,0);
       box-shadow:0 -1px 4px rgba(105,65,198,.07)}
-  nav a{flex:1;text-align:center;font-size:10.5px;padding:11px 2px 9px;
-        border-bottom:0;border-top:2px solid transparent;min-height:44px}
+  nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+        text-align:center;font-size:10px;padding:8px 2px 7px;
+        border-bottom:0;border-top:2px solid transparent;min-height:48px}
+  .ic{display:block}
   nav a.on{border-bottom-color:transparent;border-top-color:var(--accent);background:var(--accent-bg)}
 
+  /* Hero figure. Four equal tiles is a desktop habit — on a phone one number
+     matters most and should be readable at arm's length, with the rest as
+     supporting detail. The FIRST stat of the dashboard strip becomes the hero;
+     the others stay as a compact 3-up row beneath it. */
+  #p-dash .strip.hero{grid-template-columns:repeat(3,1fr);border:0;background:transparent;
+                 box-shadow:none;gap:8px;margin-bottom:18px}
+  #p-dash .hero .stat{background:var(--card);border:1px solid var(--line);border-radius:8px;
+                padding:11px 12px;border-right:1px solid var(--line)}
+  #p-dash .hero .stat:first-child{grid-column:1/-1;padding:20px 18px;text-align:center}
+  #p-dash .hero .stat:first-child .k{font-size:11px;letter-spacing:.8px}
+  #p-dash .hero .stat:first-child .v{font-size:38px;letter-spacing:-1px;line-height:1.1}
+  #p-dash .hero .stat:first-child .s{font-size:12px;margin-top:5px}
+  #p-dash .hero .stat .k{font-size:9.5px;letter-spacing:.4px;margin-bottom:4px}
+  #p-dash .hero .stat .v{font-size:16px}
+  #p-dash .hero .stat .s{font-size:10px}
+
+  /* Other pages keep the plain 2-up strip. */
   .strip{grid-template-columns:repeat(2,1fr)}
   .stat{padding:13px 14px}
   .stat .v{font-size:20px}                     /* the numbers are the point */
@@ -360,11 +381,11 @@ details .inner{padding:0 18px 16px}
   <div class="hwrap">
     <div class="logo"><img src="/icons/mark.png" alt="" width="30" height="30"><span class="wm">Raanu<b>Bot</b></span></div>
     <nav id="nav">
-      <a data-p="dash" class="on">Dashboard</a>
-      <a data-p="orders">Orders</a>
-      <a data-p="signals">Signals</a>
-      <a data-p="strategy">Strategy</a>
-      <a data-p="logs">Logs</a>
+      <a data-p="dash" class="on"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></i><span class="lb">Dashboard</span></a>
+      <a data-p="orders"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></i><span class="lb">Orders</span></a>
+      <a data-p="signals"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V9M10 18V5M16 18v-6M22 18v-9"/></svg></i><span class="lb">Signals</span></a>
+      <a data-p="strategy"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></i><span class="lb">Strategy</span></a>
+      <a data-p="logs"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></i><span class="lb">Logs</span></a>
     </nav>
     <span class="pill" id="mode">—</span>
     <span class="pill" id="engine" style="cursor:pointer" title="Click to start or stop the auto-trader">—</span>
@@ -374,7 +395,7 @@ details .inner{padding:0 18px 16px}
 <main>
   <!-- ─────────── DASHBOARD ─────────── -->
   <section class="page on" id="p-dash">
-    <div class="strip">
+    <div class="strip hero">
       <div class="stat"><div class="k">Portfolio value</div><div class="v num" id="pv">—</div><div class="s" id="pvs">&nbsp;</div></div>
       <div class="stat"><div class="k">Day's P&amp;L</div><div class="v num" id="day">—</div><div class="s">Since previous close</div></div>
       <div class="stat"><div class="k">Open P&amp;L</div><div class="v num" id="open">—</div><div class="s" id="opens">&nbsp;</div></div>
