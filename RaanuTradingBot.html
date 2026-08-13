@@ -222,6 +222,29 @@ details .inner{padding:0 18px 16px}
 .up.up{color:var(--green)}
 .down.down{color:var(--red)}
 
+/* ── Picks / learning view ─────────────────────────────────────────────── */
+.scanhead{background:var(--card);border:1px solid var(--line);border-radius:8px;
+          padding:12px 14px;margin-bottom:14px;font-size:14px}
+.scanhead b{color:var(--head);font-weight:600}
+.scanhead .sh2{font-size:12px;margin-top:3px}
+.pghead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+        margin:16px 0 8px;font-size:12.5px}
+.pgname{font-weight:600;color:var(--head);font-size:13.5px;
+        border-left:3px solid var(--line);padding-left:8px}
+.pcard{background:var(--card);border:1px solid var(--line);border-radius:8px;
+       padding:12px 14px;margin-bottom:8px}
+.pctop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.pctop .sym{font-size:16px}
+.pscore{font-size:20px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.pscore.up{color:var(--green)}
+/* The reasons ARE the lesson — full sentences from the scoring engine, not
+   truncated, because the point is to read why the name qualified. */
+.why{list-style:none;margin:9px 0 0;padding:0}
+.why li{position:relative;padding-left:14px;font-size:13px;color:var(--text);
+        line-height:1.5;margin-top:3px}
+.why li:before{content:"·";position:absolute;left:3px;color:var(--accent);font-weight:700}
+.pempty{color:var(--muted);font-size:13px;padding:10px 2px 4px}
+
 @media(max-width:820px){
   .strip{grid-template-columns:repeat(2,1fr)} .stat{border-bottom:1px solid var(--line2)}
   .srow{grid-template-columns:1fr 1fr} .g2{grid-template-columns:1fr} nav{gap:14px}
@@ -1268,34 +1291,53 @@ function renderOrders(){
 }
 
 /* ── signals ───────────────────────────────────────────── */
-function renderPicks(){
-  const box=el('picks'), rows=[];
-  for(const k of ['s1','s2','s3']){
-    const p=(S.cmp[k+'_picks'])||[], at=S.cmp[k+'_scanned_at'];
-    const meta=STRAT[k];
-    if(!p.length){
-      rows.push(`<div class="srow"><div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>
-        <div class="idle">No cached scan yet</div></div>`);
-    } else {
-      rows.push(`<div class="srow"><div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>
-        <div style="grid-column:2/-2">${p.slice(0,4).map(x=>`<span class="num">${x.ticker} <b class="mut">${x.score}</b></span>`).join(' &nbsp; ')}</div>
-        <div class="mut" style="font-size:11px">${at?new Date(at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div></div>`);
+/* The picks view is a LEARNING surface, not a portfolio one. Two questions get
+   answered: is the bot scanning on schedule, and why was each name a good swing
+   candidate. The scoring engines already produce the reasons — they were being
+   thrown away, and the tab showed only "HRL 90". */
+const SLOTS_ET = [[9,35],[11,0]];
+
+function nextScan(){
+  // Everything in ET, since that is what the scheduler runs on.
+  const nowET = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  for(let d=0; d<7; d++){
+    for(const [h,m] of SLOTS_ET){
+      const t = new Date(nowET); t.setDate(t.getDate()+d); t.setHours(h,m,0,0);
+      if(t > nowET && t.getDay()>=1 && t.getDay()<=5){
+        const mins = Math.round((t-nowET)/60000);
+        const when = mins<60 ? mins+' min'
+                   : mins<1440 ? Math.floor(mins/60)+'h '+(mins%60)+'m'
+                   : Math.round(mins/1440)+'d';
+        return {label:String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+' ET', in:when};
+      }
     }
   }
-  box.innerHTML = rows.join('');
+  return null;
 }
 
-/* Tap a row to reveal the fields the compact layout hides. Delegated on the
-   two order containers plus positions, since all three re-render wholesale.
-   Ignores the group bands, which have their own collapse behaviour. */
-for(const id of ['closedWrap','ordWrap','pos']){
-  const host = el(id); if(!host) continue;
-  host.addEventListener('click', e=>{
-    if(window.innerWidth > 820) return;              // desktop keeps the table
-    if(e.target.closest('.dgroup,.sgroup,.mhead,button,a')) return;
-    const tr = e.target.closest('tbody tr'); if(!tr) return;
-    tr.classList.toggle('open');
-  });
+function renderPicks(){
+  const box=el('picks'); const n=nextScan();
+  let html = `<div class="scanhead">
+    <div><span class="mut">Next scan</span> <b>${n?n.label:'—'}</b>
+         <span class="mut">in ${n?n.in:'—'}</span></div>
+    <div class="mut sh2">Runs 09:35 and 11:00 ET, weekdays</div>
+  </div>`;
+
+  for(const k of ['s3','s1','s2']){          // best-evidence strategy first
+    const p=(S.cmp[k+'_picks'])||[], at=S.cmp[k+'_scanned_at'], meta=STRAT[k];
+    html += `<div class="pghead"><span class="pgname" style="border-left-color:${meta.c}">${meta.n}</span>
+      <span class="mut">${at?'scanned '+new Date(at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):'no scan yet'}</span></div>`;
+    if(!p.length){ html += `<div class="pempty">Nothing met this strategy's conditions</div>`; continue; }
+    html += p.slice(0,5).map(x=>`<div class="pcard">
+        <div class="pctop">
+          <div><span class="sym">${x.ticker}</span>
+               ${x.name&&x.name!==x.ticker?`<div class="sub">${x.name}</div>`:''}</div>
+          <div class="pscore ${x.score>=75?'up':''}">${x.score}</div>
+        </div>
+        ${(x.reasons||[]).length?`<ul class="why">${x.reasons.map(r=>`<li>${r}</li>`).join('')}</ul>`:''}
+      </div>`).join('');
+  }
+  box.innerHTML = html;
 }
 
 el('scanBtn').onclick = () => {
