@@ -303,8 +303,8 @@ details .inner{padding:0 18px 16px}
 <div id="tokenGate">
   <div class="box">
     <h3>RaanuBot</h3>
-    <p id="tokenMsg">Enter your access token to view the dashboard.</p>
-    <input id="tokenInput" type="password" placeholder="Access token"
+    <p id="tokenMsg">Enter your passphrase to view the dashboard.</p>
+    <input id="tokenInput" type="password" placeholder="Passphrase"
            autocomplete="off" autocapitalize="off" spellcheck="false">
     <button class="btn" id="tokenSave">Unlock</button>
   </div>
@@ -466,7 +466,7 @@ const authHeaders = () => readToken() ? {'Authorization':'Bearer '+readToken()} 
 
 function askForToken(msg){
   const box = el('tokenGate');
-  el('tokenMsg').textContent = msg || 'Enter your access token to view the dashboard.';
+  el('tokenMsg').textContent = msg || 'Enter your passphrase to view the dashboard.';
   box.style.display = 'flex';
   el('tokenInput').focus();
 }
@@ -476,7 +476,9 @@ function askForToken(msg){
 const j = async p => {
   try{
     const r = await fetch(API+p, {headers: authHeaders()});
-    if(r.status === 401){ askForToken('That token was not accepted. Enter it again.'); return null; }
+    if(r.status === 429){ const d=await r.json().catch(()=>({}));
+      askForToken(`Too many failed attempts. Try again in ${Math.ceil((d.retry_after_sec||900)/60)} minutes.`); return null; }
+    if(r.status === 401){ askForToken('That passphrase was not accepted. Try again.'); return null; }
     return r.ok ? await r.json() : null;
   }catch(e){ logLine('fetch failed '+p,'err'); return null; }
 };
@@ -490,7 +492,7 @@ async function action(path, opts){
     'Content-Type':'application/json', ...authHeaders(), 'X-Trade-Token': pin.trim(),
     ...((opts||{}).headers||{})}});
   if(r.status === 403){ logLine('Trade PIN rejected','err'); alert('Trade PIN rejected.'); return {denied:true}; }
-  if(r.status === 401){ askForToken('Session expired. Enter your access token.'); return {denied:true}; }
+  if(r.status === 401){ askForToken('Session expired. Enter your passphrase.'); return {denied:true}; }
   return r;
 }
 

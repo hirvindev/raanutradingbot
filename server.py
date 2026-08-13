@@ -7,7 +7,9 @@ Run with:  python server.py
 """
 
 import os
+import hashlib
 import secrets
+import time
 import re
 import json
 import asyncio
@@ -664,6 +666,51 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
 ).split(",") if o.strip()]
 
 
+# Failed-attempt throttling. The read secret is chosen to be memorable and
+# typed on a phone, which means it is short enough to grind if an attacker is
+# allowed unlimited guesses against a public URL. Locking out after a handful of
+# failures is what makes a human-friendly passphrase defensible at all.
+#
+# Counts DISTINCT wrong secrets, not failed requests. The dashboard fires about
+# eight parallel calls per refresh and polls every 30s, so a tab left open with
+# a stale secret produces a burst of failures without anyone guessing anything —
+# counting requests locked the owner out of their own account within one page
+# load, and then blocked the correct passphrase too. Brute force requires trying
+# DIFFERENT secrets, so that is what gets counted; a client retrying the same
+# wrong value forever still counts as one wrong value.
+_AUTH_FAILS: dict[str, dict[str, float]] = {}
+_MAX_FAILS = 8
+_LOCKOUT_SEC = 900          # 15 minutes
+
+
+def _client_ip(request: Request) -> str:
+    # Railway terminates TLS upstream, so request.client is the proxy. The first
+    # X-Forwarded-For entry is the caller.
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _locked_out(ip: str) -> int:
+    """Seconds remaining on a lockout, or 0."""
+    now = time.time()
+    seen = {h: t for h, t in _AUTH_FAILS.get(ip, {}).items() if now - t < _LOCKOUT_SEC}
+    _AUTH_FAILS[ip] = seen
+    if len(seen) >= _MAX_FAILS:
+        return int(_LOCKOUT_SEC - (now - min(seen.values())))
+    return 0
+
+
+def _record_fail(ip: str, presented: str):
+    # Hashed, so a mistyped secret is not sitting in memory in the clear.
+    h = hashlib.sha256(presented.encode("utf-8", "replace")).hexdigest()
+    _AUTH_FAILS.setdefault(ip, {})[h] = time.time()
+    n = len(_AUTH_FAILS[ip])
+    if n >= _MAX_FAILS:
+        log.warning(f"Auth lockout: {ip} after {n} distinct wrong secrets")
+
+
 def _presented_token(request: Request) -> str:
     """Read the caller's token from the header, or the query for SSE.
 
@@ -695,20 +742,36 @@ async def api_auth_gate(request: Request, call_next):
         log.warning("API_READ_TOKEN is not set — the API is OPEN to anyone with the URL")
         return await call_next(request)
 
+    ip = _client_ip(request)
+    wait = _locked_out(ip)
+    if wait:
+        return JSONResponse(
+            {"error": "too_many_attempts", "retry_after_sec": wait},
+            status_code=429, headers={"Retry-After": str(wait)},
+        )
+
     if not secrets.compare_digest(_presented_token(request), API_READ_TOKEN):
+        _record_fail(ip, _presented_token(request))
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    # Anything that is not a read needs the second token. Deny-by-method rather
+    # Anything that is not a read needs the second secret. Deny-by-method rather
     # than by a path list: a new POST route is then protected the day it is
     # written, instead of the day someone remembers to add it here.
     if method not in ("GET", "HEAD"):
         expected = os.getenv("TRADE_PIN", "").strip()
         presented = (request.headers.get("x-trade-token") or "").strip()
         if not expected or not secrets.compare_digest(presented, expected):
+            # Counted too: the trade PIN is the shorter of the two secrets and
+            # the one worth guessing, so it needs the throttle more, not less.
+            _record_fail(ip, presented)
             return JSONResponse(
-                {"error": "forbidden", "detail": "this action needs the trade token"},
+                {"error": "forbidden", "detail": "this action needs the trade PIN"},
                 status_code=403,
             )
+
+    # A good secret clears the slate, so a few fat-fingered attempts before a
+    # correct one never accumulate into a lockout.
+    _AUTH_FAILS.pop(ip, None)
 
     return await call_next(request)
 
