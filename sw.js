@@ -1,0 +1,74 @@
+/* sw.js — offline shell for RaanuBot.
+ *
+ * Deliberately does NOT cache /api/** at all.
+ *
+ * The obvious design is network-first with a cached fallback, so the app still
+ * shows something when offline. For a trading dashboard that is the wrong
+ * trade-off: a stale portfolio value or a stale "AUTO ON" pill is worse than a
+ * blank one, because it looks current and invites a decision. API requests
+ * therefore go straight to the network and are allowed to fail, and the page
+ * renders its own empty state.
+ *
+ * What IS cached is the shell — the single HTML file, the manifest and the
+ * icons — so the app opens instantly and works as an installed app rather than
+ * a browser tab that needs a connection to show anything at all.
+ */
+const SHELL = 'raanu-shell-v1';
+const SHELL_URLS = [
+  '/',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/apple-touch-icon.png',
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(SHELL)
+      .then(c => c.addAll(SHELL_URLS))
+      .then(() => self.skipWaiting())          // a new shell should not wait a tab close
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== SHELL).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  const url = new URL(req.url);
+
+  // Never touch other origins, non-GET, or the API.
+  if (url.origin !== self.location.origin || req.method !== 'GET') return;
+  if (url.pathname.startsWith('/api/')) return;
+
+  // Navigations: network first so a deployed change is picked up, cached shell
+  // only when the network genuinely fails.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req)
+        .then(res => {
+          const copy = res.clone();
+          caches.open(SHELL).then(c => c.put('/', copy));
+          return res;
+        })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // Static assets: cache first, they are versioned by the cache name.
+  event.respondWith(
+    caches.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(SHELL).then(c => c.put(req, copy));
+      }
+      return res;
+    }))
+  );
+});

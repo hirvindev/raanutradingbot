@@ -18,8 +18,17 @@
   rule, not a filled badge.
 -->
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>RaanuTradingBot</title>
+<!-- PWA. viewport-fit=cover above is what makes env(safe-area-inset-bottom)
+     report a real value on notched iPhones, which the bottom tab bar needs. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#6941c6">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="RaanuBot">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -1214,4 +1223,16 @@ if(location.hash) go(location.hash.slice(1));
   load().then(()=>logLine('Dashboard loaded','ok'));
 })();
 setInterval(() => { if(el('tokenGate').style.display!=='flex') load(); }, 30000);
+
+/* Service worker: caches the shell so the app opens instantly and works as an
+   installed app. It never caches /api/** — a stale portfolio value is worse
+   than a blank one because it looks current. Registered after boot so it does
+   not compete with the first data load. */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(r => logLine('Offline shell ready','ok'))
+      .catch(e => logLine('Service worker failed: '+e.message,'err'));
+  });
+}
 </script>

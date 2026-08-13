@@ -1920,6 +1920,45 @@ def kite_alias():
     return RedirectResponse("/", status_code=307)
 
 
+# ---------- PWA ----------
+# These sit outside /api/ so they are not behind the token gate: a service
+# worker and a manifest must be fetchable before the user has authenticated,
+# or the app cannot install and the unlock screen itself would not render
+# offline.
+@app.get("/manifest.webmanifest")
+def pwa_manifest():
+    p = HERE / "manifest.webmanifest"
+    if not p.exists():
+        return JSONResponse({"error": "manifest not found"}, status_code=404)
+    return FileResponse(p, media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Served from the ROOT path on purpose.
+
+    A service worker may only control pages at or below its own path, so one
+    served from /static/sw.js could not intercept "/". Cache-Control: no-cache
+    lets browsers pick up a new worker without waiting out a cached copy.
+    """
+    p = HERE / "sw.js"
+    if not p.exists():
+        return JSONResponse({"error": "sw.js not found"}, status_code=404)
+    return FileResponse(p, media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache",
+                                 "Service-Worker-Allowed": "/"})
+
+
+@app.get("/icons/{name}")
+def pwa_icon(name: str):
+    # Basename only — an icon path is never a reason to walk the filesystem.
+    p = (HERE / "icons" / Path(name).name)
+    if p.suffix.lower() != ".png" or not p.exists():
+        return JSONResponse({"error": "icon not found"}, status_code=404)
+    return FileResponse(p, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.get("/legacy")
 def legacy_dashboard():
     """The previous dark dashboard. Retained because it still has controls the
