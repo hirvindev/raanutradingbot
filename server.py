@@ -76,6 +76,12 @@ def _save_picks(picks: list):
     }
     try:
         PICKS_CACHE.write_text(json.dumps(data, indent=2, default=str))
+        # Outcome tracking. Idempotent per day+strategy, and deliberately
+        # inside try/except: a research logger must never break a scan.
+        try:
+            import picks_log; picks_log.record("s1", picks)
+        except Exception as e:
+            log.warning(f"[picks] record skipped: {e}")
     except Exception as e:
         log.warning(f"Could not write picks cache: {e}")
 
@@ -95,6 +101,12 @@ def _save_picks_s2(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
     try:
         PICKS_CACHE_S2.write_text(json.dumps(data, indent=2, default=str))
+        # Outcome tracking. Idempotent per day+strategy, and deliberately
+        # inside try/except: a research logger must never break a scan.
+        try:
+            import picks_log; picks_log.record("s2", picks)
+        except Exception as e:
+            log.warning(f"[picks] record skipped: {e}")
     except Exception as e:
         log.warning(f"Could not write S2 picks cache: {e}")
 
@@ -112,6 +124,12 @@ def _save_picks_s3(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
     try:
         PICKS_CACHE_S3.write_text(json.dumps(data, indent=2, default=str))
+        # Outcome tracking. Idempotent per day+strategy, and deliberately
+        # inside try/except: a research logger must never break a scan.
+        try:
+            import picks_log; picks_log.record("s3", picks)
+        except Exception as e:
+            log.warning(f"[picks] record skipped: {e}")
     except Exception as e:
         log.warning(f"Could not write S3 picks cache: {e}")
 
@@ -615,6 +633,14 @@ async def _premarket_loop():
             await _premarket_scan_and_notify()
         except Exception as e:
             log.exception(f"Pre-market scan error: {e}")
+        # Fill in what previous picks actually did. Blocking (yfinance), so it
+        # runs in a thread and after the alert rather than delaying it.
+        try:
+            import picks_log
+            r = await asyncio.to_thread(picks_log.fill_forward_returns)
+            log.info(f"[picks] outcomes: {r}")
+        except Exception as e:
+            log.warning(f"[picks] backfill skipped: {e}")
 
 
 async def _scheduled_trade_loop():
@@ -1869,6 +1895,25 @@ async def _monthly_report_loop():
             log.info(f"Monthly report sent for {rep['period']}")
         except Exception as e:
             log.exception(f"Monthly report failed: {e}")
+
+
+@app.get("/api/picks/outcomes")
+async def picks_outcomes(limit: int = 40):
+    """What the bot picked, and what those names actually did afterwards.
+
+    Separate from the trade log on purpose: most picks are never bought, so
+    judging the scoring engines by trades alone only ever measures the subset
+    that survived the weekly limit, the cash share and the already-held check.
+    """
+    import picks_log
+    return {"summary": picks_log.summary(), "recent": picks_log.recent(limit)}
+
+
+@app.post("/api/picks/backfill")
+async def picks_backfill():
+    """Force the forward-return fill instead of waiting for 03:30 ET."""
+    import picks_log
+    return await asyncio.to_thread(picks_log.fill_forward_returns)
 
 
 @app.get("/api/strategy/compare")

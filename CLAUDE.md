@@ -523,6 +523,41 @@ one order and one count; neither bounds what a strategy can take from the whole.
 
 ---
 
+## 📈 Pick Outcome Tracking — picks_log.py
+
+Records every pick the scheduled scans produce and fills in what each name did
+1, 5 and 20 trading days later. Answers the question the Signals tab raises but
+cannot settle: **does a score of 90 mean anything?**
+
+**Deliberately separate from `trades_log.json`.** That records what was BOUGHT;
+most picks never are — the weekly limit, the cash share or an existing holding
+stops them. Judging the scoring engines by the trade log only ever measures the
+subset that survived the gates, which is a different question.
+
+Two rules carried from the backtester:
+
+* **A baseline is stored alongside.** "+2% in five days" is unreadable if SPY did
+  +2.5%. Every pick keeps SPY's return over the identical window, and the UI
+  shows the difference in percentage points.
+* **Returns are measured from the pick day's close and NEVER revised.** That is
+  when the signal was known; anything earlier is lookahead. Verified: re-running
+  the fill leaves existing values untouched.
+
+Scores are bucketed (60-69, 70-79, 80-89, 90+) because the useful question is
+monotonicity — do higher scores earn higher returns — not what one pick did.
+
+* Recording hooks `_save_picks*`, idempotent per (date, strategy) so the two
+  daily slots cannot double-count the same signal.
+* Backfill runs after the 03:30 ET pre-market scan, in a thread.
+* `GET /api/picks/outcomes`, `POST /api/picks/backfill`; state in
+  `picks_log.json` on the volume.
+* `summary()["verdict"]` refuses to draw conclusions below ~30 matured picks.
+
+Nothing here touches the trading path — every hook is wrapped so a research
+logger can never break a scan.
+
+---
+
 ## 🔐 API Authentication — server.py
 
 Before this the deployed API was **completely open**: `curl .../api/account/cash`

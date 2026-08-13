@@ -222,6 +222,15 @@ details .inner{padding:0 18px 16px}
 .up.up{color:var(--green)}
 .down.down{color:var(--red)}
 
+.ohead{padding:13px 15px;border-bottom:1px solid var(--line);font-size:13.5px}
+.ohead b{color:var(--head);font-size:16px}
+.overdict{font-size:12.5px;margin-top:5px;line-height:1.45}
+.olist{padding:4px 0}
+.orow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+      padding:10px 15px;border-bottom:1px solid var(--line2);font-size:14px}
+.orow:last-child{border-bottom:0}
+.orow .num{text-align:right;font-weight:500}
+
 /* ── Picks / learning view ─────────────────────────────────────────────── */
 .scanhead{background:var(--card);border:1px solid var(--line);border-radius:8px;
           padding:12px 14px;margin-bottom:14px;font-size:14px}
@@ -661,6 +670,9 @@ details .inner{padding:0 18px 16px}
       <div id="picks"><div class="empty">Loading…</div></div>
     </div>
 
+    <h2>Track record <em>what past picks actually did</em></h2>
+    <div class="card" id="outcomes"><div class="empty">Loading…</div></div>
+
   </section>
 
   <!-- ─────────── STRATEGY ─────────── -->
@@ -789,7 +801,7 @@ function go(p){
   location.hash = p;
   if(p==='orders')   renderOrders();
   if(p==='strategy') renderStrategy();
-  if(p==='signals')  renderPicks();
+  if(p==='signals'){ renderPicks(); renderOutcomes(); }
   syncDayBar();
 }
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
@@ -1338,6 +1350,43 @@ function renderPicks(){
       </div>`).join('');
   }
   box.innerHTML = html;
+}
+
+/* Track record. Answers the question the picks view raises but cannot settle:
+   does a higher score actually earn a higher forward return? Bands rather than
+   individual names, because one pick tells you nothing, and always against SPY
+   over the same window — "+2% in five days" is meaningless if the market did
+   +2.5%. */
+async function renderOutcomes(){
+  const box = el('outcomes');
+  const d = await j('/api/picks/outcomes?limit=25');
+  if(!d){ box.innerHTML = '<div class="empty">Could not load outcomes</div>'; return; }
+  const s = d.summary || {};
+
+  const cell = a => a ? `<td class="num ${cls(a.avg)}">${pct(a.avg)}</td>
+      <td class="num ${a.edge!=null?cls(a.edge):'mut'}">${a.edge!=null?(a.edge>0?'+':'')+a.edge+'pp':'—'}</td>
+      <td class="num mut">${a.n}</td>` : '<td class="num mut">—</td><td class="num mut">—</td><td class="num mut">—</td>';
+
+  const bands = Object.entries(s.by_score_band||{});
+  box.innerHTML = `
+    <div class="ohead">
+      <b>${s.total_picks||0}</b> picks logged
+      <span class="mut">· ${s.matured_5d||0} with a 5-day result${s.first?' · since '+s.first:''}</span>
+      <div class="mut overdict">${s.verdict||''}</div>
+    </div>
+    ${bands.length ? `<div class="scroll"><table>
+      <thead><tr><th>Score</th><th>5-day avg</th><th>vs SPY</th><th>n</th></tr></thead>
+      <tbody>${bands.map(([label,v])=>`<tr>
+        <td data-label="Score">${label}</td>${cell(v.d5)}</tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">No results yet — picks need 5 trading days to mature</div>'}
+    ${(d.recent||[]).length ? `<div class="olist">${d.recent.slice(0,12).map(r=>{
+      const f = r.fwd||{}; const has = f.d5!=null;
+      return `<div class="orow">
+        <div><span class="sym">${r.ticker}</span> ${tag(r.strategy)}
+             <div class="sub">${r.date} · score ${r.score}</div></div>
+        <div class="num ${has?cls(f.d5):'mut'}">${has?pct(f.d5):'maturing'}
+             ${f.d1!=null?`<div class="sub">1d ${pct(f.d1)}</div>`:''}</div>
+      </div>`;}).join('')}</div>` : ''}`;
 }
 
 el('scanBtn').onclick = () => {
