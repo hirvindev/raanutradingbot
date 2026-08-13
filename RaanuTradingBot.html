@@ -274,6 +274,38 @@ details .inner{padding:0 18px 16px}
   .cards td.empty{display:block;text-align:center}
   .cards td.empty:before{content:none}
 
+  /* ── Kite-style compact rows ──────────────────────────────────────────
+     The first pass showed every field as its own labelled line, which is
+     accurate but reads like a form: eight rows to say one position is down
+     1.7%. A phone wants the instrument on the left, the number you opened the
+     app for on the right, and everything else behind a tap. Cells marked .pri
+     stay; the rest collapse. */
+  .cards tbody tr:not(.dgroup):not(.sgroup){display:flex;flex-wrap:wrap;align-items:baseline;
+                  padding:11px 14px;gap:0 10px;cursor:pointer;position:relative}
+  .cards tbody tr:not(.dgroup):not(.sgroup):active{background:var(--wash)}
+  .cards td[data-label="Instrument"]{flex:1 1 55%;padding:0;font-size:14.5px;
+                                     display:block;text-align:left}
+  .cards td.pri{flex:0 0 auto;margin-left:auto;padding:0;font-size:14.5px;
+                display:block;text-align:right;font-weight:500}
+  .cards td.pri:before{content:none}
+  /* A second .pri drops under the first, right-aligned — the classic
+     price-over-change stack. */
+  .cards td.pri ~ td.pri{flex:0 0 100%;font-size:12px;font-weight:400;
+                         margin-top:1px}
+
+  /* Hidden until the row is tapped. */
+  .cards tbody tr:not(.open):not(.dgroup):not(.sgroup) td:not(.pri):not([data-label="Instrument"]){display:none}
+  .cards tbody tr.open:not(.dgroup):not(.sgroup) td:not(.pri):not([data-label="Instrument"]){
+      display:flex;justify-content:space-between;flex:0 0 100%;
+      padding:5px 0 0;font-size:12.5px}
+  .cards tbody tr.open:not(.dgroup):not(.sgroup) td:not(.pri):not([data-label="Instrument"]):before{
+      content:attr(data-label);color:var(--muted);font-size:11px;
+      text-transform:uppercase;letter-spacing:.4px}
+  .cards tbody tr.open:not(.dgroup):not(.sgroup){background:var(--wash);padding-bottom:13px}
+  /* Chevron hint that a row opens. */
+  .cards tbody tr[data-label-hint]:after{content:""}
+  .cards td.act{flex:0 0 100%;justify-content:flex-end;padding:8px 0 0}
+
   /* Group rows stay bands, not cards — label left, figure right, one line.
      Both cells get an explicit flex: these are <td>s with colspan, and their
      intrinsic table sizing otherwise leaks into the flex basis and hands the
@@ -628,8 +660,8 @@ function renderPos(){
         <td data-label="Avg" class="num">${money(p.averagePrice)}</td>
         <td data-label="LTP" class="num">${money(ltp)}</td>
         <td data-label="Value" class="num">${money(val)}</td>
-        <td data-label="P&amp;L" class="num ${cls(pl)}">${signed(pl)}</td>
-        <td data-label="Chg" class="num ${cls(ch)}">${pct(ch)}</td>
+        <td data-label="P&amp;L" class="pri num ${cls(pl)}">${signed(pl)}</td>
+        <td data-label="Chg" class="pri num ${cls(ch)}">${pct(ch)}</td>
         <td class="act"><button class="btn danger sm" data-close="${p.ticker}" data-qty="${p.quantity}">Exit</button></td>
       </tr>`;
     }).join('');
@@ -812,8 +844,8 @@ function renderOrders(){
         <td data-label="Qty" class="num">${r.qty.toFixed(2)}</td>
         <td data-label="Buy" class="num">${money(r.buy_price||0)}</td>
         <td data-label="Sell" class="num">${money(r.sell_price||0)}</td>
-        <td data-label="P&amp;L" class="num ${cls(r.pnl)}">${signed(r.pnl)}</td>
-        <td data-label="Return" class="num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
+        <td data-label="P&amp;L" class="pri num ${cls(r.pnl)}">${signed(r.pnl)}</td>
+        <td data-label="Return" class="pri num ${cls(r.pct)}">${pct(r.pct||0)}</td></tr>`;
 
     const HEAD = `<thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th>Lots</th>
         <th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>Return</th></tr></thead>`;
@@ -957,10 +989,10 @@ function renderOrders(){
         <td data-label="Time" class="mut">${x.created_at?new Date(x.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
         <td data-label="Instrument">${instrument(x)}</td>
         <td data-label="Strategy">${tag(sof(x))}</td>
-        <td data-label="Side" class="${x.side==='buy'?'':'mut'}" style="font-weight:${x.side==='buy'?600:400}">${(x.side||'').toUpperCase()}</td>
+        <td data-label="Side" class="pri ${x.side==='buy'?'':'mut'}" style="font-weight:${x.side==='buy'?600:400}">${(x.side||'').toUpperCase()}</td>
         <td data-label="Qty" class="num">${q.toFixed(2)}</td>
         <td data-label="Price" class="num">${p?money(p):'—'}</td>
-        <td data-label="Order value" class="num">${p&&q?money(p*q):'—'}</td>
+        <td data-label="Order value" class="pri num">${p&&q?money(p*q):'—'}</td>
         <td data-label="Status" class="mut">${x.status||'—'}</td></tr>`;
     };
 
@@ -1064,6 +1096,19 @@ function renderPicks(){
   box.innerHTML = rows.join('');
 }
 
+/* Tap a row to reveal the fields the compact layout hides. Delegated on the
+   two order containers plus positions, since all three re-render wholesale.
+   Ignores the group bands, which have their own collapse behaviour. */
+for(const id of ['closedWrap','ordWrap','pos']){
+  const host = el(id); if(!host) continue;
+  host.addEventListener('click', e=>{
+    if(window.innerWidth > 820) return;              // desktop keeps the table
+    if(e.target.closest('.dgroup,.sgroup,.mhead,button,a')) return;
+    const tr = e.target.closest('tbody tr'); if(!tr) return;
+    tr.classList.toggle('open');
+  });
+}
+
 el('scanBtn').onclick = () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
@@ -1085,7 +1130,7 @@ el('scanBtn').onclick = () => {
       res.sort((a,b)=>b.score-a.score);
       body.innerHTML = res.length ? res.map(r=>`<tr>
           <td data-label="Instrument"><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
-          <td data-label="Score" class="num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
+          <td data-label="Score" class="pri num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
           <td data-label="Price" class="num">${money(r.price||0)}</td>
           <td data-label="RSI" class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
           <td data-label="1M" class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
