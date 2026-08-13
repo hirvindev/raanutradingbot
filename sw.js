@@ -13,7 +13,7 @@
  * icons — so the app opens instantly and works as an installed app rather than
  * a browser tab that needs a connection to show anything at all.
  */
-const SHELL = 'raanu-shell-v4';   // v4: stop precaching '/', auto-reload clients
+const SHELL = 'raanu-shell-v5';   // v5: new brand icon
 const SHELL_URLS = [
   // "/" is deliberately NOT precached. It is the one file that changes on every
   // deploy, and precaching it meant a device could sit on an old copy — the app

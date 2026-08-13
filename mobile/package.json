@@ -10,6 +10,7 @@
     "expo": "~57.0.12",
     "expo-constants": "~57.0.10",
     "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
@@ -20,12 +21,13 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eas-cli": "^21.8.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "private": true

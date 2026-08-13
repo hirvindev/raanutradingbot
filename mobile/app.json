@@ -8,15 +8,14 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.raanu.native"
+      "bundleIdentifier": "app.raanu.mobile"
     },
     "android": {
-      "package": "app.raanu.native",
+      "package": "app.raanu.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6941c6"
-      },
-      "edgeToEdgeEnabled": true
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
