@@ -14,6 +14,9 @@ backtest_reports/*.json
 last_picks.json
 last_picks_s2.json
 last_picks_s3.json
+mobile/.expo/
+mobile/dist/
+mobile/node_modules/
 picks_log.json
 position_peaks.json
 push_subs.json
