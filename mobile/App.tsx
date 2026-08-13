@@ -42,8 +42,11 @@ const icons: Record<string, (c: string) => React.ReactNode> = {
 };
 
 export default function App() {
-  const scheme = useColorScheme();
-  const t = scheme === 'dark' ? dark : light;
+  // Light only, by preference. The dark palette is kept in theme.ts and is a
+  // one-line change away, but following the system meant the app flipped to
+  // dark on a phone set to dark and that is not what is wanted here.
+  useColorScheme();          // referenced so the import stays meaningful
+  const t = light;
 
   const [booted, setBooted] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -155,7 +158,14 @@ export default function App() {
           <Tab.Navigator
             screenOptions={({ route }) => ({
               headerStyle: { backgroundColor: t.card, borderBottomColor: t.line },
-              headerTitleStyle: { color: t.head, fontSize: 17 },
+              headerTitleStyle: { color: t.head, fontSize: 18, fontWeight: '600' },
+              headerTitleAlign: 'left',
+              // Brand mark top-left on every screen. The robot alone, not the
+              // full badge — the wordmark is unreadable at 34px.
+              headerLeft: () => (
+                <Image source={require('./assets/mark.png')}
+                       style={{ width: 34, height: 34, borderRadius: 9, marginLeft: 14, marginRight: 2 }} />
+              ),
               // Taller than the default: at 62px the labels were clipped on
               // Android, which looked like a rendering fault rather than a
               // layout one.

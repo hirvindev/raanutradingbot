@@ -78,8 +78,9 @@
   --hover:#241d38; --btn-off:#3a3350;
   --shadow:rgba(0,0,0,.45); --shadow-lg:rgba(0,0,0,.6);
 }
+/* Only applies once dark has been chosen explicitly — see currentTheme(). */
 @media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
+  :root[data-theme="dark"]{
     --bg:#0e0c14; --card:#17141f; --line:#2b2438; --line2:#221c2e;
     --wash:#1b1626;
     --text:#c5bdd6; --head:#f2eefa; --muted:#8a819e;
@@ -1677,7 +1678,10 @@ const themeMeta = document.querySelector('meta[name=theme-color]');
 function currentTheme(){
   const set = document.documentElement.getAttribute('data-theme');
   if(set) return set;
-  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  /* Light by default, deliberately NOT following the system. A phone set to
+     dark was flipping the dashboard to dark, and the light palette is the one
+     preferred here. The toggle still switches, and the choice still persists. */
+  return 'light';
 }
 function applyTheme(t){
   document.documentElement.setAttribute('data-theme', t);
