@@ -1983,6 +1983,17 @@ def kite_alias():
     return RedirectResponse("/", status_code=307)
 
 
+@app.get("/privacy")
+def privacy_policy():
+    """Public privacy policy — Play Console requires a reachable URL for the
+    Data safety declaration, and it must not sit behind the token gate because
+    Google's reviewers fetch it without credentials."""
+    p = HERE / "privacy.html"
+    if not p.exists():
+        return JSONResponse({"error": "privacy.html not found"}, status_code=404)
+    return FileResponse(p, media_type="text/html")
+
+
 @app.get("/.well-known/assetlinks.json")
 def asset_links():
     """Digital Asset Links — proves this site and the Android app are the same owner.
