@@ -351,6 +351,65 @@ details .inner{padding:0 18px 16px}
   .cards td.empty{display:block;text-align:center}
   .cards td.empty:before{content:none}
 
+  /* ── Kite holdings row ────────────────────────────────────────────────
+     Three lines, no card chrome, dividers only:
+
+        Qty 5.61 · Avg $446.00                        +13.07%
+        DELL                                          +$326.79
+        Value $2,826.78                            LTP $504.31
+
+     The same <td>s the desktop table uses, placed into grid areas — no second
+     rendering path, no duplicated markup. Line 1 is context, line 2 is the
+     identity and the number that matters, line 3 is the detail you check
+     second. Everything is visible at once, so unlike the other lists these
+     rows do not need a tap to open. */
+  #pos.kite tr{display:grid;grid-template-columns:auto auto 1fr auto;
+      grid-template-areas:"qty avg . chg" "sym sym sym pnl" "val val . ltp";
+      gap:2px 8px;padding:13px 15px;background:transparent;
+      border-bottom:1px solid var(--line2);cursor:default}
+  #pos.kite tr:last-child{border-bottom:0}
+  /* Take the whole subtree out of table layout before making rows grids.
+     Leaving the <table> as display:table means its layout algorithm and the
+     grid rows fight — the first attempt collapsed rows to 52px of a 375px
+     screen. Same approach the .cards lists use, and it is reached through the
+     wrapper because #pos is itself the tbody. */
+  .poswrap table,.poswrap tbody{display:block;width:100%}
+  .poswrap thead{display:none}
+  .poswrap{overflow-x:visible}
+  #pos.kite tr{box-sizing:border-box}
+  /* The base td carries a bottom border for the table view; inside a grid every
+     cell draws its own, which reads as underlined text. The divider belongs to
+     the row. */
+  #pos.kite td{display:block;padding:0;text-align:left;font-size:12.5px;
+               color:var(--muted);white-space:nowrap;border-bottom:0}
+  #pos.kite td:before{content:attr(data-label) " ";font-size:12.5px;
+                      text-transform:none;letter-spacing:0;color:var(--muted)}
+  #pos.kite td[data-label="Qty"]{grid-area:qty}
+  #pos.kite td[data-label="Avg"]{grid-area:avg}
+  #pos.kite td[data-label="Avg"]:before{content:"· Avg "}
+  #pos.kite td[data-label="Chg"]{grid-area:chg;text-align:right;font-size:13px;font-weight:500}
+  #pos.kite td[data-label="Chg"]:before{content:none}
+  #pos.kite td[data-label="Instrument"]{grid-area:sym;font-size:17px;
+      color:var(--head);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  #pos.kite td[data-label="Instrument"]:before{content:none}   /* it is the title */
+  #pos.kite td[data-label="Instrument"] .sub{display:none}   /* ticker is enough */
+  #pos.kite td[data-label="P&L"]{grid-area:pnl;text-align:right;font-size:17px;
+      font-weight:600}
+  #pos.kite td[data-label="P&L"]:before{content:none}
+  #pos.kite td[data-label="Value"]{grid-area:val}
+  #pos.kite td[data-label="LTP"]{grid-area:ltp;text-align:right}
+  #pos.kite td[data-label="Strategy"],#pos.kite td.act{display:none}
+
+  /* Sticky day's P&L, the way Kite pins it above the tab bar — the one number
+     you check without scrolling. */
+  #dayBar{position:fixed;left:0;right:0;bottom:0;z-index:19;display:none;
+          align-items:center;justify-content:space-between;
+          padding:11px 16px calc(11px + env(safe-area-inset-bottom,0));
+          background:var(--card);border-top:1px solid var(--line);
+          font-size:14px;transform:translateY(-100%)}
+  #dayBar b{font-weight:600}
+  #dayBar .lbl{color:var(--muted);font-weight:400}
+
   /* ── Mobile type scale ────────────────────────────────────────────────
      The desktop sheet is built for a 1180px canvas read at arm's length on a
      monitor: 13px body, 9.5-11px uppercase labels. Shrunk onto a 375px phone
@@ -469,6 +528,8 @@ details .inner{padding:0 18px 16px}
 }
 </style>
 
+<div id="dayBar"><span class="lbl">Day&#39;s P&amp;L</span><b id="dayBarV">—</b></div>
+
 <div id="tokenGate">
   <div class="box">
     <img src="/icons/mark.png" alt="" width="56" height="56"
@@ -516,10 +577,10 @@ details .inner{padding:0 18px 16px}
     </div>
 
     <h2>Positions <em id="poscount"></em></h2>
-    <div class="card scroll cards">
+    <div class="card scroll poswrap">
       <table>
         <thead><tr><th>Instrument</th><th>Strategy</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Value</th><th>P&amp;L</th><th>Chg</th><th></th></tr></thead>
-        <tbody id="pos"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
+        <tbody id="pos" class="kite"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
       </table>
     </div>
 
@@ -706,6 +767,7 @@ function go(p){
   if(p==='orders')   renderOrders();
   if(p==='strategy') renderStrategy();
   if(p==='signals')  renderPicks();
+  syncDayBar();
 }
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
 el('clearLog').onclick = ()=>{ el('log').innerHTML=''; };
@@ -736,6 +798,7 @@ async function load(){
   el('opens').textContent = S.pos.length+' position'+(S.pos.length===1?'':'s');
 
   renderBooked(); renderPos(); renderStrats(); renderOrders();
+  syncDayBar();
   if(el('p-strategy').classList.contains('on')) renderStrategy();
 }
 
@@ -1389,6 +1452,19 @@ el('engine').onclick = async () => {
   load();
 };
 
+/* Sticky day's P&L. Mirrors the stat strip rather than fetching again, so the
+   two can never disagree; hidden off the dashboard and above 560px. */
+function syncDayBar(){
+  const bar = el('dayBar'); if(!bar) return;
+  const src = el('day');
+  const onDash = document.getElementById('p-dash').classList.contains('on');
+  if(!src || !onDash || window.innerWidth > 560){ bar.style.display='none'; return; }
+  bar.style.display = 'flex';
+  const v = el('dayBarV');
+  v.textContent = src.textContent;
+  v.className = src.className.replace(/\bv\b|\bnum\b/g,'').trim();
+}
+
 /* ── theme ─────────────────────────────────────────────── */
 const themeMeta = document.querySelector('meta[name=theme-color]');
 function currentTheme(){
@@ -1409,6 +1485,7 @@ function applyTheme(t){
 }
 applyTheme(currentTheme());
 el('themeBtn').onclick = () => applyTheme(currentTheme()==='dark' ? 'light' : 'dark');
+addEventListener('resize', syncDayBar);
 
 /* ── boot ──────────────────────────────────────────────── */
 el('tokenSave').onclick = () => {
