@@ -169,6 +169,24 @@ details .inner{padding:0 18px 16px}
   nav a{font-size:12px} .logo{display:none}
 }
 
+/* Token gate. Covers everything until a read token is stored, so account
+   figures never render behind a login prompt. */
+#tokenGate{position:fixed;inset:0;z-index:100;display:none;align-items:center;
+           justify-content:center;background:var(--bg);padding:24px}
+/* Fully opaque, not translucent: on a fresh load there is nothing behind it,
+   but if a session is rejected mid-use the figures are already rendered and
+   a see-through overlay would leave them legible. */
+#tokenGate .box{background:var(--card);border:1px solid var(--line);border-radius:6px;
+                padding:26px 24px;max-width:380px;width:100%;
+                box-shadow:0 4px 20px rgba(105,65,198,.12)}
+#tokenGate h3{font-size:15px;color:var(--head);font-weight:600;margin-bottom:8px}
+#tokenGate p{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.55}
+#tokenGate input{width:100%;font:inherit;font-size:14px;padding:11px 12px;
+                 border:1px solid var(--line);border-radius:4px;color:var(--text);
+                 background:var(--bg);margin-bottom:12px}
+#tokenGate input:focus{outline:0;border-color:var(--accent)}
+#tokenGate .btn{width:100%;padding:11px;font-size:13px}
+
 /* ───────────────────────── PHONE (<=560px) ─────────────────────────────────
    The desktop layout survives narrow screens only by scrolling six tables
    sideways inside .scroll — up to nine columns each, unusable one-handed. Here
@@ -272,6 +290,16 @@ details .inner{padding:0 18px 16px}
   .bar{gap:6px}
 }
 </style>
+
+<div id="tokenGate">
+  <div class="box">
+    <h3>RaanuBot</h3>
+    <p id="tokenMsg">Enter your access token to view the dashboard.</p>
+    <input id="tokenInput" type="password" placeholder="Access token"
+           autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="btn" id="tokenSave">Unlock</button>
+  </div>
+</div>
 
 <header>
   <div class="hwrap">
@@ -416,7 +444,46 @@ const signed = n => (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minim
 const cls    = n => n>=0?'up':'down';
 const pct    = n => (n>=0?'+':'')+n.toFixed(2)+'%';
 const el     = id => document.getElementById(id);
-const j = async p => { try{ const r = await fetch(API+p); return r.ok ? await r.json() : null; }catch(e){ logLine('fetch failed '+p,'err'); return null; } };
+/* ── API tokens ──────────────────────────────────────────
+   Two, matching the server: a read token for everything the dashboard shows,
+   and a trade token for anything that moves money. The read token is stored so
+   the app opens straight to data; the trade token is asked for each time an
+   action needs it and is never persisted, so a borrowed or stolen phone cannot
+   place an order. */
+const TOKEN_KEY = 'raanu.readToken';
+const readToken  = () => localStorage.getItem(TOKEN_KEY) || '';
+const setToken   = t => t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
+const authHeaders = () => readToken() ? {'Authorization':'Bearer '+readToken()} : {};
+
+function askForToken(msg){
+  const box = el('tokenGate');
+  el('tokenMsg').textContent = msg || 'Enter your access token to view the dashboard.';
+  box.style.display = 'flex';
+  el('tokenInput').focus();
+}
+
+/* Every read goes through here so the header is attached in exactly one place
+   and a 401 always surfaces as the token prompt rather than an empty panel. */
+const j = async p => {
+  try{
+    const r = await fetch(API+p, {headers: authHeaders()});
+    if(r.status === 401){ askForToken('That token was not accepted. Enter it again.'); return null; }
+    return r.ok ? await r.json() : null;
+  }catch(e){ logLine('fetch failed '+p,'err'); return null; }
+};
+
+/* Actions carry the trade token as well; the server rejects them with 403 if it
+   is missing or wrong. Prompted per action, deliberately not remembered. */
+async function action(path, opts){
+  const pin = prompt('Trade PIN — required to place or change orders');
+  if(!pin) return {cancelled:true};
+  const r = await fetch(API+path, {...opts, headers:{
+    'Content-Type':'application/json', ...authHeaders(), 'X-Trade-Token': pin.trim(),
+    ...((opts||{}).headers||{})}});
+  if(r.status === 403){ logLine('Trade PIN rejected','err'); alert('Trade PIN rejected.'); return {denied:true}; }
+  if(r.status === 401){ askForToken('Session expired. Enter your access token.'); return {denied:true}; }
+  return r;
+}
 
 const STRAT = {s1:{n:'S1 Pullback',s:'S1',c:'var(--s1)'}, s2:{n:'S2 Breakout',s:'S2',c:'var(--s2)'},
                s3:{n:'S3 Leader Dip',s:'S3',c:'var(--s3)'}, manual:{n:'Manual',s:'MAN',c:'var(--muted)'}};
@@ -550,9 +617,9 @@ el('pos').addEventListener('click', e=>{
   const t=b.dataset.close, q=parseFloat(b.dataset.qty);
   if(!confirm(`Exit ${t} × ${q.toFixed(2)} at market?`)) return;
   b.disabled=true; logLine(`Exit ${t} × ${q.toFixed(2)} requested`);
-  fetch(API+'/api/orders/sell',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ticker:t,quantity:q})})
+  action('/api/orders/sell',{method:'POST',body:JSON.stringify({ticker:t,quantity:q})})
     .then(async r=>{
+      if(!r || r.cancelled || r.denied){ b.disabled=false; return; }
       const d=await r.json().catch(()=>({}));
       // Report the API result, never an exception from UI code that runs after
       // the order is already in — that mistake made filled orders look failed
@@ -977,7 +1044,10 @@ el('scanBtn').onclick = () => {
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
   el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="8">Screening…</td></tr>';
   const res=[]; let total=0, done=0;
-  const es=new EventSource('/api/scan/stream');
+  // EventSource cannot set headers, so the READ token goes in the query here.
+  // It is the only place a token rides in a URL; see _presented_token() in
+  // server.py for why that is acceptable for a read-only token.
+  const es=new EventSource('/api/scan/stream'+(readToken()?'?token='+encodeURIComponent(readToken()):''));
   const finish = msg => { es.close(); btn.disabled=false; btn.textContent='Scan market';
                           prog.style.display='none'; el('scanStat').textContent=msg; };
   es.onmessage = e => {
@@ -1114,7 +1184,8 @@ el('engine').onclick = async () => {
       '\n\nThis affects the running instance only; AUTO_TRADE_ENABLED decides what it boots into.')) return;
   logLine(`${verb} auto-trader requested`);
   try{
-    const r = await fetch(API+(on?'/api/auto/stop':'/api/auto/start'), {method:'POST'});
+    const r = await action(on?'/api/auto/stop':'/api/auto/start', {method:'POST'});
+    if(!r || r.cancelled || r.denied){ load(); return; }
     const d = await r.json().catch(()=>({}));
     if(r.ok) logLine(`Auto-trader ${on?'stopped':'started'}`, 'ok');
     else     logLine(`Failed: ${d.detail||r.status}`, 'err');
@@ -1123,7 +1194,24 @@ el('engine').onclick = async () => {
 };
 
 /* ── boot ──────────────────────────────────────────────── */
+el('tokenSave').onclick = () => {
+  const t = el('tokenInput').value.trim();
+  if(!t) return;
+  setToken(t);
+  el('tokenGate').style.display='none';
+  el('tokenInput').value='';
+  load().then(()=>logLine('Dashboard loaded','ok'));
+};
+el('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') el('tokenSave').click(); });
+
 if(location.hash) go(location.hash.slice(1));
-load().then(()=>logLine('Dashboard loaded','ok'));
-setInterval(load, 30000);
+
+// Ask before the first request rather than after a wall of failed panels. If
+// the server has no token configured the probe succeeds and the gate never shows.
+(async () => {
+  const probe = await fetch(API+'/api/health', {headers: authHeaders()}).catch(()=>null);
+  if(probe && probe.status === 401){ askForToken(); return; }
+  load().then(()=>logLine('Dashboard loaded','ok'));
+})();
+setInterval(() => { if(el('tokenGate').style.display!=='flex') load(); }, 30000);
 </script>

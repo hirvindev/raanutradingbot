@@ -7,6 +7,7 @@ Run with:  python server.py
 """
 
 import os
+import secrets
 import re
 import json
 import asyncio
@@ -642,9 +643,79 @@ async def lifespan(app: FastAPI):
 # ---------- APP ----------
 app = FastAPI(title="RaanuTradingBot", version="2.0", lifespan=lifespan)
 
+# ---------- AUTH ----------
+# Until this existed the deployed API was completely open: anyone with the URL
+# could read the account and place orders. That was survivable only while the
+# URL was unknown, which stops being true the moment the app is published.
+#
+# TWO tokens, deliberately:
+#   API_READ_TOKEN  — reads. The phone gets this one.
+#   TRADE_PIN       — anything that moves money or changes bot behaviour.
+# A phone is the most losable device here, so the token it carries must not be
+# able to buy, sell, or switch the auto-trader on.
+API_READ_TOKEN = os.getenv("API_READ_TOKEN", "").strip()
+
+# Origins allowed to call the API from a browser. "*" is wrong once tokens are
+# involved — it lets any page a user visits read their account with a token the
+# browser has.
+_ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://raanu.up.railway.app,http://localhost:8000,http://127.0.0.1:8000",
+).split(",") if o.strip()]
+
+
+def _presented_token(request: Request) -> str:
+    """Read the caller's token from the header, or the query for SSE.
+
+    EventSource cannot set request headers, so /api/scan/stream is the one route
+    that accepts ?token=. That does mean the token appears in access logs, which
+    is why it is the READ token only — it can never authorise an order.
+    """
+    auth = request.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    return (request.headers.get("x-api-token")
+            or request.query_params.get("token") or "").strip()
+
+
+@app.middleware("http")
+async def api_auth_gate(request: Request, call_next):
+    path = request.url.path
+    method = request.method.upper()
+
+    # Only /api/** is gated. GET / serves the HTML shell, which holds no data,
+    # and /webhook/whatsapp must stay open for Twilio to reach it.
+    if not path.startswith("/api/") or method == "OPTIONS":
+        return await call_next(request)
+
+    # Unset token = gate disabled, so a deploy cannot lock the owner out before
+    # the variable is in place. Loud on every request rather than silent, or
+    # "temporarily open" quietly becomes permanent.
+    if not API_READ_TOKEN:
+        log.warning("API_READ_TOKEN is not set — the API is OPEN to anyone with the URL")
+        return await call_next(request)
+
+    if not secrets.compare_digest(_presented_token(request), API_READ_TOKEN):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    # Anything that is not a read needs the second token. Deny-by-method rather
+    # than by a path list: a new POST route is then protected the day it is
+    # written, instead of the day someone remembers to add it here.
+    if method not in ("GET", "HEAD"):
+        expected = os.getenv("TRADE_PIN", "").strip()
+        presented = (request.headers.get("x-trade-token") or "").strip()
+        if not expected or not secrets.compare_digest(presented, expected):
+            return JSONResponse(
+                {"error": "forbidden", "detail": "this action needs the trade token"},
+                status_code=403,
+            )
+
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
