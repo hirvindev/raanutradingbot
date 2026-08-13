@@ -709,6 +709,9 @@ details .inner{padding:0 18px 16px}
 
   <!-- ─────────── LOGS ─────────── -->
   <section class="page" id="p-logs">
+    <h2>Device <em>what this screen is actually doing</em></h2>
+    <div class="card pad" id="diag" style="font-size:14px;line-height:1.7">—</div>
+
     <h2>Activity <em>this browser session</em></h2>
     <div class="bar"><button class="btn ghost sm" id="clearLog">Clear</button></div>
     <div class="card"><div id="log"></div></div>
@@ -810,6 +813,7 @@ function go(p){
   if(p==='orders')   renderOrders();
   if(p==='strategy') renderStrategy();
   if(p==='signals'){ renderPicks(); renderOutcomes(); }
+  if(p==='logs')     renderDiag();
   syncDayBar();
 }
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
@@ -1563,6 +1567,35 @@ function syncDayBar(){
   v.textContent = src.textContent;
   v.className = src.className.replace(/\bv\b|\bnum\b/g,'').trim();
 }
+
+/* Device diagnostic. Names the exact reason the phone layout would not be
+   applying, rather than leaving it to be guessed at from a screenshot. The
+   usual culprit is Chrome's "Desktop site" toggle, which reports a ~980px
+   viewport and defeats every breakpoint. */
+function renderDiag(){
+  const w = window.innerWidth, dpr = window.devicePixelRatio || 1;
+  const phone = w <= 560, cards = w <= 820;
+  const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+  const standalone = matchMedia('(display-mode: standalone)').matches;
+  const row = (k,v,ok) => `<div><span class="mut">${k}</span> <b style="color:${
+      ok===undefined?'var(--head)':ok?'var(--green)':'var(--red)'}">${v}</b></div>`;
+  el('diag').innerHTML =
+    row('Page', location.pathname, location.pathname === '/') +
+    row('Viewport width', w + ' px', cards) +
+    row('Phone layout (≤560)', phone ? 'ON' : 'off', phone) +
+    row('Card layout (≤820)', cards ? 'ON' : 'off', cards) +
+    row('Installed app', standalone ? 'yes' : 'browser tab') +
+    row('Service worker', sw ? 'active' : 'none', !!sw) +
+    row('Notifications', typeof Notification!=='undefined' ? Notification.permission : 'n/a') +
+    row('Pixel ratio', dpr) +
+    (cards ? '' : `<div style="margin-top:9px;color:var(--red)">The viewport is
+       ${w}px, so the phone layout cannot apply. This is almost always Chrome's
+       <b>Desktop site</b> setting — turn it off in the ⋮ menu.</div>`) +
+    (location.pathname !== '/' ? `<div style="margin-top:9px;color:var(--red)">
+       You are on <b>${location.pathname}</b>, not the main app. Open
+       <b>raanu.up.railway.app</b> with no path.</div>` : '');
+}
+addEventListener('resize', () => { if(el('p-logs').classList.contains('on')) renderDiag(); });
 
 /* ── push notifications ────────────────────────────────── */
 /* Permission is requested on a TAP, never on load. Browsers reject unprompted
