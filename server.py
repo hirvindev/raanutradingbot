@@ -837,7 +837,8 @@ async def api_auth_gate(request: Request, call_next):
     # behaviour; gating them behind the trade PIN made "is push working?"
     # unanswerable without placing a trade.
     _READ_TOKEN_POSTS = {"/api/push/subscribe", "/api/push/unsubscribe",
-                         "/api/push/test", "/api/push/native/register"}
+                         "/api/push/test", "/api/push/native/register",
+                         "/api/push/clear-web"}
 
     if method not in ("GET", "HEAD") and path not in _READ_TOKEN_POSTS:
         expected = os.getenv("TRADE_PIN", "").strip()
@@ -1925,6 +1926,22 @@ async def push_subscribe(request: Request):
 async def push_unsubscribe(request: Request):
     import push
     return push.unsubscribe((await request.json()).get("endpoint", ""))
+
+
+@app.post("/api/push/clear-web")
+async def push_clear_web():
+    """Drop every browser/TWA push subscription.
+
+    Two apps subscribing to the same events meant two notifications per trade,
+    and tapping either one opened the TWA — because a web push belongs to the
+    service worker that registered it, not to whichever app you prefer. With the
+    native app in place the web channel is redundant, and one owner is the only
+    stable arrangement.
+    """
+    import push
+    n = len(push._load())
+    push._save([])
+    return {"ok": True, "cleared": n}
 
 
 @app.post("/api/push/native/register")
