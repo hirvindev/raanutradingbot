@@ -499,6 +499,30 @@ when it falls below $1. Do not size against raw `free_cash` again.
 
 ---
 
+## 🍰 Per-Strategy Cash Share — CASH_SHARE_S1/S2/S3
+
+The scheduled slot used to run `for strat in ("s1","s2","s3")` against a single
+pot of cash, so **whichever ran first could spend everything**. On 13 Aug 2026
+S1 and S2 consumed the entire account at 09:35 ET and S3 — holding candidates
+scoring **90, 84 and 73** — arrived at $0.01 and bought nothing.
+
+Execution order was silently deciding capital allocation, and it decided against
+the one strategy profitable in both halves of the backtest. That is the exact
+opposite of what this file says the design intends.
+
+Each strategy now receives a slice of the deployable budget:
+
+    deployable = max(0, free_cash - equity * CASH_RESERVE_PCT/100)
+    budget(s)  = deployable * CASH_SHARE_S{n} / 100
+
+Defaults follow conviction: **S3 50%, S1 30%, S2 20%**. The loop also runs
+**s3 first**, so any rounding edge falls its way rather than against it.
+
+⚠️ Do not go back to a single shared pot. Per-trade caps and weekly limits bound
+one order and one count; neither bounds what a strategy can take from the whole.
+
+---
+
 ## 🔐 API Authentication — server.py
 
 Before this the deployed API was **completely open**: `curl .../api/account/cash`

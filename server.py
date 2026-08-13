@@ -383,6 +383,21 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     reserve_pct = _float_env("CASH_RESERVE_PCT", 30.0)
     reserve = equity * reserve_pct / 100.0
     deployable = max(0.0, free_cash - reserve)
+
+    # ── Per-strategy share ───────────────────────────────────────────────────
+    # The slot runs s1, s2, s3 in that order against ONE pot, so whichever runs
+    # first can spend everything. On 13 Aug S1 and S2 consumed the whole account
+    # and S3 — holding candidates scoring 90, 84 and 73 — reached an empty one.
+    # Execution order was silently deciding allocation, and it decided against
+    # the only strategy profitable in both halves of the backtest.
+    #
+    # Each strategy now gets a slice of the deployable budget. Weights follow
+    # conviction, which is what CLAUDE.md always said capital should do.
+    share = {"s1": _float_env("CASH_SHARE_S1", 30.0),
+             "s2": _float_env("CASH_SHARE_S2", 20.0),
+             "s3": _float_env("CASH_SHARE_S3", 50.0)}.get(strategy, 33.0)
+    deployable = deployable * share / 100.0
+    log.info(f"[{label}][{strategy.upper()}] share {share:.0f}% of deployable")
     log.info(f"[{label}][{strategy.upper()}] cash {free_cash:,.0f} | "
              f"reserve {reserve_pct:.0f}% = {reserve:,.0f} | deployable {deployable:,.0f}")
     if deployable < 1.0:
@@ -638,7 +653,9 @@ async def _scheduled_trade_loop():
 
         try:
             log.info(f"[{next_label}] Running all three strategies")
-            for strat in ("s1", "s2", "s3"):
+            # S3 first: it is the only strategy profitable in both halves of
+            # the backtest, so any leftover edge should fall its way.
+            for strat in ("s3", "s1", "s2"):
                 await _execute_scheduled_trades(next_n, next_label, strategy=strat)
         except Exception as e:
             log.exception(f"Scheduled slot error [{next_label}]: {e}")
