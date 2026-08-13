@@ -222,37 +222,37 @@ details .inner{padding:0 18px 16px}
 .up.up{color:var(--green)}
 .down.down{color:var(--red)}
 
-.ohead{padding:13px 15px;border-bottom:1px solid var(--line);font-size:13.5px}
+.ohead{padding:15px;border-bottom:1px solid var(--line);font-size:15px}
 .ohead b{color:var(--head);font-size:16px}
-.overdict{font-size:12.5px;margin-top:5px;line-height:1.45}
+.overdict{font-size:14px;margin-top:6px;line-height:1.5}
 .olist{padding:4px 0}
 .orow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
-      padding:10px 15px;border-bottom:1px solid var(--line2);font-size:14px}
+      padding:12px 15px;border-bottom:1px solid var(--line2);font-size:15.5px}
 .orow:last-child{border-bottom:0}
 .orow .num{text-align:right;font-weight:500}
 
 /* ── Picks / learning view ─────────────────────────────────────────────── */
 .scanhead{background:var(--card);border:1px solid var(--line);border-radius:8px;
-          padding:12px 14px;margin-bottom:14px;font-size:14px}
+          padding:14px 15px;margin-bottom:14px;font-size:16px}
 .scanhead b{color:var(--head);font-weight:600}
-.scanhead .sh2{font-size:12px;margin-top:3px}
+.scanhead .sh2{font-size:13.5px;margin-top:5px}
 .pghead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
-        margin:16px 0 8px;font-size:12.5px}
-.pgname{font-weight:600;color:var(--head);font-size:13.5px;
+        margin:18px 0 9px;font-size:13.5px}
+.pgname{font-weight:600;color:var(--head);font-size:15.5px;
         border-left:3px solid var(--line);padding-left:8px}
 .pcard{background:var(--card);border:1px solid var(--line);border-radius:8px;
        padding:12px 14px;margin-bottom:8px}
 .pctop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.pctop .sym{font-size:16px}
-.pscore{font-size:20px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.pctop .sym{font-size:18px}
+.pscore{font-size:23px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
 .pscore.up{color:var(--green)}
 /* The reasons ARE the lesson — full sentences from the scoring engine, not
    truncated, because the point is to read why the name qualified. */
 .why{list-style:none;margin:9px 0 0;padding:0}
-.why li{position:relative;padding-left:14px;font-size:13px;color:var(--text);
-        line-height:1.5;margin-top:3px}
+.why li{position:relative;padding-left:16px;font-size:15px;color:var(--text);
+        line-height:1.6;margin-top:5px}
 .why li:before{content:"·";position:absolute;left:3px;color:var(--accent);font-weight:700}
-.pempty{color:var(--muted);font-size:13px;padding:10px 2px 4px}
+.pempty{color:var(--muted);font-size:15px;padding:12px 2px 6px}
 
 @media(max-width:820px){
   .strip{grid-template-columns:repeat(2,1fr)} .stat{border-bottom:1px solid var(--line2)}
@@ -449,22 +449,29 @@ details .inner{padding:0 18px 16px}
      size below is raised to a phone-appropriate floor — nothing under 12px —
      and the spacing opened up to match, because larger type in the same boxes
      just looks tighter, not clearer. */
-  body{font-size:15px}
-  h2{font-size:16px;margin-bottom:11px}
-  h2 em{font-size:12.5px}
-  .stat .k{font-size:11.5px;letter-spacing:.4px;margin-bottom:5px}
-  .stat .s{font-size:12px;margin-top:4px}
-  .sub{font-size:12.5px}
-  .tag{font-size:11px}
-  .dmeta{font-size:12px}
-  .mname{font-size:15px}
-  .tab{font-size:14px}
-  .tab b{font-size:12px}
-  .chip,.btn{font-size:13.5px}
-  .empty{font-size:13px;padding:30px 14px}
-  .sk{font-size:11px}
-  .sv{font-size:14px}
-  .pill{font-size:11px}
+  /* Raised again, decisively. 15px still had the owner reaching for a
+     magnifier: the floor that matters is not the body copy but the SUPPORTING
+     text — labels, sub-lines, table headers — which sat at 11-12px and carries
+     most of the meaning here. Nothing on a phone is now under 13px, and the
+     reading matter (reasons, list rows) is 15-16px. */
+  body{font-size:16.5px;line-height:1.55}
+  h2{font-size:18px;margin-bottom:12px}
+  h2 em{font-size:14px}
+  .stat .k{font-size:13px;letter-spacing:.3px;margin-bottom:5px}
+  .stat .s{font-size:13.5px;margin-top:5px}
+  .sub{font-size:14px}
+  .tag{font-size:12.5px}
+  .dmeta{font-size:13.5px}
+  .mname{font-size:16.5px}
+  .tab{font-size:15.5px}
+  .tab b{font-size:13.5px}
+  .chip,.btn{font-size:15px}
+  .empty{font-size:15px;padding:32px 14px}
+  .sk{font-size:13px}
+  .sv{font-size:15.5px}
+  .pill{font-size:12.5px}
+  th{font-size:13px;letter-spacing:.3px}
+  td{font-size:15px}
 
   /* Compact rows carry the actual data — these are the numbers being scanned,
      so they get the largest jump. */
