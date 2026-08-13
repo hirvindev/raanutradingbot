@@ -13,13 +13,14 @@
  * icons — so the app opens instantly and works as an installed app rather than
  * a browser tab that needs a connection to show anything at all.
  */
-const SHELL = 'raanu-shell-v1';
+const SHELL = 'raanu-shell-v2';   // v2: new logo assets
 const SHELL_URLS = [
   '/',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',
+  '/icons/mark.png',
 ];
 
 self.addEventListener('install', event => {

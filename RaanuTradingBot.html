@@ -56,8 +56,10 @@ body{background:var(--bg);color:var(--text);font:400 13px/1.5 Inter,-apple-syste
 header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;
        box-shadow:0 1px 3px rgba(105,65,198,.06)}
 .hwrap{max-width:1180px;margin:0 auto;padding:0 20px;height:56px;display:flex;align-items:center}
-.logo{font-weight:600;font-size:15px;color:var(--head);letter-spacing:-.2px}
-.logo span{color:var(--accent)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;
+      color:var(--head);letter-spacing:-.2px}
+.logo img{border-radius:7px;display:block;flex:0 0 auto}
+.logo .wm b{color:var(--accent);font-weight:600}
 nav{display:flex;gap:22px;margin-left:auto}
 nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:19px 0;border-bottom:2px solid transparent;cursor:pointer}
 nav a:hover{color:var(--text)}
@@ -175,7 +177,7 @@ details .inner{padding:0 18px 16px}
 @media(max-width:820px){
   .strip{grid-template-columns:repeat(2,1fr)} .stat{border-bottom:1px solid var(--line2)}
   .srow{grid-template-columns:1fr 1fr} .g2{grid-template-columns:1fr} nav{gap:14px}
-  nav a{font-size:12px} .logo{display:none}
+  nav a{font-size:12px} .logo .wm{display:none}
 }
 
 /* Token gate. Covers everything until a read token is stored, so account
@@ -189,7 +191,7 @@ details .inner{padding:0 18px 16px}
                 padding:26px 24px;max-width:380px;width:100%;
                 box-shadow:0 4px 20px rgba(105,65,198,.12)}
 #tokenGate h3{font-size:15px;color:var(--head);font-weight:600;margin-bottom:8px}
-#tokenGate p{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.55}
+#tokenGate p{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.55;text-align:center}
 #tokenGate input{width:100%;font:inherit;font-size:14px;padding:11px 12px;
                  border:1px solid var(--line);border-radius:4px;color:var(--text);
                  background:var(--bg);margin-bottom:12px}
@@ -212,7 +214,8 @@ details .inner{padding:0 18px 16px}
   /* Header keeps only the brand and status pills; navigation moves to the
      bottom where a thumb can reach it. */
   .hwrap{padding:0 14px;height:50px}
-  .logo{display:block;font-size:14px}
+  .logo{display:flex;font-size:14px}
+  .logo .wm{display:inline}
   .pill{margin-left:8px;font-size:10px;padding:2px 6px}
   nav{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;gap:0;
       display:flex;justify-content:space-around;background:var(--card);
@@ -302,7 +305,9 @@ details .inner{padding:0 18px 16px}
 
 <div id="tokenGate">
   <div class="box">
-    <h3>RaanuBot</h3>
+    <img src="/icons/mark.png" alt="" width="56" height="56"
+         style="border-radius:12px;display:block;margin:0 auto 12px">
+    <h3 style="text-align:center">RaanuBot</h3>
     <p id="tokenMsg">Enter your passphrase to view the dashboard.</p>
     <input id="tokenInput" type="password" placeholder="Passphrase"
            autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -312,7 +317,7 @@ details .inner{padding:0 18px 16px}
 
 <header>
   <div class="hwrap">
-    <div class="logo">Raanu<span>Bot</span></div>
+    <div class="logo"><img src="/icons/mark.png" alt="" width="30" height="30"><span class="wm">Raanu<b>Bot</b></span></div>
     <nav id="nav">
       <a data-p="dash" class="on">Dashboard</a>
       <a data-p="orders">Orders</a>
