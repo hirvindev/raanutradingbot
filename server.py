@@ -533,11 +533,18 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
 async def _premarket_scan_and_notify():
-    """Scan both strategies and send separate Telegram alerts to each strategy's chat."""
+    """Scan every strategy and send a separate Telegram alert per strategy chat.
+
+    S3 was missing here from the day it was added: this function predates it,
+    scanned only S1 and S2, and nobody noticed because the absence of an alert
+    looks exactly like "no signals today". S3 has produced picks scoring 90 and
+    84 that were never reported.
+    """
     from notifier import send_telegram
     log.info("[Pre-market] Running dual-strategy scan...")
     picks_s1 = await _run_scan_and_cache()
     picks_s2 = await _run_scan_and_cache_s2()
+    picks_s3 = await _run_scan_and_cache_s3()
 
     # S1 alert → S1 chat
     s1_lines = ["📡 *RaanuBot — Pre-market Scan*", "📊 *S1 Pullback*", ""]
@@ -576,7 +583,27 @@ async def _premarket_scan_and_notify():
     s2_lines.append("\n_Auto-trader will execute at market open if enabled._")
     send_telegram("\n".join(s2_lines), strategy="s2")
 
-    log.info(f"[Pre-market] Telegram sent — S1: {len(picks_s1)}, S2: {len(picks_s2)}")
+    # S3 alert → S3 chat. Listed last here but it is the strategy with the best
+    # evidence: the only one profitable in both halves of the backtest.
+    s3_lines = ["📡 *RaanuBot — Pre-market Scan*", "💧 *S3 Leader Dip*", ""]
+    if picks_s3:
+        medals = ["🏆", "🥈", "🥉"]
+        s3_lines.append(f"{len(picks_s3)} signal(s) found:\n")
+        for i, p in enumerate(picks_s3):
+            score = p.get("score", 0)
+            heat = "🔥" if score >= 75 else "📈"
+            ticker = p.get("ticker", "?")
+            name = p.get("name", ticker)
+            s3_lines.append(
+                f"{medals[i] if i < 3 else '  '} *{ticker}* ({name}) {heat} {score}/100"
+            )
+    else:
+        s3_lines.append("⚠️ No leader dips today.")
+    s3_lines.append("\n_Auto-trader will execute at market open if enabled._")
+    send_telegram("\n".join(s3_lines), strategy="s3")
+
+    log.info(f"[Pre-market] Telegram sent — S1: {len(picks_s1)}, "
+             f"S2: {len(picks_s2)}, S3: {len(picks_s3)}")
 
 
 # Schedule slots:

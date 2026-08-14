@@ -20,13 +20,15 @@ def _token() -> str:
 
 
 def _chat_id_for(strategy: str = "") -> str:
-    """Return the chat ID for a strategy, falling back to the default."""
-    if strategy == "s1":
-        sid = os.getenv("TELEGRAM_CHAT_ID_S1", "").strip()
-        if sid:
-            return sid
-    elif strategy == "s2":
-        sid = os.getenv("TELEGRAM_CHAT_ID_S2", "").strip()
+    """Return the chat ID for a strategy, falling back to the default.
+
+    Generic rather than a branch per strategy. The hand-written version had
+    cases for s1 and s2 only — S3 was added later and nobody updated it, so
+    TELEGRAM_CHAT_ID_S3 silently did nothing. Any future strategy now works
+    without touching this function.
+    """
+    if strategy:
+        sid = os.getenv(f"TELEGRAM_CHAT_ID_{strategy.upper()}", "").strip()
         if sid:
             return sid
     return os.getenv("TELEGRAM_CHAT_ID", "").strip()
