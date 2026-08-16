@@ -429,6 +429,41 @@ Two things this killed immediately:
 Passing 0, the common shortcut, inflates every Sharpe and would have made this
 comparison look far closer than it is.
 
+### ⚠️ `--sweep-rank`: the score does not rank
+
+`python3 backtest.py --strategy s3 --years 3 --stop-atr 3.0 --sweep-rank`
+
+```
+ score bar  max pos  trades     CAGR   beta    ALPHA  Sharpe   maxDD
+        60        4     177   +3.46%   0.27   -4.60%   -0.03  11.86%
+        60        8     352  +13.48%   0.50   +1.39%    0.72  17.81%
+        60       15     517  +17.27%   0.61   +3.20%    0.85  18.40%
+        70       15     485  +15.80%   0.56   +2.55%    0.79  17.51%
+        80        8     285   +4.63%   0.40   -5.22%    0.11  18.68%
+        80       15     330   +5.54%   0.42   -4.65%    0.18  15.48%
+```
+
+Two monotone trends across all nine cells:
+
+1. **Raising the score bar makes things WORSE.** At 15 positions, alpha falls
+   +3.20% → +2.55% → −4.65% as the bar goes 60 → 70 → 80. **The scoring model
+   does not rank: its high-conviction names underperform its marginal ones.**
+   Everything built on "score ≥ 75 = high conviction" — the CONFIDENT BUY
+   alerts, `MIN_SIGNAL_SCORE`, the notification threshold — rests on an ordering
+   that this test does not support.
+2. **Diversification helps, a lot.** 4 → 8 → 15 positions improves alpha at
+   every threshold (−4.60 → +1.39 → +3.20 at bar 60). Beta rises too (0.27 →
+   0.61), so part is market exposure — but alpha rising alongside it is not.
+
+⚠️ **The live config sits in the bad corner.** `MIN_SIGNAL_SCORE=70` plus
+per-strategy weekly limits of 1–3 trades produce a small, high-bar book: the
+regime this grid scores worst. Do not change live settings off one 3-year
+window on one strategy — run `--robustness` on the winning cell first — but the
+direction is consistent enough that the current defaults should not be treated
+as validated.
+
+**No cell beats buy & hold.** Best Sharpe here is 0.85 against SPY's 1.08.
+
 ---
 
 ## 🔭 Scanner — scanner.py

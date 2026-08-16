@@ -438,6 +438,21 @@ def kelly_fraction(win_rate: float, payoff: float) -> float:
 TRADING_DAYS = 252
 
 
+def filter_signals(sig: dict, min_score: int, top_n: int) -> dict:
+    """Re-cut cached signals to a higher score bar and a shorter per-day list.
+
+    Signals are cached at the LOWEST threshold and narrowed here, so a sweep
+    across thresholds costs one scan instead of one per setting. Every cut is
+    the same underlying scoring run, which is what makes the comparison fair —
+    rebuilding per threshold would also resample the noise.
+    """
+    out = {"dates": sig["dates"], "signals": {}}
+    for d, hits in sig["signals"].items():
+        keep = [h for h in hits if h.get("score", 0) >= min_score][:top_n]
+        out["signals"][d] = keep
+    return out
+
+
 def _benchmark_frame(years: int):
     """SPY OHLCV for the window, for the risk maths. Cached by yfinance."""
     try:
@@ -711,6 +726,10 @@ def main() -> None:
                          "The documented S3 result uses 3.0 — without this flag the "
                          "default run tested a config nobody chose.")
     ap.add_argument("--sweep-atr", action="store_true", help="compare stop rules")
+    ap.add_argument("--sweep-rank", action="store_true",
+                    help="does the SCORE carry information? sweeps the score bar "
+                         "against portfolio concentration, judged on alpha and "
+                         "Sharpe rather than raw return")
     ap.add_argument("--sweep-risk", action="store_true", help="compare sizing models")
     ap.add_argument("--sweep-ladder", action="store_true",
                     help="compare profit-ladder variants")
@@ -814,6 +833,42 @@ def main() -> None:
             print_stats("    first half", h1)
             print_stats("    second half", h2)
             print()
+
+    elif args.sweep_rank:
+        # The question this answers: if the score ranks candidates correctly,
+        # then raising the bar and concentrating into fewer names should IMPROVE
+        # risk-adjusted return. If the numbers are flat across the grid, the
+        # score separates nothing and the ranking is decoration.
+        #
+        # Judged on alpha and Sharpe, not total return — a more concentrated
+        # book almost always returns more in a bull market simply by carrying
+        # more beta, and that is not evidence of anything.
+        ex = ExitConfig(**({"stop_atr_mult": args.stop_atr} if args.stop_atr else {}))
+        spy = _benchmark_frame(args.years)
+        print(f"exit rule: {ex.label()}   (rf {args.risk_free}%)\n")
+        print(f"{'score bar':>10} {'max pos':>8} {'trades':>7} {'CAGR':>8} "
+              f"{'beta':>6} {'ALPHA':>8} {'Sharpe':>7} {'maxDD':>7}")
+        base_sharpe = None
+        for min_score in (60, 70, 80):
+            for top_n in (4, 8, 15):
+                p2 = PortfolioConfig(**{**asdict(pf), "max_positions": top_n})
+                sub = filter_signals(sig, min_score, top_n)
+                res = simulate(sub, prices, ex, p2)
+                st = stats(res, p2)
+                if not st.get("trades"):
+                    print(f"{min_score:>10} {top_n:>8} {'—':>7}   no trades")
+                    continue
+                rk = risk_stats(res["equity_curve"], spy, res["trades"],
+                                risk_free_pct=args.risk_free) if spy is not None else {}
+                if base_sharpe is None:
+                    base_sharpe = rk.get("bench_sharpe")
+                print(f"{min_score:>10} {top_n:>8} {st['trades']:>7} "
+                      f"{rk.get('cagr', 0):>+7.2f}% {rk.get('beta', 0):>6.2f} "
+                      f"{rk.get('alpha', 0):>+7.2f}% {rk.get('sharpe', 0):>7.2f} "
+                      f"{st['max_drawdown_pct']:>6.2f}%")
+        if base_sharpe is not None:
+            print(f"\n  SPY buy & hold Sharpe over the same window: {base_sharpe:.2f}")
+            print("  A row only matters if its Sharpe beats that. Alpha alone does not.")
 
     elif args.sweep_risk:
         ex = ExitConfig(stop_mode="atr", stop_atr_mult=2.5,
