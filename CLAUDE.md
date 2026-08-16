@@ -464,6 +464,38 @@ as validated.
 
 **No cell beats buy & hold.** Best Sharpe here is 0.85 against SPY's 1.08.
 
+### The winning cell did NOT survive the split
+
+`--robustness --max-positions 15` on S3 (now reports alpha/Sharpe per half):
+
+```
+  3.0x ATR   full  beta 0.61  alpha  +3.20%  Sharpe 0.85  (SPY 1.08)
+             1st   beta 0.79  alpha  +5.52%  Sharpe 1.35  (SPY 1.45)
+             2nd   beta 0.52  alpha  -0.31%  Sharpe 0.45  (SPY 0.85)
+
+  3% fixed   full  beta 0.39  alpha  +4.73%  Sharpe 0.74  (SPY 1.08)
+             1st   beta 0.47  alpha  -0.05%  Sharpe 0.69  (SPY 1.45)
+             2nd   beta 0.35  alpha  +9.73%  Sharpe 0.84  (SPY 0.85)
+```
+
+**S3's +3.20% alpha is a first-half artefact** — +5.52% then −0.31%. The
+headline came from the good half, exactly as every stop setting did before it.
+
+**And the 3% fixed stop — the one this file calls catastrophic — is the only
+config with positive SECOND-half alpha (+9.73%), at the lowest beta (0.35).**
+That does not overturn the wide-stop finding, which was measured on S1/S2 at 8
+positions; it does mean *"wider stops are a large, robust improvement"* is not
+established at 15 positions on S3, and the word **robust** was too strong.
+
+The honest synthesis: **two configurations, opposite halves, neither consistent.**
+One works in the first half, the other in the second, and SPY's own Sharpe fell
+1.45 → 0.85 across them — the regime changed and the strategies did not survive
+the change. That is the signature of no persistent edge, not of a setting that
+needs tuning.
+
+⚠️ **Do not retune live off this.** The reason to run the split is to stop
+exactly that.
+
 ---
 
 ## 🔭 Scanner — scanner.py

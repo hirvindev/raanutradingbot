@@ -823,7 +823,9 @@ def main() -> None:
             ("3.0x ATR", ExitConfig(stop_mode="atr", stop_atr_mult=3.0,
                                     trail_mode="atr", trail_activate_atr=2.0, trail_atr_mult=1.5)),
         ]
-        print("stability check — does the config work in BOTH halves?\n")
+        spy = _benchmark_frame(args.years)
+        print(f"stability check — does the config work in BOTH halves?")
+        print(f"  max_positions={pf.max_positions}   (rf {args.risk_free}%)\n")
         for label, ex in candidates:
             res = simulate(sig, prices, ex, pf)
             full = stats(res, pf)
@@ -832,6 +834,25 @@ def main() -> None:
             print_stats("    full period", full)
             print_stats("    first half", h1)
             print_stats("    second half", h2)
+
+            # Risk-adjusted per half too. A config can hold its total return
+            # across both halves while its alpha flips sign — return alone
+            # cannot show that, and it is the thing the split exists to catch.
+            if spy is not None:
+                curve, trades = res["equity_curve"], res["trades"]
+                mid = curve[len(curve) // 2][0]
+                for name, cv, tr in (
+                    ("full ", curve, trades),
+                    ("1st  ", [c for c in curve if c[0] <= mid],
+                              [t for t in trades if t.exit_date <= mid]),
+                    ("2nd  ", [c for c in curve if c[0] > mid],
+                              [t for t in trades if t.exit_date > mid])):
+                    rk = risk_stats(cv, spy, tr, risk_free_pct=args.risk_free)
+                    if rk.get("error"):
+                        continue
+                    print(f"      {name} beta {rk['beta']:>5.2f}  "
+                          f"alpha {rk['alpha']:>+7.2f}%  "
+                          f"Sharpe {rk['sharpe']:>5.2f}  (SPY {rk['bench_sharpe']:.2f})")
             print()
 
     elif args.sweep_rank:
