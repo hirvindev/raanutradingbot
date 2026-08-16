@@ -281,7 +281,7 @@ async def get_held_symbols() -> Optional[set[str]]:
 
 
 async def alpaca_buy_notional(symbol: str, notional: float,
-                              strategy: str | None = None) -> dict:
+                              strategy: Optional[str] = None) -> dict:
     """Place a market buy order for a notional USD amount.
 
     The strategy is stamped into `client_order_id` so attribution survives

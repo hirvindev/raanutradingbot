@@ -183,6 +183,27 @@ def _empty(ticker: str, reason: str, err: str) -> dict:
     return {"ticker": ticker, "ok": False, "score": 0, "reasons": [reason], "error": err}
 
 
+def atr_pct_from_df(df, period: int = 14):
+    """Wilder's ATR(14) as a percentage of the last close.
+
+    Same maths as backtest.atr_series() — deliberately, so a signal alert and a
+    backtest describe the same instrument the same way.
+    """
+    try:
+        high, low, close = df["High"], df["Low"], df["Close"]
+        prev = close.shift(1)
+        import pandas as _pd
+        tr = _pd.concat([high - low, (high - prev).abs(), (low - prev).abs()],
+                        axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+        last = float(close.iloc[-1])
+        if not last or atr != atr:          # NaN guard
+            return None
+        return round(float(atr) / last * 100, 2)
+    except Exception:
+        return None
+
+
 def _score_core(ticker: str, df: Optional[pd.DataFrame], bench_ret_3m: Optional[float] = None) -> dict:
     """
     Score one ticker from a pre-fetched OHLCV DataFrame using a trend +
@@ -196,6 +217,7 @@ def _score_core(ticker: str, df: Optional[pd.DataFrame], bench_ret_3m: Optional[
     if len(close) < 60:
         return _empty(ticker, "Insufficient history (<60 bars)", "short series")
     vol = df["Volume"].dropna() if "Volume" in df.columns else None
+    atr_pct = atr_pct_from_df(df)
     high = df["High"].dropna() if "High" in df.columns else close
     low = df["Low"].dropna() if "Low" in df.columns else close
 
@@ -359,6 +381,10 @@ def _score_core(ticker: str, df: Optional[pd.DataFrame], bench_ret_3m: Optional[
         "mom_1m": round(mom_1m * 100, 1),
         "mom_3m": round(mom_3m * 100, 1),
         "rel_strength": round(rel * 100, 1) if rel is not None else None,
+        # ATR as a % of price. The exit engine scales every stop and trail from
+        # this, so without it a signal alert cannot state where the trade would
+        # be closed — which is the number that decides whether to take it.
+        "atr_pct": atr_pct,
         "uptrend": uptrend,
         "in_golden_pocket": bool(gp["in_golden_pocket"]) if gp else False,
         "swing_high": gp["swing_high"] if gp else None,

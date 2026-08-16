@@ -201,38 +201,24 @@ _CONFIDENT_BUY_THRESHOLD = 75
 
 def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
     """Send Telegram alert for high-conviction picks, tagged by strategy."""
-    from notifier import send_telegram, _strat_tag
+    from notifier import send_telegram
     gate_key = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
     confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get(gate_key)]
     if not confident:
         return
 
-    stag = _strat_tag(strategy)
     for p in confident:
         ticker = p.get("ticker", "?")
         name = p.get("name", ticker)
         score = p.get("score", 0)
-        price = p.get("price", 0)
-        rsi = p.get("rsi", 0)
-        mom_3m = p.get("mom_3m", 0)
-        rel = p.get("rel_strength", 0)
-        reasons = " | ".join(p.get("reasons", [])[:3])
-        gp = "\n   🎯 *In Golden Pocket* (0.618–0.786 fib)" if p.get("in_golden_pocket") else ""
-
-        msg = (
-            f"🟢 *CONFIDENT BUY — {ticker}* ({name})\n"
-            f"   {stag}\n"
-            f"   Score: *{score}/100* | Uptrend confirmed\n"
-            f"   💵 ${price:.2f} | RSI {rsi:.0f} | 3M momentum {mom_3m:+.1f}%\n"
-            f"   Rel. strength vs SPY: {rel:+.1f}%{gp}\n"
-            f"   {reasons}\n\n"
-            f"   _Score ≥ {_CONFIDENT_BUY_THRESHOLD} = high conviction. Review and act._"
-        )
-        send_telegram(msg, strategy=strategy)
-        # Same event on push, same fields, same order — see push._tech_lines().
-        # Wrapped: a notification failure must never break a scan.
+        # ONE definition of this alert, in push.format_signal(), used by both
+        # channels. Telegram and push used to build their own text from the same
+        # pick, which is how two descriptions of one event drift until you have
+        # to read both to trust either.
+        import push
+        title, body = push.format_signal(p, strategy)
+        send_telegram(f"*{title}* ({name})\n{body}", strategy=strategy)
         try:
-            import push
             push.notify_signal(p, strategy)
         except Exception as e:
             log.warning(f"[push] signal notify skipped: {e}")
@@ -2014,13 +2000,15 @@ async def push_test():
     """
     import push
     sample = {"ticker": "HUM", "score": 87, "price": 385.88, "rsi": 52.0,
-              "macd": 0.93, "atr_pct": 4.2, "mom_3m": 28.4, "rel_strength": 24.3,
-              "reasons": ["Confirmed uptrend — price > EMA200, EMA50 rising"]}
-    title = "🔥 CONFIDENT BUY — HUM (sample)"
-    body = "\n".join([f"{push._strat_name('s1')} · Score 87/100"]
-                     + push._tech_lines(sample) + [sample["reasons"][0]])
-    web = push.send(title, body, tag="test")
-    nat = push.send_native(title, body)
+              "macd": 0.93, "atr_pct": 4.2, "ema20": 380.65, "mom_3m": 28.4,
+              "rel_strength": 24.3,
+              "reasons": ["Confirmed uptrend — price > EMA200, EMA50 rising",
+                          "Price $385.88 above EMA50 $365.40",
+                          "3M momentum +28.4%"]}
+    title, body = push.format_signal(sample, "s1")
+    title += " (sample)"
+    web = push.send(title, body, tag="test", sticky=True)
+    nat = push.send_native(title, body, sticky=True)
     return {**web, "native_sent": nat, "sent": web.get("sent", 0) + nat}
 
 
