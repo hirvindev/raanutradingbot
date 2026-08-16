@@ -280,8 +280,18 @@ async def get_held_symbols() -> Optional[set[str]]:
     return held
 
 
-async def alpaca_buy_notional(symbol: str, notional: float) -> dict:
-    """Place a market buy order for a notional USD amount."""
+async def alpaca_buy_notional(symbol: str, notional: float,
+                              strategy: str | None = None) -> dict:
+    """Place a market buy order for a notional USD amount.
+
+    The strategy is stamped into `client_order_id` so attribution survives
+    losing the trade log. It used to live ONLY in trades_log.json, so when that
+    file was on /tmp and Railway wiped it on redeploy, the answer to "which
+    strategy bought this?" was destroyed permanently — BAC, OKTA and ROKU are
+    still unattributable for exactly this reason. Alpaca keeps client_order_id
+    for the life of the order, which makes the broker the durable record and
+    the local log a cache.
+    """
     body = {
         "symbol":        symbol.upper(),
         "notional":      str(round(notional, 2)),
@@ -289,6 +299,10 @@ async def alpaca_buy_notional(symbol: str, notional: float) -> dict:
         "type":          "market",
         "time_in_force": "day",
     }
+    if strategy:
+        # Must be unique per order or Alpaca rejects it; 128-char limit.
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")[:-3]
+        body["client_order_id"] = f"raanu-{strategy.lower()}-{symbol.upper()}-{stamp}"[:128]
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             f"{_broker_base()}/orders",
@@ -493,7 +507,7 @@ class AutoTrader:
             pass
 
         try:
-            result = await alpaca_buy_notional(sym, notional)
+            result = await alpaca_buy_notional(sym, notional, strategy)
         except Exception as e:
             self.event("error", f"Alpaca rejected order: {e}")
             self.last_decision = {"action": "error", "reason": str(e)}

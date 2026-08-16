@@ -341,16 +341,26 @@ async def _get_prev_close(symbol: str) -> Optional[float]:
 def strategy_for(symbol: str) -> str:
     """
     Which strategy opened this position, from the most recent BUY in the trade
-    log. Defaults to "s1" when the position predates strategy tagging.
+    log. Returns "unknown" when there is no BUY on record.
+
+    It used to return "s1" for those, which was a guess presented as a fact.
+    The dashboard said UNTAGGED for the same position while the exit engine
+    treated it as S1, and worse, `_record_exit` then wrote "s1" into the trade
+    log when it closed — so an unattributable trade's P&L permanently joined
+    S1's track record, which is what kelly.py sizes future positions from.
+
+    "unknown" costs nothing here: no `stop_atr_mult_unknown` or
+    `profit_ladder_unknown` key exists, so both fall through to the shared
+    defaults, which are identical to the S1 values. Same exits, honest label.
     """
     try:
         from auto_trader import trader
         for t in reversed(trader.tradelog.data.get("trades", [])):
             if t.get("action") == "BUY" and (t.get("ticker") or "").upper() == symbol.upper():
-                return t.get("strategy", "s1")
+                return t.get("strategy") or "unknown"
     except Exception:
         pass
-    return "s1"
+    return "unknown"
 
 
 def stop_atr_mult_for(strategy: str) -> float:
@@ -380,10 +390,13 @@ def _record_exit(symbol: str, entry: float, exit_price: float,
     try:
         from auto_trader import trader
 
-        strategy = "s1"
+        # "unknown", never "s1" — see strategy_for(). Mislabelling an
+        # unattributable exit pollutes the win rate and payoff ratio that
+        # position sizing is computed from.
+        strategy = "unknown"
         for t in reversed(trader.tradelog.data.get("trades", [])):
             if t.get("action") == "BUY" and (t.get("ticker") or "").upper() == symbol.upper():
-                strategy = t.get("strategy", "s1")
+                strategy = t.get("strategy") or "unknown"
                 break
 
         # Exits are the events most worth interrupting someone for — a stop or
