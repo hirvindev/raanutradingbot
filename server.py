@@ -229,6 +229,13 @@ def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
             f"   _Score ≥ {_CONFIDENT_BUY_THRESHOLD} = high conviction. Review and act._"
         )
         send_telegram(msg, strategy=strategy)
+        # Same event on push, same fields, same order — see push._tech_lines().
+        # Wrapped: a notification failure must never break a scan.
+        try:
+            import push
+            push.notify_signal(p, strategy)
+        except Exception as e:
+            log.warning(f"[push] signal notify skipped: {e}")
         log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score}")
 
 
@@ -508,7 +515,8 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             trader.event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
             # Push is best-effort and must never break an order that already filled.
             try:
-                import push; push.notify_buy(ticker, notional, strategy, pick.get("score"))
+                import push; push.notify_buy(ticker, notional, strategy,
+                                             pick.get("score"), pick)
             except Exception as e:
                 log.warning(f"[push] buy notify skipped: {e}")
             send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy), strategy=strategy)
@@ -2005,8 +2013,14 @@ async def push_test():
     broken rather than untested.
     """
     import push
-    web = push.send("RaanuBot", "Notifications are working.", tag="test")
-    nat = push.send_native("RaanuBot", "Notifications are working.")
+    sample = {"ticker": "HUM", "score": 87, "price": 385.88, "rsi": 52.0,
+              "macd": 0.93, "atr_pct": 4.2, "mom_3m": 28.4, "rel_strength": 24.3,
+              "reasons": ["Confirmed uptrend — price > EMA200, EMA50 rising"]}
+    title = "🔥 CONFIDENT BUY — HUM (sample)"
+    body = "\n".join([f"{push._strat_name('s1')} · Score 87/100"]
+                     + push._tech_lines(sample) + [sample["reasons"][0]])
+    web = push.send(title, body, tag="test")
+    nat = push.send_native(title, body)
     return {**web, "native_sent": nat, "sent": web.get("sent", 0) + nat}
 
 

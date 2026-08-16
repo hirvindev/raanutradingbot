@@ -296,10 +296,73 @@ def _fanout(title: str, body: str, tag: str):
     log.info(f"[push] {tag}: {web.get('sent', 0)} web, {nat} native")
 
 
-def notify_buy(ticker: str, usd: float, strategy: str, score=None):
-    _fanout(f"Bought {ticker}",
-            f"${usd:,.0f} · {strategy.upper()}" + (f" · score {score}" if score else ""),
-            f"buy-{ticker}")
+def _strat_name(strategy: str) -> str:
+    return {"s1": "Trend Pullback", "s2": "Breakout",
+            "s3": "Leader Dip"}.get((strategy or "").lower(), (strategy or "?").upper())
+
+
+def _tech_lines(p: dict) -> list:
+    """The technical snapshot, as lines — shared by the signal and buy pushes.
+
+    Deliberately the same fields the Telegram alert leads with, in the same
+    order. Two channels describing the same event in different shapes makes you
+    re-read both to check they agree; this way a glance at either is enough.
+
+    Markdown is NOT used: Telegram renders *bold*, a push notification shows
+    the asterisks.
+    """
+    out = []
+    price, rsi = p.get("price", 0), p.get("rsi", 0)
+    macd, atr = p.get("macd", 0), p.get("atr_pct", 0)
+    bits = [f"${price:,.2f}"]
+    if rsi:  bits.append(f"RSI {rsi:.0f}")
+    if macd: bits.append(f"MACD {macd:+.2f}")
+    if atr:  bits.append(f"ATR {atr:.1f}%")
+    out.append(" · ".join(bits))
+
+    mom, rel = p.get("mom_3m", 0), p.get("rel_strength", 0)
+    if mom or rel:
+        line = f"3M {mom:+.1f}%"
+        if rel:
+            line += f" · vs SPY {rel:+.1f}%"
+        if p.get("in_golden_pocket"):
+            line += " · 🎯 Golden Pocket"
+        out.append(line)
+    return out
+
+
+def notify_signal(p: dict, strategy: str):
+    """High-conviction pick — the push twin of the Telegram CONFIDENT BUY.
+
+    This is the notification with the most reason to interrupt someone: it is
+    the one that may need a decision, and it arrives before any order exists.
+    """
+    ticker = p.get("ticker", "?")
+    body = [f"{_strat_name(strategy)} · Score {p.get('score', 0)}/100"]
+    body += _tech_lines(p)
+    reasons = p.get("reasons") or []
+    if reasons:
+        body.append(reasons[0])
+    _fanout(f"🔥 CONFIDENT BUY — {ticker}", "\n".join(body), f"signal-{ticker}")
+
+
+def notify_buy(ticker: str, usd: float, strategy: str, score=None, pick: dict | None = None):
+    """An order was actually placed. Carries the exit plan, not just the entry.
+
+    The stop is the number worth knowing at 3am, and it was missing before —
+    the push said what was bought but never what would close it.
+    """
+    head = f"✅ Bought {ticker} · ${usd:,.0f}"
+    body = [f"{_strat_name(strategy)}" + (f" · Score {score}/100" if score else "")]
+    if pick:
+        body += _tech_lines(pick)
+        entry = pick.get("price", 0)
+        atr_pct = pick.get("atr_pct", 0)
+        if entry and atr_pct:
+            mult = {"s2": 3.0, "s3": 3.0}.get((strategy or "").lower(), 2.5)
+            stop_pct = max(1.5, min(25.0, atr_pct * mult))
+            body.append(f"Stop ~${entry * (1 - stop_pct / 100):,.2f} ({-stop_pct:.1f}%, ATR-scaled)")
+    _fanout(head, "\n".join(body), f"buy-{ticker}")
 
 
 def notify_exit(ticker: str, pnl: float, pct: float, reason: str):
