@@ -12,10 +12,12 @@ import {
   View, Text, TextInput, Pressable, ActivityIndicator, useColorScheme,
   StatusBar, SafeAreaView, Platform, Image,
 } from 'react-native';
-import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme,
+         createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
+import * as Notifications from 'expo-notifications';
 
 import { api, loadCreds, setPass, hasPass, Unauthorized } from './src/api';
 import { light, dark, type as T } from './src/theme';
@@ -27,6 +29,21 @@ import Strategy from './src/screens/Strategy';
 import Logs from './src/screens/Logs';
 
 const Tab = createBottomTabNavigator();
+
+/**
+ * Tapping a notification used to open the app at Home and dismiss the
+ * notification, so the signal you were reading was simply gone — the alert had
+ * the detail, the app did not show it, and the notification was the only copy.
+ *
+ * Now a tap lands on Signals, where the same pick is listed with its score and
+ * reasoning. The notification being dismissed stops mattering once the content
+ * it carried is one tap away.
+ */
+export const navRef = createNavigationContainerRef();
+
+function goToSignals() {
+  if (navRef.isReady()) navRef.navigate('Signals' as never);
+}
 
 const icons: Record<string, (c: string) => React.ReactNode> = {
   Home: c => <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={1.8}
@@ -110,6 +127,17 @@ export default function App() {
     setBusy(false);
   };
 
+  // Cold start (app was killed) and warm tap are different APIs: the listener
+  // only fires while the app is running, so a notification that launched the
+  // app would otherwise land on Home.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener(goToSignals);
+    Notifications.getLastNotificationResponseAsync()
+      .then(r => { if (r) setTimeout(goToSignals, 350); })
+      .catch(() => {});
+    return () => sub.remove();
+  }, []);
+
   if (!booted) {
     return <View style={{ flex: 1, backgroundColor: t.bg, justifyContent: 'center' }}>
       <ActivityIndicator color={t.accent} /></View>;
@@ -175,7 +203,7 @@ function Tabs({ t, props }: any) {
   };
 
   return (
-        <NavigationContainer theme={navTheme}>
+        <NavigationContainer ref={navRef} theme={navTheme}>
           <Tab.Navigator
             screenOptions={({ route }) => ({
               headerStyle: { backgroundColor: t.card, borderBottomColor: t.line },
