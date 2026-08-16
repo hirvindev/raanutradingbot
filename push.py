@@ -271,6 +271,20 @@ def send_native(title: str, body: str, sticky: bool = False) -> int:
         headers = {"Authorization": f"Bearer {creds.token}"}
         sent, dead = 0, []
         for t in toks:
+            # An iPhone registers an APNs token, not an FCM one. Firing it at
+            # FCM returns 404, which this loop reads as "unregistered" and
+            # prunes — so an iOS device would silently unregister itself on the
+            # first send and the owner would only notice by never being
+            # notified. Skip it loudly instead.
+            #
+            # Real iOS push needs an APNs auth key, and Apple only issues those
+            # to paid Developer Program members. It is gated behind the $99/yr
+            # either way, so there is nothing to implement here until that is
+            # a decision that has been made.
+            if (t.get("platform") or "android").lower() != "android":
+                log.warning(f"[push] skipping {t.get('platform')} token — "
+                            f"FCM cannot deliver to APNs; iOS needs an APNs key")
+                continue
             # sticky=True: pops up as a heads-up banner AND stays in the shade
             # until dismissed by hand, instead of vanishing on tap. A signal you
             # glanced at on a lock screen and lost is a signal you did not read.

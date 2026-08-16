@@ -696,6 +696,25 @@ and then the stop-out gets dismissed with it. `PUSH_SCANS=0` disables them.
   for days while looking configured. `_fcm_info()` accepts both forms now.
 - Generate: `base64 -i ~/.secrets/raanubot-firebase-adminsdk-*.json | tr -d '\n'`
 
+### iPhone — the code is ready, Apple is the blocker
+The React Native app is cross-platform and the UI is iOS-clean (the one
+Android-only assumption, `fontFamily: 'monospace'`, now resolves to `Menlo`).
+No `ios/` project has ever been generated, and there is little point until this
+is settled:
+
+- **APNs auth keys are only issued to paid Apple Developer Program members**
+  ($99/**year**, recurring). FCM cannot deliver to an APNs token, so iOS push
+  is gated behind that fee no matter how the app is built.
+- `send_native()` now **skips** non-android tokens rather than firing them at
+  FCM. A 404 there reads as "unregistered" and prunes the token, so an iPhone
+  would silently unregister itself on its first send.
+- **The free path that works today is the PWA**: Safari → Add to Home Screen.
+  Full dashboard, app icon, no browser bar. Web push works from iOS 16.4+ once
+  installed to the Home Screen.
+
+Google's $25 was one-time and met the project's stated cost constraint. Apple's
+$99 is annual and does not.
+
 ### `GET /api/push/status` — use this first
 Reports web subs, native devices (token tails only) and whether FCM
 credentials actually **mint a token**, not merely whether the variable is set.

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator,
+         Platform } from 'react-native';
 import { Card, Muted, useTheme, styles } from '../ui';
 
 /**
@@ -57,8 +58,11 @@ export default function Alerts({ refreshing, onRefresh, data }: any) {
               {a.title}
             </Text>
             <Muted style={{ fontSize: 12, marginTop: 2 }}>{when(a.ts)}</Muted>
+            {/* 'monospace' is an Android family name. On iOS it does not
+                resolve and silently falls back to the system font, which
+                throws away the column alignment this text depends on. */}
             <Text style={{ color: t.text, fontSize: 12.5, lineHeight: 19, marginTop: 8,
-                           fontFamily: 'monospace' }}>
+                           fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
               {a.body}
             </Text>
           </View>

@@ -17,7 +17,7 @@
         "backgroundColor": "#6941c6"
       },
       "googleServicesFile": "./google-services.json",
-      "versionCode": 4
+      "versionCode": 5
     },
     "web": {
       "favicon": "./assets/favicon.png"
