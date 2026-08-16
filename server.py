@@ -1988,6 +1988,13 @@ async def push_native_register(request: Request):
     return push.register_native(b.get("token", ""), b.get("platform", "android"))
 
 
+@app.get("/api/push/status")
+async def push_status():
+    """Which half of push is broken: registration, or delivery?"""
+    import push
+    return push.status()
+
+
 @app.post("/api/push/test")
 async def push_test():
     """Fire a test notification. Deliberately a READ-token action.

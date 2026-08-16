@@ -163,6 +163,52 @@ def register_native(token: str, platform: str = "android") -> dict:
     return {"ok": True, "devices": len(toks)}
 
 
+def status() -> dict:
+    """What is actually registered, and can the server actually send?
+
+    Written while native push had been 'not working' for days with no way to
+    tell WHICH half was broken — the phone never registering, or the server
+    unable to deliver. Those need opposite fixes, and guessing between them
+    wasted more time than this endpoint took to write.
+
+    It mints a real FCM access token rather than just checking the variable is
+    set: a service-account key from the wrong project, or with the Cloud
+    Messaging API disabled, is present-but-useless and looks identical from the
+    outside.
+    """
+    out = {
+        "web": {"configured": configured(), "subs": len(_load())},
+        "native": {"devices": [], "fcm": {}},
+    }
+    for t in _load_native():
+        tok = t.get("token", "")
+        out["native"]["devices"].append({          # never echo a whole token
+            "platform": t.get("platform"),
+            "added": t.get("added"),
+            "token_tail": tok[-8:] if tok else None,
+            "token_len": len(tok),
+        })
+    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        out["native"]["fcm"] = {"configured": False,
+                                "detail": "FCM_SERVICE_ACCOUNT_JSON is not set"}
+        return out
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request as GRequest
+        info = json.loads(raw)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
+        creds.refresh(GRequest())                  # the real test
+        out["native"]["fcm"] = {"configured": True, "credentials_valid": True,
+                                "project_id": info.get("project_id"),
+                                "client_email": info.get("client_email")}
+    except Exception as e:
+        out["native"]["fcm"] = {"configured": True, "credentials_valid": False,
+                                "detail": f"{type(e).__name__}: {e}"[:300]}
+    return out
+
+
 def send_native(title: str, body: str) -> int:
     """Deliver via FCM v1. Returns how many devices were reached.
 
