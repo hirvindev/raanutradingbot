@@ -1635,13 +1635,15 @@ async def stocks_market_movers(top: int = 10):
 @app.get("/api/scan/stream")
 async def scan_stream():
     """
-    SSE endpoint — scans the curated universe with BOTH S1 (pullback) and S2
-    (VCP breakout) strategies and streams qualifying stocks tagged with which
-    strategy surfaced them. A ticker can appear twice if it passes both.
+    SSE endpoint — scans the curated universe with ALL THREE strategies (S1
+    pullback, S2 breakout, S3 leader dip) and streams qualifying stocks tagged
+    with which engine surfaced them. A ticker can appear more than once if it
+    passes several: those are different setups, not duplicates.
     """
     from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
     from strategy import score_from_df, batch_download, benchmark_return_3m
     from strategy2 import score_from_df_s2
+    from strategy3 import score_from_df_s3
 
     async def generator():
         import json
@@ -1715,6 +1717,22 @@ async def scan_stream():
                         mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
                     r2["cap_label"] = _cap_label(mc_val)
                     yield f"data: {json.dumps(r2)}\n\n"
+                    emitted += 1
+
+                # S3: Leader Dip. Absent from this stream since S3 was written —
+                # the browser scanner has only ever shown S1 and S2, so the one
+                # strategy profitable in BOTH halves of the backtest was
+                # invisible on the screen used to eyeball candidates. Same
+                # omission that kept it out of the pre-market alerts.
+                r3 = score_from_df_s3(ticker, df, bench_ret_3m=bench)
+                if r3.get("ok") and r3.get("leader_dip") and r3.get("score", 0) >= 60:
+                    r3["strategy"] = "s3"
+                    r3["total"] = total
+                    r3["name"] = get_ticker_name(ticker)
+                    if not mc_fetched:
+                        mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
+                    r3["cap_label"] = _cap_label(mc_val)
+                    yield f"data: {json.dumps(r3)}\n\n"
                     emitted += 1
 
         yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
@@ -1980,6 +1998,19 @@ async def push_native_register(request: Request):
     import push
     b = await request.json()
     return push.register_native(b.get("token", ""), b.get("platform", "android"))
+
+
+@app.get("/api/notifications")
+async def notifications():
+    """Alerts from the last NOTIF_RETAIN_HOURS (default 48), newest first.
+
+    Exists because a tapped notification is gone, and a trade signal is the
+    wrong thing to lose — it carried the entry, stop and reasoning.
+    """
+    import push
+    items = push.history()
+    return {"items": items, "count": len(items),
+            "retain_hours": push.NOTIF_RETAIN_HOURS}
 
 
 @app.get("/api/push/status")

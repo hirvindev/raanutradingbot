@@ -572,6 +572,15 @@ details .inner{padding:0 18px 16px}
   .chip,.btn{padding:10px 14px;min-height:40px}
   .bar{gap:6px}
 }
+  .alertlist{padding:4px 0}
+  .alertitem{padding:13px 16px;border-bottom:1px solid var(--line2)}
+  .alertitem:last-child{border-bottom:0}
+  .alertitem .at{font-weight:650;color:var(--head);font-size:14.5px}
+  .alertitem .aw{font:400 11.5px/1.5 var(--mono);color:var(--muted);margin-top:2px}
+  /* Monospace + pre-wrap: the alert body is column-aligned text, and a
+     proportional font throws that alignment away. */
+  .alertitem .ab{font:400 12.5px/1.6 var(--mono);color:var(--text);
+                 margin-top:7px;white-space:pre-wrap;word-break:break-word}
 </style>
 
 <div id="dayBar"><span class="lbl">Day&#39;s P&amp;L</span><b id="dayBarV">—</b></div>
@@ -595,6 +604,7 @@ details .inner{padding:0 18px 16px}
       <a data-p="dash" class="on"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></i><span class="lb">Dashboard</span></a>
       <a data-p="orders"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></i><span class="lb">Orders</span></a>
       <a data-p="signals"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V9M10 18V5M16 18v-6M22 18v-9"/></svg></i><span class="lb">Signals</span></a>
+      <a data-p="alerts"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10.3 21a2 2 0 003.4 0"/></svg></i><span class="lb">Alerts</span></a>
       <a data-p="strategy"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></i><span class="lb">Strategy</span></a>
       <a data-p="logs"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></i><span class="lb">Logs</span></a>
     </nav>
@@ -676,8 +686,8 @@ details .inner{padding:0 18px 16px}
     <div class="prog" id="prog"><i></i></div>
     <div class="card scroll cards">
       <table>
-        <thead><tr><th>Instrument</th><th>Score</th><th>Price</th><th>RSI</th><th>1M</th><th>3M</th><th>vs SPY</th><th>Signal</th></tr></thead>
-        <tbody id="sig"><tr><td class="empty" colspan="8">Run a scan to see candidates</td></tr></tbody>
+        <thead><tr><th>Instrument</th><th>Strategy</th><th>Score</th><th>Price</th><th>RSI</th><th>1M</th><th>3M</th><th>vs SPY</th><th>Signal</th></tr></thead>
+        <tbody id="sig"><tr><td class="empty" colspan="9">Run a scan to see candidates</td></tr></tbody>
       </table>
     </div>
     <div class="card">
@@ -691,6 +701,19 @@ details .inner{padding:0 18px 16px}
   </section>
 
   <!-- ─────────── STRATEGY ─────────── -->
+  <!-- ─────────── ALERTS ─────────── -->
+  <section class="page" id="p-alerts">
+    <div class="card">
+      <div class="ch">
+        <h2>Alerts <span class="sub" id="alertcount"></span></h2>
+        <span class="sub">kept 48 hours</span>
+      </div>
+      <!-- A tapped notification is gone, and a trade signal is the wrong thing
+           to lose: it carried the entry, stop and reasoning. This is the copy. -->
+      <div id="alerts" class="alertlist"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
   <section class="page" id="p-strategy">
     <h2>Budgets <em>capital and attempts, per strategy</em></h2>
     <div class="card" id="budgets"><div class="empty">Loading…</div></div>
@@ -788,6 +811,19 @@ const sof = o => STRAT[(o.strategy||'').toLowerCase()] ? (o.strategy||'').toLowe
 // Strategy groups sort in strategy order, not alphabetically; anything
 // unrecognised (including untagged) sorts last. Used by both order views.
 const SORDER = ['s1','s2','s3'];
+// Positions list in CONVICTION order, not label order: S3 is the only strategy
+// profitable in both halves of the backtest, and it is already what the trade
+// loop runs first and gives the largest cash share to. Showing it first keeps
+// the screen agreeing with how the money is actually allocated.
+const CONVICTION = ['s3','s1','s2'];
+// Strategy chip for a scan candidate. The stream already tags every candidate
+// with which engine surfaced it — the table simply never showed it, so two rows
+// for the same ticker (it can pass S1 and S2 both) looked like a duplicate
+// rather than two different setups.
+const stag = k => { const m = STRAT[(k||'').toLowerCase()];
+  return m ? `<span class="tag" style="color:${m.c};border-color:${m.c}">${m.s}</span>`
+           : '<span class="tag mut">—</span>'; };
+const crank = p => { const i = CONVICTION.indexOf(sof(p)); return i < 0 ? 99 : i; };
 // Instrument cell: company name leads, ticker underneath. get_ticker_name()
 // falls back to the symbol when Alpaca has no name for it, so guard against
 // rendering the ticker twice.
@@ -826,15 +862,61 @@ function go(p){
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
 el('clearLog').onclick = ()=>{ el('log').innerHTML=''; };
 
+/* Alerts: notifications from the last 48h. Android drops a notification the
+
+   moment it is tapped, and a trade signal is the wrong thing to lose — it
+
+   carried the entry, the stop and the reasoning. This is the copy. The body
+
+   renders as pre-wrapped monospace because it is column-aligned text. */
+
+const escA = t => String(t==null?'':t).replace(/[&<>]/g,
+
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function renderAlerts(){
+
+  const box = el('alerts'); if(!box) return;
+
+  const items = S.alerts || [];
+
+  el('alertcount').textContent = items.length ? items.length+' in 48h' : '';
+
+  if(!items.length){ box.innerHTML =
+
+    '<div class="empty">No alerts in the last 48 hours</div>'; return; }
+
+  box.innerHTML = items.map(a=>{
+
+    const when = new Date(a.ts).toLocaleString(undefined,
+
+      {weekday:'short', hour:'2-digit', minute:'2-digit'});
+
+    return `<div class="alertitem">
+
+      <div class="at">${escA(a.title)}</div>
+
+      <div class="aw">${when}</div>
+
+      <div class="ab">${escA(a.body)}</div>
+
+    </div>`;
+
+  }).join('');
+
+}
+
+
 /* ── data ──────────────────────────────────────────────── */
 async function load(){
-  const [acct, pos, health, cmp, orders, auto, exit] = await Promise.all([
+  const [acct, pos, health, cmp, orders, auto, exit, alerts] = await Promise.all([
     j('/api/account/cash'), j('/api/portfolio'), j('/api/health'),
     j('/api/strategy/compare'), j('/api/history/orders?limit=500'),
-    j('/api/auto/status'), j('/api/exit-config')
+    j('/api/auto/status'), j('/api/exit-config'), j('/api/notifications')
   ]);
   S.pos=pos||[]; S.cfg=(health&&health.config)||{}; S.cmp=cmp||{}; S.health=health||{};
   S.orders=Array.isArray(orders)?orders:[]; S.exit=exit||{}; S.auto=auto||{};
+  S.alerts=(alerts&&alerts.items)||[]; renderAlerts();
 
   if(health) el('mode').innerHTML = `<span class="dot"></span>${(health.mode||'').toUpperCase()}`;
   if(auto) el('engine').innerHTML =
@@ -884,11 +966,13 @@ function renderPos(){
   el('poscount').textContent = S.pos.length ? S.pos.length+' open' : '';
   const b = el('pos');
   if(!S.pos.length){ b.innerHTML='<tr><td class="empty" colspan="9">No open positions</td></tr>'; return; }
-  // Flat and sorted by size. No per-strategy block headers: the Strategy
-  // column already carries that, and grouping rows under an "Untagged" heading
-  // is what made a bulk close-all action look reasonable.
+  // Grouped by strategy in conviction order (S3, S1, S2), largest first within
+  // each. Still no block headers: the Strategy column already carries the
+  // label, and grouping rows under an "Untagged" heading is what made a bulk
+  // close-all action look reasonable.
   b.innerHTML = [...S.pos]
-    .sort((x,y)=>(y.currentPrice||y.averagePrice)*y.quantity-(x.currentPrice||x.averagePrice)*x.quantity)
+    .sort((x,y)=> crank(x)-crank(y)
+               || (y.currentPrice||y.averagePrice)*y.quantity-(x.currentPrice||x.averagePrice)*x.quantity)
     .map(p=>{
       const ltp=p.currentPrice??p.averagePrice, pl=p.ppl??(ltp-p.averagePrice)*p.quantity;
       const ch=((ltp-p.averagePrice)/p.averagePrice)*100, val=ltp*p.quantity;
@@ -1411,7 +1495,7 @@ async function renderOutcomes(){
 el('scanBtn').onclick = () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
-  el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="8">Screening…</td></tr>';
+  el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="9">Screening…</td></tr>';
   const res=[]; let total=0, done=0;
   // EventSource cannot set headers, so the READ token goes in the query here.
   // It is the only place a token rides in a URL; see _presented_token() in
@@ -1422,13 +1506,14 @@ el('scanBtn').onclick = () => {
   es.onmessage = e => {
     let d; try{ d=JSON.parse(e.data); }catch(_){ return; }
     if(d.failed){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
-      body.innerHTML=`<tr><td class="empty down" colspan="8">Scan failed — ${d.error}</td></tr>`; return; }
+      body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${d.error}</td></tr>`; return; }
     if(d.status==='downloading'){ total=d.total||0; el('scanStat').textContent=`Screening ${total}`; return; }
     if(d.progress){ done=d.progress; if(total) bar.style.width=Math.min(100,done/total*100)+'%'; return; }
     if(d.done){
       res.sort((a,b)=>b.score-a.score);
       body.innerHTML = res.length ? res.map(r=>`<tr>
           <td data-label="Instrument"><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
+          <td data-label="Strategy">${stag(r.strategy)}</td>
           <td data-label="Score" class="pri num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
           <td data-label="Price" class="num">${money(r.price||0)}</td>
           <td data-label="RSI" class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
@@ -1436,7 +1521,7 @@ el('scanBtn').onclick = () => {
           <td data-label="3M" class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
           <td data-label="vs SPY" class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
           <td data-label="Signal" class="reason mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
-        : '<tr><td class="empty" colspan="8">Nothing in a confirmed uptrend right now</td></tr>';
+        : '<tr><td class="empty" colspan="9">Nothing in a confirmed uptrend right now</td></tr>';
       finish(`${d.scanned||total} screened · ${res.length} candidates`);
       logLine(`Scan done — ${d.scanned||total} screened, ${res.length} candidates`,'ok');
       return;

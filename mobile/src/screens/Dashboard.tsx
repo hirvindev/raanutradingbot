@@ -119,8 +119,19 @@ export default function Dashboard({ refreshing, onRefresh, data }: any) {
       <H2 sub={pos.length ? undefined : 'nothing open'}>Positions</H2>
       <Card>
         {pos.length === 0 && <Muted style={{ padding: 20, textAlign: 'center' }}>No open positions</Muted>}
+        {/* Conviction order (S3, S1, S2), largest first within each — the same
+            order the trade loop runs and allocates cash in. S3 is the only
+            strategy profitable in both halves of the backtest, so it leads. */}
         {[...pos]
-          .sort((a, b) => (b.currentPrice || b.averagePrice) * b.quantity - (a.currentPrice || a.averagePrice) * a.quantity)
+          .sort((a, b) => {
+            const rank = (p: any) => {
+              const i = ['s3', 's1', 's2'].indexOf((sof(p) || '').toLowerCase());
+              return i < 0 ? 99 : i;                    // untagged sorts last
+            };
+            return rank(a) - rank(b)
+              || (b.currentPrice || b.averagePrice) * b.quantity
+               - (a.currentPrice || a.averagePrice) * a.quantity;
+          })
           .map((p, i) => {
             const ltp = p.currentPrice ?? p.averagePrice;
             const pl = p.ppl ?? (ltp - p.averagePrice) * p.quantity;

@@ -302,8 +302,52 @@ def send_native(title: str, body: str, sticky: bool = False) -> int:
 
 
 # ---------- event helpers (call these, not send()) ----------
+LOG_PATH = state_path("notifications.json")
+NOTIF_RETAIN_HOURS = float(os.getenv("NOTIF_RETAIN_HOURS", "48"))
+
+
+def _record(title: str, body: str, tag: str):
+    """Keep every alert for NOTIF_RETAIN_HOURS so it survives being dismissed.
+
+    Tapping a notification opens the app and Android drops it, which is fine for
+    a reminder and not fine for a trade signal — the alert carried the entry,
+    stop and reasoning, and that was the only copy. This is the copy.
+
+    Deliberately bounded, not a permanent archive: after two days a signal is
+    history the Signals tab and picks_log already cover better. A log that only
+    grows is one more thing to prune later.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        items = []
+        if LOG_PATH.exists():
+            items = json.loads(LOG_PATH.read_text()).get("items", [])
+        items.insert(0, {"ts": now.isoformat(), "title": title,
+                         "body": body, "tag": tag})
+        cutoff = now.timestamp() - NOTIF_RETAIN_HOURS * 3600
+        items = [i for i in items
+                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff][:200]
+        LOG_PATH.write_text(json.dumps({"items": items}, indent=2))
+    except Exception as e:
+        log.warning(f"[push] could not record notification: {e}")
+
+
+def history() -> list:
+    """Alerts from the retention window, newest first."""
+    try:
+        if not LOG_PATH.exists():
+            return []
+        cutoff = datetime.now(timezone.utc).timestamp() - NOTIF_RETAIN_HOURS * 3600
+        return [i for i in json.loads(LOG_PATH.read_text()).get("items", [])
+                if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff]
+    except Exception:
+        return []
+
+
 def _fanout(title: str, body: str, tag: str, sticky: bool = False):
     """One call, every registered client — browser and native alike."""
+    _record(title, body, tag)          # before sending: a delivery failure
+                                       # must not also lose the record of it
     web = send(title, body, tag=tag, sticky=sticky)
     nat = send_native(title, body, sticky=sticky)
     log.info(f"[push] {tag}: {web.get('sent', 0)} web, {nat} native")
