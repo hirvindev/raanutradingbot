@@ -1670,13 +1670,13 @@ async function toggleBell(){
   }
   paintBell();
 }
-/* The native app owns notifications now. Leaving this button live meant the
-   web channel could be re-subscribed by accident, putting two apps back on the
-   same events — and a web push always opens the TWA, not the app in use. */
-el('bellBtn').onclick = () => alert(
-  'Notifications are handled by the RaanuBot app on your phone.\n\n' +
-  'Open the app, go to Logs, and use "Turn on notifications" there.');
-el('bellBtn').style.opacity = '0.5';
+/* Two channels by design: this one for the desktop browser, the native app for
+   the phone. They do not overlap because they run on different devices — the
+   problem earlier was subscribing BOTH on the same phone, where every event
+   arrived twice and a web push opened the TWA rather than the app in use.
+   Subscribing this on a phone will reintroduce that; use the app there. */
+el('bellBtn').onclick = toggleBell;
+paintBell();
 paintBell();
 
 /* ── theme ─────────────────────────────────────────────── */
