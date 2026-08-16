@@ -2038,9 +2038,15 @@ async def push_test():
                           "3M momentum +28.4%"]}
     title, body = push.format_signal(sample, "s1")
     title += " (sample)"
-    web = push.send(title, body, tag="test", sticky=True)
-    nat = push.send_native(title, body, sticky=True)
-    return {**web, "native_sent": nat, "sent": web.get("sent", 0) + nat}
+    # Through _fanout, not send()/send_native() directly: a self-test that
+    # skips half the delivery path proves less than it appears to. It was
+    # bypassing _record(), so tests never showed up in Alerts — exactly the
+    # thing the test is meant to demonstrate.
+    push._fanout(title, body, "test", sticky=True)
+    st = push.status()
+    return {"sent": len(st["native"]["devices"]) + st["web"]["subs"],
+            "native_sent": len(st["native"]["devices"]),
+            "web_subs": st["web"]["subs"], "recorded": True}
 
 
 @app.get("/api/picks/outcomes")
