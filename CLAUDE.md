@@ -1,6 +1,30 @@
 # RaanuTradingBot — Project Context for Claude
 > Paste this file at the start of every new Claude chat to restore full context.
-> Last updated: August 2026
+> Last updated: 16 August 2026
+
+---
+
+## ⛔ This is a PERSONAL project
+
+Nothing here is connected to any employer, and no employer's tooling,
+credentials, accounts or conventions may be used in it.
+
+**The global `~/.claude/CLAUDE.md` describes a Delivery Hero internal tool
+(Planning Capacity Tool: React/MUI, JIRA, Google Sheets, Slack). None of it
+applies here.** It loads into every session regardless, so treat it as
+inapplicable background rather than instructions — this file wins on every
+point of conflict.
+
+Concretely, in this project:
+
+- Never touch Delivery Hero credentials, service accounts, or repos. Two
+  unrelated `service-account*.json` files live in `~/Downloads` and are
+  **off-limits**.
+- The Google account for this project is the personal one (Firebase project
+  `raanubot`, Railway). The `gcloud` CLI on this machine is authenticated as
+  the **work** account and therefore cannot — and must not — administer it.
+- Secrets live in `~/.secrets/` (mode 700, files 600) and in Railway
+  variables. Not in `~/Downloads`, not in the repo. `.env` is gitignored.
 
 ---
 
@@ -10,6 +34,7 @@
 **Target:** +4–5% monthly returns, max 5% stop loss  
 **Owner:** Archana Arjunraj (dev: Prakash Rajamani)  
 **Local URL:** http://localhost:8000  
+**Production:** https://raanu.up.railway.app (Railway project `fearless-abundance`)  
 **Platform:** macOS (python3, not python)
 
 ---
@@ -22,7 +47,9 @@
 ├── strategy.py            ← Indicator engine (RSI, MACD, BB, EMA) + batch_download
 ├── scanner.py             ← Momentum scanner (42 US-listed tickers, batch yfinance)
 ├── alpaca_data.py         ← Alpaca market data helper (skips non-US tickers)
-├── notifier.py            ← Twilio WhatsApp alerts (pre-trade + post-trade)
+├── notifier.py            ← Telegram + Twilio WhatsApp alerts (pre/post-trade)
+├── push.py                ← Web push (VAPID) + native push (FCM v1), one fanout
+├── picks_log.py           ← Records every pick + its 1/5/20-day return vs SPY
 ├── profit_monitor.py      ← Exit engine (ATR-scaled stop / trailing stop)
 ├── strategy2.py           ← S2 breakout engine (Minervini stage-2 / VCP)
 ├── strategy3.py           ← S3 leader-dip engine (Bollinger + MACD mean reversion)
@@ -30,13 +57,27 @@
 ├── kelly.py               ← Kelly Criterion position sizing (Quarter Kelly)
 ├── datadir.py             ← Resolves the persistent state dir (volume / local / tmp)
 ├── RaanuTradingBot.html   ← Main dashboard (single-file, served at localhost:8000)
+├── sw.js                  ← Service worker — NEVER caches /api/**, see PWA note
+├── manifest.webmanifest   ← PWA manifest (installable from Chrome/Safari)
+├── icons/                 ← App icons: web, PWA, TWA, native
+├── mobile/                ← React Native app (Expo, package app.raanu.mobile)
+│   ├── src/api.ts         ←   read passphrase stored; trade PIN NEVER stored
+│   ├── src/push.ts        ←   FCM device-token registration
+│   └── apply-signing.sh   ←   re-applies release signing (prebuild wipes android/)
+├── twa/                   ← Bubblewrap TWA wrapper (Play Store)
+├── Procfile               ← Railway entrypoint
 ├── start.sh               ← Start server on Mac
 ├── setup.sh               ← One-time Mac setup
 ├── requirements.txt       ← Python dependencies
 ├── .env                   ← API keys (NOT in GitHub)
-├── .gitignore             ← Excludes .env, __pycache__, *.pyc
+├── .gitignore             ← Excludes .env, keystores, __pycache__, *.pyc
 └── CLAUDE.md              ← This file
 ```
+
+**Not in the repo, and must stay that way:** `.env`, the two Android keystores
+(`twa/android.keystore`, `mobile/android/app/raanu-native.keystore`) and
+`~/.secrets/`. **Back the keystores up** — losing one means the Play listing
+can never be updated again.
 
 ---
 
@@ -430,6 +471,27 @@ TWILIO_AUTH_TOKEN=<secret>
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 USER_WHATSAPP=whatsapp:+919176911755
 
+# API auth — see the API Authentication section. Two secrets, not one:
+# a phone is the most losable device here, so what it carries must not
+# be able to move money. The gate is SKIPPED entirely if API_READ_TOKEN
+# is unset, logging a warning per request — a deploy must not lock the
+# owner out before the variable exists, but must not go quiet either.
+API_READ_TOKEN=<memorable passphrase — every /api/** request>
+TRADE_PIN=<additionally required for every non-GET /api/**>
+ALLOWED_ORIGINS=<comma-separated; never "*" once tokens are in play>
+
+# Notifications
+TELEGRAM_BOT_TOKEN=<secret>
+TELEGRAM_CHAT_ID_S1=<per-strategy chats>
+VAPID_PUBLIC_KEY=<web push>
+VAPID_PRIVATE_KEY=<secret>
+FCM_SERVICE_ACCOUNT_JSON=<base64 of the service-account JSON, ONE line>
+PUSH_SCANS=1                # 0 disables the daily scan digest on push
+
+# Persistence — REQUIRED on Railway. Without it every module falls back
+# to /tmp, which is wiped on redeploy, taking the trade log with it.
+DATA_DIR=/data
+
 # Trading parameters
 # Trade budget — PER STRATEGY (capital and attempts follow conviction).
 # S3 is the only strategy profitable in both halves of the backtest, so it gets
@@ -444,6 +506,11 @@ PER_TRADE_MAX_USD_S1=1000
 PER_TRADE_MAX_USD_S2=100
 PER_TRADE_MAX_USD_S3=5000
 CASH_RESERVE_PCT=30         # keep 30% of EQUITY liquid; see below
+# Per-strategy slice of the deployable budget. Without these, whichever
+# strategy ran first could spend the whole account — and once did.
+CASH_SHARE_S1=30
+CASH_SHARE_S2=20
+CASH_SHARE_S3=50            # highest conviction; the loop also runs s3 first
 MIN_SIGNAL_SCORE=60
 PROFIT_CHECK_SEC=300
 
@@ -597,6 +664,53 @@ localhost, or use a GET, unless you mean it.
 
 ---
 
+## 🔔 Notifications — notifier.py + push.py
+
+Three channels, deliberately. `push._fanout()` sends every event to **both**
+push transports; Telegram is separate and carries more.
+
+| | Telegram | Web push (desktop) | Native app (phone) |
+|---|---|---|---|
+| BUY / EXIT / ERROR | ✅ | ✅ | ✅ |
+| Daily scan digest | ✅ | ✅ | ✅ |
+| Quiet days ("no signals") | ✅ | ❌ | ❌ |
+
+**Web is for the desktop browser, the app is for the phone — one channel per
+device.** Subscribing both on the same handset means two notifications per
+event, and tapping either opens the TWA rather than the native app, because a
+web push belongs to the service worker that registered it. This was hit live;
+the comment on the bell handler in the dashboard says so.
+
+**Scan digests are ONE notification, never one per strategy, and empty scans
+send nothing.** A channel that fires on everything gets dismissed by reflex,
+and then the stop-out gets dismissed with it. `PUSH_SCANS=0` disables them.
+
+### FCM setup (native)
+- Firebase project **`raanubot`**, package **`app.raanu.mobile`**, sender
+  **141291543634**. `google-services.json` must match the package or token
+  retrieval fails.
+- **`FCM_SERVICE_ACCOUNT_JSON` should be base64, on one line.** The
+  service-account `private_key` is a multi-line PEM; pasting it raw into a
+  dashboard variable box mangles the newlines. This actually happened — the
+  variable held *only the PEM*, 1733 chars starting with `-`, so push was dead
+  for days while looking configured. `_fcm_info()` accepts both forms now.
+- Generate: `base64 -i ~/.secrets/raanubot-firebase-adminsdk-*.json | tr -d '\n'`
+
+### `GET /api/push/status` — use this first
+Reports web subs, native devices (token tails only) and whether FCM
+credentials actually **mint a token**, not merely whether the variable is set.
+A key from the wrong project, or with Cloud Messaging disabled, is
+present-but-useless and looks identical from outside.
+
+It exists because "push is broken" was ambiguous between *the phone never
+registered* and *the server cannot deliver* — opposite fixes. It was the
+second. Registration had worked since day one.
+
+⚠️ Tokens under 100 chars are rejected at registration. A 5-char `probe` from
+testing was stored permanently and failed on every send until pruned.
+
+---
+
 ## 🌐 Alpaca API
 | Mode | Broker Base URL |
 |------|----------------|
@@ -662,6 +776,12 @@ git push
 - [x] Live Signals Execute button (calls `/api/orders/buy` with notional)
 - [x] Trade log persisted to `trades_log.json` — now records SELLs with realized P&L
 - [x] Walk-forward backtester with stop-rule sweeps and a both-halves stability check
+- [x] Token-gated API (read passphrase + separate trade PIN, deny-by-method)
+- [x] Mobile layout, PWA, TWA, and a native React Native app (`mobile/`)
+- [x] Push on three channels — Telegram, web (desktop), native app (phone)
+- [x] Pick outcome tracking with a SPY baseline (`picks_log.py`)
+- [x] Per-strategy cash shares, so execution order no longer decides allocation
+- [x] Strategy stamped into `client_order_id` — attribution survives a log wipe
 
 ## 🔲 Pending / Next Steps
 - [ ] **Beat the benchmark.** S3 is the first strategy to survive the
@@ -672,9 +792,16 @@ git push
 - [ ] `PER_TRADE_MAX_USD=2500` still binds on every candidate, so per-trade risk
       is compressed but not equalised — needs ~$10k for `MAX_POSITION_PCT` to
       become the real limit
-- [ ] Dashboard sell button for open positions
+- [ ] Dashboard sell button for open positions (the native app has one —
+      long-press a position, PIN prompted per action and never stored)
 - [ ] News sentiment scoring (currently no real data source)
-- [ ] Mobile responsive layout
+- [ ] **Play Store: internal testing only.** The app is a monitor for one
+      Alpaca account behind a passphrase, so a public download is a lock screen
+      nobody can pass — "public" needs a signals-only mode that does not exist.
+      Google then adds its own gate: individual accounts created after Nov 2023
+      need 12 testers × 14 continuous days before production. And a public app
+      recommending stocks is regulated as investment advice in most
+      jurisdictions, India included. **Unresolved — settle before building.**
 
 ---
 
@@ -696,6 +823,35 @@ Resolution order: `$DATA_DIR` → project dir (local dev, detected by `.env`) �
 
 Check it with `GET /api/health` → `state.data_dir` / `state.persistent`.
 If `data_dir` reads `/tmp`, the write test failed and state is ephemeral.
+
+---
+
+## 🏷 Strategy Attribution — the broker is the record
+
+Every BUY stamps its strategy into Alpaca's **`client_order_id`**:
+
+    raanu-s3-NVDA-20260816T143022123
+
+Alpaca keeps that for the life of the order, so **the broker is the durable
+record and `trades_log.json` is a cache**. Before this, the tag lived only in
+the log — so when the log was still on `/tmp` and Railway wiped it, the answer
+to "which strategy bought this?" was destroyed permanently. **BAC, OKTA and
+ROKU are still unattributable for exactly that reason and cannot be
+recovered**; Alpaca recorded the order, never the reason for it.
+
+⚠️ **Unattributable means `"unknown"`, never `"s1"`.** `strategy_for()` used to
+return `"s1"` for positions with no BUY on record — a guess presented as a
+fact. The dashboard showed UNTAGGED for the same position while the exit engine
+treated it as S1, and `_record_exit()` then **wrote `"s1"` into the log on
+close**, so an unattributable trade's P&L permanently joined S1's track
+record — which is what `kelly.py` sizes every future position from. The guess
+did not stay cosmetic.
+
+`"unknown"` is safe because no `stop_atr_mult_unknown` or
+`profit_ladder_unknown` key exists, so both fall through to the shared
+defaults, which are identical to the S1 values. Same 2.5×ATR stop, same
+ladder — label only. Verify that equivalence before adding any per-strategy
+key, or "unknown" silently starts meaning something.
 
 ---
 
@@ -730,7 +886,24 @@ If `data_dir` reads `/tmp`, the write test failed and state is ephemeral.
 ---
 
 ## 💬 How to Use This File
-At the start of a new Claude chat, paste this file and say:
-> "Here is my CLAUDE.md project context. Let's continue building RaanuTradingBot."
+
+**You no longer need to paste it.** Claude Code loads `CLAUDE.md` from the
+project root automatically at the start of every session in this directory.
+
+Two things to remember when reading it:
+
+1. **The global `~/.claude/CLAUDE.md` loads too, and it is about an unrelated
+   Delivery Hero tool.** This file overrides it on every point of conflict —
+   see the banner at the top.
+2. **Keep the evidence, not just the conclusions.** Most warnings here exist
+   because something failed in production and cost real time: the scheduler
+   that never fired, the 100%-deployed account, the fixed stop tighter than
+   daily ATR, the strategy tag that lived in one wipeable file. A rule without
+   its reason gets "simplified" away by the next person, including a future
+   Claude.
+
+The single most important line in the file: **no strategy has beaten SPY
+buy-and-hold in any test.** S3 is the only one profitable in both halves.
+Stay on paper.
 
 
