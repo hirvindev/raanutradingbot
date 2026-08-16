@@ -1423,7 +1423,14 @@ function nextScan(){
         const when = mins<60 ? mins+' min'
                    : mins<1440 ? Math.floor(mins/60)+'h '+(mins%60)+'m'
                    : Math.round(mins/1440)+'d';
-        return {label:String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+' ET', in:when};
+        // Date as well as time: "in 21h 34m" alone leaves you counting forward
+        // to work out whether that lands tomorrow or after the weekend.
+        // Today/Tomorrow are named because that is how you actually read it;
+        // anything further gets the weekday and date.
+        const dayName = d===0 ? 'today' : d===1 ? 'tomorrow'
+          : t.toLocaleDateString(undefined,{weekday:'short', day:'numeric', month:'short'});
+        return {label:String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+' ET',
+                in:when, day:dayName};
       }
     }
   }
@@ -1434,7 +1441,7 @@ function renderPicks(){
   const box=el('picks'); const n=nextScan();
   let html = `<div class="scanhead">
     <div><span class="mut">Next scan</span> <b>${n?n.label:'—'}</b>
-         <span class="mut">in ${n?n.in:'—'}</span></div>
+         <span class="mut">${n?n.day:''} · in ${n?n.in:'—'}</span></div>
     <div class="mut sh2">Runs 09:35 and 11:00 ET, weekdays</div>
   </div>`;
 
