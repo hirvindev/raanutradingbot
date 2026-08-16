@@ -435,6 +435,153 @@ def kelly_fraction(win_rate: float, payoff: float) -> float:
     return (payoff * win_rate - (1 - win_rate)) / payoff
 
 
+TRADING_DAYS = 252
+
+
+def _benchmark_frame(years: int):
+    """SPY OHLCV for the window, for the risk maths. Cached by yfinance."""
+    try:
+        from strategy import batch_download
+        return batch_download(["SPY"], period=f"{years + 1}y").get("SPY")
+    except Exception as e:
+        print(f"  (benchmark unavailable for risk stats: {e})")
+        return None
+
+
+def risk_stats(equity_curve: list, bench: "pd.DataFrame",
+               trades: list = None, risk_free_pct: float = 4.0) -> dict:
+    """Risk-ADJUSTED performance: alpha, beta, Sharpe, Sortino, exposure.
+
+    Total return alone cannot tell skill from leverage. A strategy that returns
+    less than the index while carrying half its risk is not losing — it is
+    under-deployed, and the fix is size, not a new strategy. That distinction is
+    invisible in every number this backtester printed before now, which is why
+    the file has a comment at simulate() saying "the improvement is just beta"
+    and no code anywhere that measures beta.
+
+    - beta   : sensitivity to the index. 1.0 moves with it, 0.5 half as much.
+    - alpha  : annualised return NOT explained by that exposure (Jensen's).
+               This is the only number here that claims skill.
+    - Sharpe : excess return per unit of total volatility.
+    - Sortino: same, but punishing downside only — upside volatility is not a
+               risk, and Sharpe treats it as one.
+    - exposure: share of days holding anything. A strategy in cash 60% of the
+               time is not comparable to buy-and-hold until this is known.
+
+    risk_free_pct is annual and defaults to 4%, roughly US T-bills across the
+    2023–2026 window. Passing 0 (the common shortcut) inflates every Sharpe.
+    """
+    import numpy as np
+
+    if not equity_curve or len(equity_curve) < 30:
+        return {"error": "not enough equity history"}
+
+    dates = [pd.Timestamp(d) for d, _ in equity_curve]
+    eq = np.array([v for _, v in equity_curve], dtype=float)
+
+    # Align the benchmark to the strategy's own calendar — comparing series with
+    # different trading days silently corrupts beta.
+    bc = bench["Close"].reindex(pd.DatetimeIndex(dates)).ffill()
+    bp = bc.to_numpy(dtype=float)
+    ok = ~np.isnan(bp) & (eq > 0)
+    eq, bp = eq[ok], bp[ok]
+    if len(eq) < 30:
+        return {"error": "benchmark did not align"}
+
+    r_s = np.diff(eq) / eq[:-1]
+    r_b = np.diff(bp) / bp[:-1]
+    n = len(r_s)
+    years = n / TRADING_DAYS
+    rf_daily = (1 + risk_free_pct / 100) ** (1 / TRADING_DAYS) - 1
+
+    cagr   = ((eq[-1] / eq[0]) ** (1 / years) - 1) * 100 if years > 0 else 0.0
+    b_cagr = ((bp[-1] / bp[0]) ** (1 / years) - 1) * 100 if years > 0 else 0.0
+    vol    = float(np.std(r_s, ddof=1)) * np.sqrt(TRADING_DAYS) * 100
+    b_vol  = float(np.std(r_b, ddof=1)) * np.sqrt(TRADING_DAYS) * 100
+
+    var_b = float(np.var(r_b, ddof=1))
+    beta  = float(np.cov(r_s, r_b, ddof=1)[0][1] / var_b) if var_b > 0 else 0.0
+    # Jensen's alpha, annualised: the daily return left over once the index
+    # exposure implied by beta is subtracted.
+    alpha_d = float(np.mean(r_s - rf_daily) - beta * np.mean(r_b - rf_daily))
+    alpha   = ((1 + alpha_d) ** TRADING_DAYS - 1) * 100
+
+    ex = r_s - rf_daily
+    sharpe = float(np.mean(ex) / np.std(ex, ddof=1) * np.sqrt(TRADING_DAYS)) \
+             if np.std(ex, ddof=1) > 0 else 0.0
+    # The BENCHMARK's Sharpe, on the same window and risk-free rate. A strategy
+    # Sharpe on its own is unreadable: 0.72 sounds respectable until the index
+    # scored 1.13 over the identical period. Positive alpha and a lower Sharpe
+    # can coexist, and that combination means the index is still the better
+    # holding — which is exactly the conclusion a lone Sharpe hides.
+    exb = r_b - rf_daily
+    b_sharpe = float(np.mean(exb) / np.std(exb, ddof=1) * np.sqrt(TRADING_DAYS)) \
+               if np.std(exb, ddof=1) > 0 else 0.0
+    down = ex[ex < 0]
+    sortino = float(np.mean(ex) / np.std(down, ddof=1) * np.sqrt(TRADING_DAYS)) \
+              if len(down) > 1 and np.std(down, ddof=1) > 0 else 0.0
+    diff = r_s - r_b
+    info = float(np.mean(diff) / np.std(diff, ddof=1) * np.sqrt(TRADING_DAYS)) \
+           if np.std(diff, ddof=1) > 0 else 0.0
+    corr = float(np.corrcoef(r_s, r_b)[0][1]) if np.std(r_s, ddof=1) > 0 else 0.0
+
+    # Exposure: share of trading days holding at least one position. Without it
+    # a low return looks like weakness when it may be idleness.
+    exposure = None
+    if trades:
+        held = set()
+        idx = {d: i for i, d in enumerate(dates)}
+        for t in trades:
+            a, b = pd.Timestamp(t.entry_date), pd.Timestamp(t.exit_date)
+            for d, i in idx.items():
+                if a <= d <= b:
+                    held.add(i)
+        exposure = len(held) / len(dates) * 100
+
+    return {
+        "years": round(years, 2),
+        "cagr": round(cagr, 2), "bench_cagr": round(b_cagr, 2),
+        "vol": round(vol, 2), "bench_vol": round(b_vol, 2),
+        "beta": round(beta, 3), "alpha": round(alpha, 2),
+        "sharpe": round(sharpe, 2), "bench_sharpe": round(b_sharpe, 2),
+        "sortino": round(sortino, 2),
+        "info_ratio": round(info, 2), "corr": round(corr, 3),
+        "exposure": round(exposure, 1) if exposure is not None else None,
+        "risk_free_pct": risk_free_pct,
+    }
+
+
+def format_risk(r: dict, label: str = "") -> str:
+    """One block, phrased so the conclusion is not left to the reader."""
+    if r.get("error"):
+        return f"  risk stats unavailable — {r['error']}"
+    L = [f"\nRISK-ADJUSTED{(' — ' + label) if label else ''}"
+         f"   ({r['years']}y, rf {r['risk_free_pct']}%)",
+         f"  CAGR        {r['cagr']:+7.2f}%   vs SPY {r['bench_cagr']:+.2f}%",
+         f"  Volatility  {r['vol']:7.2f}%   vs SPY {r['bench_vol']:.2f}%",
+         f"  Beta        {r['beta']:7.3f}    correlation {r['corr']:.3f}",
+         f"  ALPHA       {r['alpha']:+7.2f}%  <- return not explained by index exposure",
+         f"  Sharpe      {r['sharpe']:7.2f}    vs SPY {r['bench_sharpe']:.2f}"
+         f"     Sortino {r['sortino']:.2f}",
+         f"  Info ratio  {r['info_ratio']:7.2f}    (consistency of out/under-performance)"]
+    if r.get("exposure") is not None:
+        L.append(f"  Exposure    {r['exposure']:7.1f}%   of days holding anything")
+    a, be, sh, bsh = r["alpha"], r["beta"], r["sharpe"], r["bench_sharpe"]
+    if a <= 0:
+        L.append(f"  → Alpha {a:+.2f}%. Not beating what its beta of {be:.2f} alone "
+                 f"would have\n    produced. Index exposure, not skill.")
+    elif sh < bsh:
+        L.append(f"  → Alpha is positive ({a:+.2f}%) but Sharpe {sh:.2f} is BELOW the "
+                 f"index's {bsh:.2f}.\n    Both are true: it earns a little more than "
+                 f"its beta implies, and still\n    pays more risk per unit of return "
+                 f"than simply holding SPY. Buy & hold wins.")
+    else:
+        L.append(f"  → Alpha {a:+.2f}% AND Sharpe {sh:.2f} above the index's {bsh:.2f}. "
+                 f"This is the\n    first configuration that is genuinely better "
+                 f"risk-adjusted, not just different.")
+    return "\n".join(L)
+
+
 def stats(result: dict, pf: PortfolioConfig) -> dict:
     trades: list[Trade] = result["trades"]
     if not trades:
@@ -559,6 +706,10 @@ def main() -> None:
     ap.add_argument("--sizing", default="risk_pct", choices=["risk_pct", "equity_pct"])
     ap.add_argument("--risk-pct", type=float, default=1.0)
     ap.add_argument("--max-atr-pct", type=float, default=0.0)
+    ap.add_argument("--stop-atr", type=float, default=None,
+                    help="ATR multiple for the stop (default: ExitConfig default). "
+                         "The documented S3 result uses 3.0 — without this flag the "
+                         "default run tested a config nobody chose.")
     ap.add_argument("--sweep-atr", action="store_true", help="compare stop rules")
     ap.add_argument("--sweep-risk", action="store_true", help="compare sizing models")
     ap.add_argument("--sweep-ladder", action="store_true",
@@ -566,6 +717,9 @@ def main() -> None:
     ap.add_argument("--robustness", action="store_true",
                     help="split each config into first/second half to test stability")
     ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("--risk-free", type=float, default=4.0,
+                    help="annual risk-free %% for Sharpe/alpha (default 4, ~T-bills "
+                         "over this window; 0 inflates every Sharpe)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -677,12 +831,22 @@ def main() -> None:
             lbl = f"{mode} {val}%"
             print_stats(lbl, stats(simulate(sig, prices, ex, p), p))
     else:
-        ex = ExitConfig()
+        ex = ExitConfig(**({"stop_atr_mult": args.stop_atr} if args.stop_atr else {}))
         res = simulate(sig, prices, ex, pf)
         s = stats(res, pf)
         print(f"exit rule: {ex.label()}")
         print_stats(args.strategy.upper(), s)
         print(f"\n  exit reasons: {s['exit_reasons']}")
+
+        # Risk-adjusted view. Printed by default, not behind a flag: total
+        # return alone cannot separate skill from index exposure, and every
+        # conclusion drawn from this backtester so far has been drawn without it.
+        spy = _benchmark_frame(args.years)
+        if spy is not None:
+            r = risk_stats(res["equity_curve"], spy, res["trades"],
+                           risk_free_pct=args.risk_free)
+            print(format_risk(r, args.strategy.upper()))
+            s["risk"] = r
         out = CACHE_DIR / f"backtest_{args.strategy}_{datetime.now():%Y%m%d_%H%M%S}.json"
         out.write_text(json.dumps({
             "config": {"exits": asdict(ex), "portfolio": asdict(pf)},

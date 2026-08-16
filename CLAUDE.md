@@ -388,6 +388,49 @@ Two conclusions that must not be lost:
 
 ---
 
+## 📏 Risk-Adjusted Measurement — backtest.py `risk_stats()`
+
+Total return cannot separate skill from index exposure. Every conclusion in
+this file before 16 Aug 2026 was drawn without measuring that, and the file
+even carried a comment at `simulate()` saying *"the improvement is just beta"*
+with no code anywhere that computed beta.
+
+`python3 backtest.py --strategy s3 --years 3 --stop-atr 3.0` now also prints:
+
+```
+CAGR         +13.48%   vs SPY +21.38%
+Volatility    13.43%   vs SPY 15.36%
+Beta          0.496    correlation 0.567
+ALPHA         +1.39%
+Sharpe         0.72    vs SPY 1.08     Sortino 1.03
+Info ratio    -0.52
+Exposure       99.9%   of days holding anything
+```
+
+**S3 has genuinely positive alpha (+1.39%) at half the index's beta.** That is
+the first evidence in this project of anything other than levered beta — the
+strategy earns slightly more than its market exposure alone would.
+
+**And it is still worse than buy & hold.** Sharpe 0.72 against the index's
+1.08: more risk paid per unit of return. Both facts are true at once, and the
+alpha alone would have been read as a win. `format_risk()` therefore states the
+verdict rather than leaving it to the reader.
+
+Two things this killed immediately:
+
+- **"S3 is under-deployed, just size it up."** Exposure is **99.9%** — it holds
+  something on essentially every trading day. There is no idle capital to lever.
+- **The default backtest config was testing a stop nobody chose.** `ExitConfig()`
+  defaults to 2.0×ATR while the docs and live both use 2.5–3.0. At 2.0× the
+  same strategy scores **alpha −10.68%**, and a bare `--strategy s3` was
+  reporting that as the result. Hence `--stop-atr`.
+
+⚠️ `risk_free_pct` defaults to **4%** (roughly T-bills over this window).
+Passing 0, the common shortcut, inflates every Sharpe and would have made this
+comparison look far closer than it is.
+
+---
+
 ## 🔭 Scanner — scanner.py
 **Strategy-driven, not brute-force.** The scanner screens a single curated,
 liquid **quality universe** (`FALLBACK_UNIVERSE`, **472** tickers) and only
