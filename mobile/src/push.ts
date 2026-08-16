@@ -66,7 +66,10 @@ export async function enablePush(): Promise<{ ok: boolean; msg: string }> {
     const t = await Notifications.getDevicePushTokenAsync();
     token = String(t.data);
   } catch (e: any) {
-    return { ok: false, msg: 'No Firebase config in this build — push cannot register yet.' };
+    // Report what actually failed. This previously claimed "no Firebase config"
+    // for ANY exception — a cause it had not verified — which sent days of
+    // debugging at the build while the real fault was the server's credentials.
+    return { ok: false, msg: `Could not get a device token: ${e?.message || e}` };
   }
 
   try {

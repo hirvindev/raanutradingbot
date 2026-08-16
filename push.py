@@ -155,12 +155,46 @@ def _save_native(toks: list):
 def register_native(token: str, platform: str = "android") -> dict:
     if not token:
         return {"ok": False, "error": "no token"}
+    if len(token) < 100:
+        # A real FCM registration token is ~140+ chars. A short string is a
+        # test artefact, and once stored it fails on every future send.
+        return {"ok": False, "error": "that does not look like an FCM token"}
     toks = [t for t in _load_native() if t.get("token") != token]
     toks.append({"token": token, "platform": platform,
                  "added": datetime.now(timezone.utc).isoformat()})
     _save_native(toks)
     log.info(f"[push] native device registered ({len(toks)} total)")
     return {"ok": True, "devices": len(toks)}
+
+
+def _fcm_info():
+    """Parse FCM_SERVICE_ACCOUNT_JSON, accepting base64 as well as raw JSON.
+
+    Raw JSON loses to the paste box: the service-account private_key is a
+    multi-line PEM, and pasting it into a dashboard variable field mangles the
+    newlines often enough that the value ends up unparseable. That is exactly
+    how this was broken — the variable was set, looked right in the UI, and was
+    not JSON at all.
+
+    Base64 is one line and cannot be mangled, so it is the recommended form.
+    Raw JSON still works when it survives the trip.
+    """
+    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        return None, "FCM_SERVICE_ACCOUNT_JSON is not set"
+    try:
+        return json.loads(raw), None
+    except Exception:
+        pass
+    try:
+        import base64
+        return json.loads(base64.b64decode(raw + "===")), None
+    except Exception:
+        pass
+    # Say what it actually looks like WITHOUT leaking it — this is a private key.
+    return None, (f"not valid JSON and not valid base64 "
+                  f"(length {len(raw)}, starts with {raw[:1]!r}). "
+                  f"Re-add it base64-encoded, on one line.")
 
 
 def status() -> dict:
@@ -188,15 +222,14 @@ def status() -> dict:
             "token_tail": tok[-8:] if tok else None,
             "token_len": len(tok),
         })
-    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
-    if not raw:
-        out["native"]["fcm"] = {"configured": False,
-                                "detail": "FCM_SERVICE_ACCOUNT_JSON is not set"}
+    info, err = _fcm_info()
+    if info is None:
+        out["native"]["fcm"] = {"configured": bool(os.getenv("FCM_SERVICE_ACCOUNT_JSON")),
+                                "credentials_valid": False, "detail": err}
         return out
     try:
         from google.oauth2 import service_account
         from google.auth.transport.requests import Request as GRequest
-        info = json.loads(raw)
         creds = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
         creds.refresh(GRequest())                  # the real test
@@ -219,16 +252,15 @@ def send_native(title: str, body: str) -> int:
     toks = _load_native()
     if not toks:
         return 0
-    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
-    if not raw:
-        log.info("[push] native skipped — FCM_SERVICE_ACCOUNT_JSON not set")
+    info, err = _fcm_info()
+    if info is None:
+        log.warning(f"[push] native skipped — {err}")
         return 0
     try:
         import httpx
         from google.oauth2 import service_account
         from google.auth.transport.requests import Request as GRequest
 
-        info = json.loads(raw)
         creds = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
         creds.refresh(GRequest())
