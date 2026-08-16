@@ -27,22 +27,23 @@ import Orders from './src/screens/Orders';
 import Signals from './src/screens/Signals';
 import Strategy from './src/screens/Strategy';
 import Logs from './src/screens/Logs';
+import Alerts from './src/screens/Alerts';
 
 const Tab = createBottomTabNavigator();
 
 /**
- * Tapping a notification used to open the app at Home and dismiss the
- * notification, so the signal you were reading was simply gone — the alert had
- * the detail, the app did not show it, and the notification was the only copy.
+ * Tapping a notification opens the app and Android dismisses the notification,
+ * so the signal being read was simply gone — the alert carried the entry, the
+ * stop and the reasoning, and it was the only copy.
  *
- * Now a tap lands on Signals, where the same pick is listed with its score and
- * reasoning. The notification being dismissed stops mattering once the content
- * it carried is one tap away.
+ * A tap now lands on Alerts, which holds the exact text of every notification
+ * from the last 48 hours. Fighting the dismissal is the wrong fix; keeping a
+ * copy is the right one.
  */
 export const navRef = createNavigationContainerRef();
 
-function goToSignals() {
-  if (navRef.isReady()) navRef.navigate('Signals' as never);
+function goToAlerts() {
+  if (navRef.isReady()) navRef.navigate('Alerts' as never);
 }
 
 const icons: Record<string, (c: string) => React.ReactNode> = {
@@ -77,8 +78,8 @@ export default function App() {
     try {
       // Settled, not all-or-nothing: one slow endpoint should not blank the
       // whole app, and /api/picks/outcomes is the newest and least proven.
-      const [health, cash, portfolio, auto, compare, orders, exit, outcomes] =
-        await Promise.all([
+      const [health, cash, portfolio, auto, compare, orders, exit, outcomes,
+             alerts] = await Promise.all([
           api.health().catch(() => null),
           api.cash(),
           api.portfolio().catch(() => null),
@@ -87,8 +88,9 @@ export default function App() {
           api.orders().catch(() => []),
           api.exitConfig().catch(() => null),
           api.outcomes().catch(() => null),
+          api.notifications().catch(() => ({ items: [] })),
         ]);
-      setData({ health, cash, portfolio, auto, compare, orders, exit, outcomes });
+      setData({ health, cash, portfolio, auto, compare, orders, exit, outcomes, alerts });
       setLocked(false);
     } catch (e) {
       if (e instanceof Unauthorized) { setLocked(true); }
@@ -131,9 +133,9 @@ export default function App() {
   // only fires while the app is running, so a notification that launched the
   // app would otherwise land on Home.
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener(goToSignals);
+    const sub = Notifications.addNotificationResponseReceivedListener(goToAlerts);
     Notifications.getLastNotificationResponseAsync()
-      .then(r => { if (r) setTimeout(goToSignals, 350); })
+      .then(r => { if (r) setTimeout(goToAlerts, 350); })
       .catch(() => {});
     return () => sub.remove();
   }, []);
@@ -226,6 +228,20 @@ function Tabs({ t, props }: any) {
                 <Image source={require('./assets/mark.png')}
                        style={{ width: 34, height: 34, borderRadius: 9, marginLeft: 14, marginRight: 2 }} />
               ),
+              // Alerts lives in the header, not the tab bar: a sixth bottom tab
+              // clips every label at 375pt. It is still a navigator screen so
+              // a notification tap can route straight to it.
+              headerRight: () => (
+                <Pressable onPress={() => navRef.navigate('Alerts' as never)}
+                           hitSlop={10} style={{ marginRight: 16 }}>
+                  <Svg width={21} height={21} viewBox="0 0 24 24" fill="none"
+                       stroke={t.head} strokeWidth={1.8} strokeLinecap="round"
+                       strokeLinejoin="round">
+                    <Path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                    <Path d="M10.3 21a2 2 0 003.4 0" />
+                  </Svg>
+                </Pressable>
+              ),
               // Taller than the default: at 62px the labels were clipped on
               // Android, which looked like a rendering fault rather than a
               // layout one.
@@ -244,6 +260,10 @@ function Tabs({ t, props }: any) {
             <Tab.Screen name="Signals">{() => <Signals {...props} />}</Tab.Screen>
             <Tab.Screen name="Strategy">{() => <Strategy {...props} />}</Tab.Screen>
             <Tab.Screen name="Logs">{() => <Logs {...props} />}</Tab.Screen>
+            <Tab.Screen name="Alerts"
+                        options={{ tabBarButton: () => null }}>
+              {() => <Alerts {...props} />}
+            </Tab.Screen>
           </Tab.Navigator>
         </NavigationContainer>
   );

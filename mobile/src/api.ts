@@ -107,6 +107,7 @@ export const api = {
   compare: () => get('/api/strategy/compare'),
   exitConfig: () => get('/api/exit-config'),
   outcomes: (limit = 40) => get(`/api/picks/outcomes?limit=${limit}`),
+  notifications: () => get('/api/notifications'),
   pushKey: () => get('/api/push/key'),
   pushSubscribe: (sub: any) => post('/api/push/subscribe', sub),
   pushTest: () => post('/api/push/test'),
