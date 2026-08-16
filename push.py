@@ -83,7 +83,8 @@ def unsubscribe(endpoint: str) -> dict:
     return {"ok": True, "devices": len(subs)}
 
 
-def send(title: str, body: str, tag: str = "raanu", url: str = "/") -> dict:
+def send(title: str, body: str, tag: str = "raanu", url: str = "/",
+         sticky: bool = False) -> dict:
     """Push to every registered device. Never raises.
 
     A 404 or 410 from the push service means the browser dropped the
@@ -101,7 +102,8 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/") -> dict:
         log.warning(f"[push] pywebpush unavailable: {e}")
         return {"sent": 0, "error": str(e)}
 
-    payload = json.dumps({"title": title, "body": body, "tag": tag, "url": url})
+    payload = json.dumps({"title": title, "body": body, "tag": tag, "url": url,
+                          "requireInteraction": sticky})
     claims = {"sub": os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@example.com")}
     sent, dead = 0, []
 
@@ -242,7 +244,7 @@ def status() -> dict:
     return out
 
 
-def send_native(title: str, body: str) -> int:
+def send_native(title: str, body: str, sticky: bool = False) -> int:
     """Deliver via FCM v1. Returns how many devices were reached.
 
     Requires FCM_SERVICE_ACCOUNT_JSON — the service-account key from the
@@ -268,10 +270,20 @@ def send_native(title: str, body: str) -> int:
         headers = {"Authorization": f"Bearer {creds.token}"}
         sent, dead = 0, []
         for t in toks:
+            # sticky=True: pops up as a heads-up banner AND stays in the shade
+            # until dismissed by hand, instead of vanishing on tap. A signal you
+            # glanced at on a lock screen and lost is a signal you did not read.
+            # The 'trades' channel is registered IMPORTANCE_HIGH by the app,
+            # which is what permits the heads-up at all.
+            android_note = {"channel_id": "trades"}
+            if sticky:
+                android_note["sticky"] = True
+                android_note["notification_priority"] = "PRIORITY_MAX"
+                android_note["default_vibrate_timings"] = True
             payload = {"message": {"token": t["token"],
                                    "notification": {"title": title, "body": body},
                                    "android": {"priority": "high",
-                                               "notification": {"channel_id": "trades"}}}}
+                                               "notification": android_note}}}
             r = httpx.post(url, headers=headers, json=payload, timeout=15)
             if r.status_code == 200:
                 sent += 1
@@ -289,10 +301,10 @@ def send_native(title: str, body: str) -> int:
 
 
 # ---------- event helpers (call these, not send()) ----------
-def _fanout(title: str, body: str, tag: str):
+def _fanout(title: str, body: str, tag: str, sticky: bool = False):
     """One call, every registered client — browser and native alike."""
-    web = send(title, body, tag=tag)
-    nat = send_native(title, body)
+    web = send(title, body, tag=tag, sticky=sticky)
+    nat = send_native(title, body, sticky=sticky)
     log.info(f"[push] {tag}: {web.get('sent', 0)} web, {nat} native")
 
 
@@ -343,7 +355,8 @@ def notify_signal(p: dict, strategy: str):
     reasons = p.get("reasons") or []
     if reasons:
         body.append(reasons[0])
-    _fanout(f"🔥 CONFIDENT BUY — {ticker}", "\n".join(body), f"signal-{ticker}")
+    _fanout(f"🔥 CONFIDENT BUY — {ticker}", "\n".join(body), f"signal-{ticker}",
+            sticky=True)
 
 
 def notify_buy(ticker: str, usd: float, strategy: str, score=None, pick: dict | None = None):
@@ -362,13 +375,13 @@ def notify_buy(ticker: str, usd: float, strategy: str, score=None, pick: dict | 
             mult = {"s2": 3.0, "s3": 3.0}.get((strategy or "").lower(), 2.5)
             stop_pct = max(1.5, min(25.0, atr_pct * mult))
             body.append(f"Stop ~${entry * (1 - stop_pct / 100):,.2f} ({-stop_pct:.1f}%, ATR-scaled)")
-    _fanout(head, "\n".join(body), f"buy-{ticker}")
+    _fanout(head, "\n".join(body), f"buy-{ticker}", sticky=True)
 
 
 def notify_exit(ticker: str, pnl: float, pct: float, reason: str):
     sign = "+" if pnl >= 0 else ""
     _fanout(f"Exited {ticker} {sign}{pct:.1f}%",
-            f"{sign}${pnl:,.2f} · {reason}", f"exit-{ticker}")
+            f"{sign}${pnl:,.2f} · {reason}", f"exit-{ticker}", sticky=True)
 
 
 def notify_scan(per_strategy: dict):
@@ -396,7 +409,7 @@ def notify_scan(per_strategy: dict):
         return                                 # quiet days stay quiet
     _fanout("Pre-market scan",
             f"{total} signal(s) · " + " · ".join(parts),
-            "scan")
+            "scan", sticky=True)
 
 
 def notify_error(what: str):

@@ -13,7 +13,7 @@
  * icons — so the app opens instantly and works as an installed app rather than
  * a browser tab that needs a connection to show anything at all.
  */
-const SHELL = 'raanu-shell-v5';   // v5: new brand icon
+const SHELL = 'raanu-shell-v6';   // v6: sticky notifications
 const SHELL_URLS = [
   // "/" is deliberately NOT precached. It is the one file that changes on every
   // deploy, and precaching it meant a device could sit on an old copy — the app
@@ -96,6 +96,9 @@ self.addEventListener('push', event => {
       tag: d.tag,
       data: {url: d.url},
       vibrate: [80, 40, 80],
+      // Stays on screen until dismissed by hand rather than fading after a few
+      // seconds. A trade signal glanced at and lost is a signal not read.
+      requireInteraction: d.requireInteraction === true,
     })
   );
 });
