@@ -605,6 +605,14 @@ async def _premarket_scan_and_notify():
     log.info(f"[Pre-market] Telegram sent — S1: {len(picks_s1)}, "
              f"S2: {len(picks_s2)}, S3: {len(picks_s3)}")
 
+    # One push digest for the whole scan. Wrapped, like every other push hook:
+    # a notification failure must never affect a scan.
+    try:
+        import push
+        push.notify_scan({"s1": picks_s1, "s2": picks_s2, "s3": picks_s3})
+    except Exception as e:
+        log.warning(f"[push] scan digest skipped: {e}")
+
 
 # Schedule slots:
 #   03:30 ET  — pre-market scan + Telegram alert (scan only, no orders)

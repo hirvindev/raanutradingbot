@@ -230,5 +230,33 @@ def notify_exit(ticker: str, pnl: float, pct: float, reason: str):
             f"{sign}${pnl:,.2f} · {reason}", f"exit-{ticker}")
 
 
+def notify_scan(per_strategy: dict):
+    """Daily scan summary — ONE notification, not one per strategy.
+
+    Scans were deliberately excluded at first: a channel that fires on
+    everything gets dismissed by reflex, and then the stop-out is dismissed with
+    it. Included now by request, but as a single digest rather than three
+    separate pushes, and only for scans that actually found something. A
+    notification that says "nothing today" three times a day is precisely the
+    kind that teaches you to swipe without reading.
+
+    Set PUSH_SCANS=0 to turn these off again without a code change.
+    """
+    if os.getenv("PUSH_SCANS", "1").strip().lower() in ("0", "false", "no", "off"):
+        return
+    parts, total = [], 0
+    for strat in ("s3", "s1", "s2"):          # best evidence first
+        picks = per_strategy.get(strat) or []
+        total += len(picks)
+        if picks:
+            top = picks[0]
+            parts.append(f"{strat.upper()} {top.get('ticker','?')} {top.get('score','')}")
+    if not total:
+        return                                 # quiet days stay quiet
+    _fanout("Pre-market scan",
+            f"{total} signal(s) · " + " · ".join(parts),
+            "scan")
+
+
 def notify_error(what: str):
     _fanout("RaanuBot problem", what[:180], "error")
