@@ -795,13 +795,24 @@ git push
 - [ ] Dashboard sell button for open positions (the native app has one —
       long-press a position, PIN prompted per action and never stored)
 - [ ] News sentiment scoring (currently no real data source)
-- [ ] **Play Store: internal testing only.** The app is a monitor for one
-      Alpaca account behind a passphrase, so a public download is a lock screen
-      nobody can pass — "public" needs a signals-only mode that does not exist.
-      Google then adds its own gate: individual accounts created after Nov 2023
-      need 12 testers × 14 continuous days before production. And a public app
-      recommending stocks is regulated as investment advice in most
-      jurisdictions, India included. **Unresolved — settle before building.**
+- [x] **Play Store: internal testing only — decided 16 Aug 2026.** Not a
+      staging step toward production; this is the end state.
+
+      The app is a monitor for one Alpaca account behind a passphrase, so a
+      public download is a lock screen nobody can pass. "Public" would need a
+      signals-only mode that does not exist. Internal testing gives the two
+      things actually wanted — the app on two phones, and Play auto-updates
+      instead of sideloading — and gives up only store search, which two
+      known users do not need.
+
+      Reopening this means clearing three gates, in this order:
+      1. Build the signals-only public mode (does not exist).
+      2. Settle whether a public app recommending stocks is regulated as
+         investment advice — it is, in most jurisdictions including India.
+      3. Google's own gate: Personal accounts created after Nov 2023 need
+         12 testers × 14 continuous days of closed testing before production.
+
+      Gate 2 is the one to answer first; the other two are work, not risk.
 
 ---
 
