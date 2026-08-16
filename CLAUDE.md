@@ -764,6 +764,25 @@ pip3 install fastapi uvicorn httpx python-dotenv pydantic numpy pandas yfinance 
 
 ---
 
+## 🚀 Deploying — see DEPLOY.md
+
+**Server, dashboard and API deploy themselves.** `git push` to `main` triggers
+Railway. If you changed only Python or the HTML, pushing *is* the deploy.
+
+**The Android app is one command:** `./deploy-mobile.sh` — bumps the version
+code in *both* `app.json` and `build.gradle`, builds, asserts the bundle
+carries the release certificate (not the debug one), and uploads to the Play
+**internal** track with exactly one version code in the release.
+
+Each of those checks exists because that exact thing went wrong by hand: a
+debug-signed release, a version code that reverted on `expo prebuild`, and
+three bundles stacked in one release that Play refused as "completely
+shadowed".
+
+Production release is deliberately unreachable from the script.
+
+---
+
 ## 🗃 Git Workflow
 ```bash
 git add .

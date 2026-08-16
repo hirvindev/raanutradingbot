@@ -41,3 +41,4 @@ twa/gradlew
 twa/gradlew.bat
 twa/manifest-checksum.txt
 twa/settings.gradle
+tools/__pycache__/
