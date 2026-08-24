@@ -1,0 +1,60 @@
+# Used only by Dockerfile.lambda (the AWS Lambda container image). Keeps the
+# build context to exactly what the API/worker Lambdas need to run. Most
+# importantly: .env and the keystores must NEVER reach an image — an image is
+# far more durable and copyable than a running process's environment, so
+# anything baked in here is effectively permanent.
+.git/
+.github/
+.devcontainer/
+.claude/
+.venv*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Secrets — never bake these into an image.
+.env
+.env.*
+*.keystore
+raanu-native.keystore
+
+# AWS CDK toolchain (this file lives at repo root so it can COPY the app
+# code; the CDK app itself is not part of the Lambda runtime).
+aws/cdk.out/
+aws/node_modules/
+aws/.venv/
+aws/site/
+
+# Other platforms' build output — irrelevant to the Lambda runtime.
+mobile/
+twa/
+play/
+icons/
+tools/
+
+# Regenerable/local-only — never the source of truth, and on Lambda this
+# path isn't even read (STATE_BACKEND=dynamodb there).
+backtest_reports/
+*.log
+trades_log.json
+position_peaks.json
+picks_log.json
+push_subs.json
+push_native.json
+notifications.json
+last_picks.json
+last_picks_s2.json
+last_picks_s3.json
+raanu.db*
+
+# Not part of the live app. RaanuTradingBot.html is NOT excluded — server.py's
+# own GET / route serves it directly from disk, which matters if the Function
+# URL is ever hit directly rather than through CloudFront.
+backtest.py
+files.zip
+force_deploy.py
+fix_and_push.py
+fix_branding.py
+*.bat

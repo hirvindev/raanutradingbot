@@ -35,11 +35,11 @@ US_EAST = ZoneInfo("US/Eastern")
 # ---------- CONFIG ----------
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env", override=False)  # no-op on Railway; env vars come from dashboard
-from datadir import state_path, data_dir
+from datadir import state_load, state_save, data_dir
 _DATA_DIR = data_dir()
-PICKS_CACHE = state_path("last_picks.json")
-PICKS_CACHE_S2 = state_path("last_picks_s2.json")
-PICKS_CACHE_S3 = state_path("last_picks_s3.json")
+PICKS_KEY = "last_picks.json"
+PICKS_KEY_S2 = "last_picks_s2.json"
+PICKS_KEY_S3 = "last_picks_s3.json"
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "").strip()
 ALPACA_SECRET  = os.getenv("ALPACA_SECRET_KEY", "").strip()
@@ -66,7 +66,7 @@ log = logging.getLogger("raanu")
 from auto_trader import trader
 
 # ---------- PICKS CACHE ----------
-# PICKS_CACHE already set above in CONFIG section
+# PICKS_KEY already set above in CONFIG section
 
 
 def _save_picks(picks: list):
@@ -74,73 +74,49 @@ def _save_picks(picks: list):
         "picks":      picks,
         "scanned_at": datetime.now(BERLIN).isoformat(),
     }
+    state_save(PICKS_KEY, data)
+    # Outcome tracking. Idempotent per day+strategy, and deliberately
+    # inside try/except: a research logger must never break a scan.
     try:
-        PICKS_CACHE.write_text(json.dumps(data, indent=2, default=str))
-        # Outcome tracking. Idempotent per day+strategy, and deliberately
-        # inside try/except: a research logger must never break a scan.
-        try:
-            import picks_log; picks_log.record("s1", picks)
-        except Exception as e:
-            log.warning(f"[picks] record skipped: {e}")
+        import picks_log; picks_log.record("s1", picks)
     except Exception as e:
-        log.warning(f"Could not write picks cache: {e}")
+        log.warning(f"[picks] record skipped: {e}")
 
 
 def _load_picks() -> Optional[dict]:
-    if PICKS_CACHE.exists():
-        try:
-            return json.loads(PICKS_CACHE.read_text())
-        except Exception:
-            pass
-    return None
+    return state_load(PICKS_KEY)
 
 
 # ---------- S2 PICKS CACHE ----------
 
 def _save_picks_s2(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
+    state_save(PICKS_KEY_S2, data)
+    # Outcome tracking. Idempotent per day+strategy, and deliberately
+    # inside try/except: a research logger must never break a scan.
     try:
-        PICKS_CACHE_S2.write_text(json.dumps(data, indent=2, default=str))
-        # Outcome tracking. Idempotent per day+strategy, and deliberately
-        # inside try/except: a research logger must never break a scan.
-        try:
-            import picks_log; picks_log.record("s2", picks)
-        except Exception as e:
-            log.warning(f"[picks] record skipped: {e}")
+        import picks_log; picks_log.record("s2", picks)
     except Exception as e:
-        log.warning(f"Could not write S2 picks cache: {e}")
+        log.warning(f"[picks] record skipped: {e}")
 
 
 def _load_picks_s2() -> Optional[dict]:
-    if PICKS_CACHE_S2.exists():
-        try:
-            return json.loads(PICKS_CACHE_S2.read_text())
-        except Exception:
-            pass
-    return None
+    return state_load(PICKS_KEY_S2)
 
 
 def _save_picks_s3(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
+    state_save(PICKS_KEY_S3, data)
+    # Outcome tracking. Idempotent per day+strategy, and deliberately
+    # inside try/except: a research logger must never break a scan.
     try:
-        PICKS_CACHE_S3.write_text(json.dumps(data, indent=2, default=str))
-        # Outcome tracking. Idempotent per day+strategy, and deliberately
-        # inside try/except: a research logger must never break a scan.
-        try:
-            import picks_log; picks_log.record("s3", picks)
-        except Exception as e:
-            log.warning(f"[picks] record skipped: {e}")
+        import picks_log; picks_log.record("s3", picks)
     except Exception as e:
-        log.warning(f"Could not write S3 picks cache: {e}")
+        log.warning(f"[picks] record skipped: {e}")
 
 
 def _load_picks_s3() -> Optional[dict]:
-    if PICKS_CACHE_S3.exists():
-        try:
-            return json.loads(PICKS_CACHE_S3.read_text())
-        except Exception:
-            pass
-    return None
+    return state_load(PICKS_KEY_S3)
 
 
 # ---------- BACKGROUND SCAN ----------

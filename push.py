@@ -34,28 +34,20 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from datadir import state_path
+from datadir import state_load, state_save
 from typing import Optional
 
 log = logging.getLogger("raanu.push")
 
-SUBS_PATH = state_path("push_subs.json")
+SUBS_KEY = "push_subs.json"
 
 
 def _load() -> list:
-    if SUBS_PATH.exists():
-        try:
-            return json.loads(SUBS_PATH.read_text()).get("subs", [])
-        except Exception:
-            log.warning("[push] subscription file unreadable")
-    return []
+    return state_load(SUBS_KEY, default={}).get("subs", [])
 
 
 def _save(subs: list):
-    try:
-        SUBS_PATH.write_text(json.dumps({"subs": subs}, indent=2))
-    except Exception as e:
-        log.error(f"[push] could not save subscriptions: {e}")
+    state_save(SUBS_KEY, {"subs": subs})
 
 
 def public_key() -> str:
@@ -136,23 +128,15 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/",
 # file and are sent through a different transport, but BOTH are fanned out by
 # the same notify_* helpers, so a buy reaches every registered client without
 # the trading code knowing which kind each one is.
-NATIVE_PATH = state_path("push_native.json")
+NATIVE_KEY = "push_native.json"
 
 
 def _load_native() -> list:
-    if NATIVE_PATH.exists():
-        try:
-            return json.loads(NATIVE_PATH.read_text()).get("tokens", [])
-        except Exception:
-            log.warning("[push] native token file unreadable")
-    return []
+    return state_load(NATIVE_KEY, default={}).get("tokens", [])
 
 
 def _save_native(toks: list):
-    try:
-        NATIVE_PATH.write_text(json.dumps({"tokens": toks}, indent=2))
-    except Exception as e:
-        log.error(f"[push] could not save native tokens: {e}")
+    state_save(NATIVE_KEY, {"tokens": toks})
 
 
 def register_native(token: str, platform: str = "android") -> dict:
@@ -316,7 +300,7 @@ def send_native(title: str, body: str, sticky: bool = False) -> int:
 
 
 # ---------- event helpers (call these, not send()) ----------
-LOG_PATH = state_path("notifications.json")
+NOTIF_KEY = "notifications.json"
 NOTIF_RETAIN_HOURS = float(os.getenv("NOTIF_RETAIN_HOURS", "48"))
 
 
@@ -333,15 +317,13 @@ def _record(title: str, body: str, tag: str):
     """
     try:
         now = datetime.now(timezone.utc)
-        items = []
-        if LOG_PATH.exists():
-            items = json.loads(LOG_PATH.read_text()).get("items", [])
+        items = state_load(NOTIF_KEY, default={}).get("items", [])
         items.insert(0, {"ts": now.isoformat(), "title": title,
                          "body": body, "tag": tag})
         cutoff = now.timestamp() - NOTIF_RETAIN_HOURS * 3600
         items = [i for i in items
                  if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff][:200]
-        LOG_PATH.write_text(json.dumps({"items": items}, indent=2))
+        state_save(NOTIF_KEY, {"items": items})
     except Exception as e:
         log.warning(f"[push] could not record notification: {e}")
 
@@ -349,10 +331,9 @@ def _record(title: str, body: str, tag: str):
 def history() -> list:
     """Alerts from the retention window, newest first."""
     try:
-        if not LOG_PATH.exists():
-            return []
         cutoff = datetime.now(timezone.utc).timestamp() - NOTIF_RETAIN_HOURS * 3600
-        return [i for i in json.loads(LOG_PATH.read_text()).get("items", [])
+        items = state_load(NOTIF_KEY, default={}).get("items", [])
+        return [i for i in items
                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff]
     except Exception:
         return []

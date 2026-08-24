@@ -27,8 +27,7 @@ STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Di
 log = logging.getLogger("raanu.auto")
 
 HERE = Path(__file__).parent
-from datadir import state_path
-LOG_PATH = state_path("trades_log.json")
+from datadir import state_load, state_save
 
 
 # ---------- LIMITS (configurable via .env) ----------
@@ -90,23 +89,16 @@ WATCHLIST = [t.strip().upper() for t in os.getenv("WATCHLIST", "AAPL,MSFT,NVDA,G
 
 # ---------- TRADE LOG ----------
 class TradeLog:
-    def __init__(self, path: Path = LOG_PATH):
-        self.path = path
+    STATE_KEY = "trades_log.json"
+
+    def __init__(self):
         self.data = self._load()
 
     def _load(self):
-        if self.path.exists():
-            try:
-                return json.loads(self.path.read_text())
-            except Exception:
-                pass
-        return {"trades": []}
+        return state_load(self.STATE_KEY, default={"trades": []})
 
     def save(self):
-        try:
-            self.path.write_text(json.dumps(self.data, indent=2, default=str))
-        except Exception as e:
-            log.error(f"Failed to write trade log: {e}")
+        state_save(self.STATE_KEY, self.data)
 
     def trades_in_last_7_days(self, strategy: Optional[str] = None,
                               action: Optional[str] = None):

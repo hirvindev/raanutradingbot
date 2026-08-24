@@ -1,0 +1,22 @@
+# Lambda container image for the AWS port of this bot (aws/ — see aws/README.md).
+#
+# Named ".lambda", not "Dockerfile", on purpose: Railway auto-detects a file
+# literally named "Dockerfile" at repo root and would switch its own build
+# mechanism away from the Procfile-based deploy it uses today — a real,
+# unwanted change to production. This file is never referenced by Railway.
+#
+# A container image, not a zip package: pandas/numpy/yfinance/ta are too
+# heavy and native-wheel-fragile for Lambda's ~250MB unzipped zip limit.
+# Both the API and worker Lambdas share this one image; CDK overrides CMD
+# per function (see aws/stacks/skeleton_stack.py) so there's only one build.
+FROM public.ecr.aws/lambda/python:3.12
+
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# .dockerignore keeps this to exactly the application code — no .env, no
+# keystores, no local JSON state, no git history. An image is far more
+# durable and copyable than a running process's environment.
+COPY . ${LAMBDA_TASK_ROOT}/
+
+CMD ["api_handler.handler"]

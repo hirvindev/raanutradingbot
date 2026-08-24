@@ -11,7 +11,13 @@
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "20" },
     "ghcr.io/devcontainers/features/aws-cli:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // Needed from Phase 2 on: the Lambda functions are container images
+    // (pandas/numpy/yfinance are too heavy for a zip-based Lambda), and
+    // `cdk deploy`/`cdk synth`'s asset bundling builds that image locally.
+    // GitHub Actions runners already have Docker preinstalled, so this is
+    // only needed for local `cdk deploy`.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
 
   // Bind mount, not a copy: the container reads your host's already-

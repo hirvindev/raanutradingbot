@@ -170,8 +170,8 @@ def update_exit_config(updates: dict) -> dict:
 # Peak-price store — survives restarts so the trailing stop keeps its high-water
 # mark. Uses /tmp on Railway (no local .env), else the project dir.
 _HERE = Path(__file__).parent
-from datadir import state_path
-_PEAKS_FILE = state_path("position_peaks.json")
+from datadir import state_load, state_save
+_PEAKS_KEY = "position_peaks.json"
 
 
 def _load_peaks() -> dict:
@@ -181,10 +181,7 @@ def _load_peaks() -> dict:
     Older files stored a bare float per symbol — upgrade those in place so the
     trailing stop keeps its high-water mark across the format change.
     """
-    try:
-        raw = json.loads(_PEAKS_FILE.read_text())
-    except Exception:
-        return {}
+    raw = state_load(_PEAKS_KEY, default={})
     out = {}
     for sym, val in raw.items():
         if isinstance(val, dict):
@@ -195,10 +192,7 @@ def _load_peaks() -> dict:
 
 
 def _save_peaks(peaks: dict) -> None:
-    try:
-        _PEAKS_FILE.write_text(json.dumps(peaks))
-    except Exception as e:
-        log.warning(f"Could not persist position peaks: {e}")
+    state_save(_PEAKS_KEY, peaks)
 
 
 async def _get_atr(symbol: str, period: int = 14) -> Optional[float]:
@@ -427,8 +421,6 @@ async def monitor_loop():
     Continuous loop — checks every CHECK_INTERVAL seconds.
     Closes positions that hit take-profit or stop-loss.
     """
-    from notifier import send_whatsapp, format_profit_alert
-
     hard_tp = f" | hard TP +{HARD_TAKE_PROFIT_PCT}%" if HARD_TAKE_PROFIT_PCT > 0 else ""
     crash = f" | daily crash -{DAILY_CRASH_PCT}%" if DAILY_CRASH_PCT > 0 else ""
     stop_d = (f"{STOP_ATR_MULT}xATR (cap {STOP_MAX_PCT}%)"
@@ -442,126 +434,136 @@ async def monitor_loop():
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
+        await run_monitor_once()
 
-        if not await _market_is_open():
-            log.debug("Profit monitor: market closed — skipping exit checks")
+
+async def run_monitor_once():
+    """One exit-check pass — checks every open position once and closes any
+    that hit a stop/trail/ladder/crash rule. `monitor_loop` calls this every
+    CHECK_INTERVAL seconds for the local/Railway long-running process; the AWS
+    worker Lambda calls it directly once per invocation instead, since Lambda
+    has no persistent process to sleep inside."""
+    from notifier import send_whatsapp, format_profit_alert
+
+    if not await _market_is_open():
+        log.debug("Profit monitor: market closed — skipping exit checks")
+        return
+
+    try:
+        positions = await _get_positions()
+    except Exception as e:
+        log.warning(f"Profit monitor: failed to fetch positions: {e}")
+        return
+
+    pending_sells = await _symbols_with_pending_sell()
+    peaks = _load_peaks()
+    open_symbols = set()
+
+    for pos in positions:
+        symbol  = pos.get("symbol", "")
+        entry   = float(pos.get("avg_entry_price", 0))
+        current = float(pos.get("current_price", 0))
+        qty     = float(pos.get("qty", 0))
+        side    = pos.get("side", "long")
+
+        if entry <= 0 or current <= 0 or side != "long":
             continue
 
-        try:
-            positions = await _get_positions()
-        except Exception as e:
-            log.warning(f"Profit monitor: failed to fetch positions: {e}")
+        open_symbols.add(symbol)
+
+        # A close order is already working — the position stays open until
+        # it fills, so re-evaluating would stack duplicate exit orders.
+        if symbol.upper() in pending_sells:
+            log.info(f"{symbol}: close order already pending — skipping")
             continue
+        pct = (current - entry) / entry * 100
+        pnl = (current - entry) * qty
 
-        pending_sells = await _symbols_with_pending_sell()
-        peaks = _load_peaks()
-        open_symbols = set()
+        strategy = strategy_for(symbol)
+        state = peaks.get(symbol) or {}
+        # Capture ATR once, the first time we see the position, and freeze
+        # it — the stop distance must not drift with changing volatility.
+        atr = state.get("atr")
+        if atr is None and STOP_MODE == "atr":
+            atr = await _get_atr(symbol)
+        peak = max(float(state.get("peak") or entry), current)
+        peaks[symbol] = {"peak": peak, "atr": atr}
 
-        for pos in positions:
-            symbol  = pos.get("symbol", "")
-            entry   = float(pos.get("avg_entry_price", 0))
-            current = float(pos.get("current_price", 0))
-            qty     = float(pos.get("qty", 0))
-            side    = pos.get("side", "long")
+        peak_pct = (peak - entry) / entry * 100
+        drop_from_peak = (peak - current) / peak * 100 if peak > 0 else 0.0
+        atr_pct = (atr / entry * 100) if atr else None
 
-            if entry <= 0 or current <= 0 or side != "long":
-                continue
+        # ── stop distance ────────────────────────────────────────────────
+        if STOP_MODE == "atr" and atr_pct:
+            mult = stop_atr_mult_for(strategy)
+            stop_pct = min(max(mult * atr_pct, STOP_MIN_PCT), STOP_MAX_PCT)
+            stop_desc = f"{mult}xATR ({stop_pct:.1f}%)"
+        else:
+            stop_pct = STOP_LOSS_PCT
+            stop_desc = f"{STOP_LOSS_PCT}%"
 
-            open_symbols.add(symbol)
-
-            # A close order is already working — the position stays open until
-            # it fills, so re-evaluating would stack duplicate exit orders.
-            if symbol.upper() in pending_sells:
-                log.info(f"{symbol}: close order already pending — skipping")
-                continue
-            pct = (current - entry) / entry * 100
-            pnl = (current - entry) * qty
-
-            strategy = strategy_for(symbol)
-            state = peaks.get(symbol) or {}
-            # Capture ATR once, the first time we see the position, and freeze
-            # it — the stop distance must not drift with changing volatility.
-            atr = state.get("atr")
-            if atr is None and STOP_MODE == "atr":
-                atr = await _get_atr(symbol)
-            peak = max(float(state.get("peak") or entry), current)
-            peaks[symbol] = {"peak": peak, "atr": atr}
-
-            peak_pct = (peak - entry) / entry * 100
-            drop_from_peak = (peak - current) / peak * 100 if peak > 0 else 0.0
-            atr_pct = (atr / entry * 100) if atr else None
-
-            # ── stop distance ────────────────────────────────────────────────
-            if STOP_MODE == "atr" and atr_pct:
-                mult = stop_atr_mult_for(strategy)
-                stop_pct = min(max(mult * atr_pct, STOP_MIN_PCT), STOP_MAX_PCT)
-                stop_desc = f"{mult}xATR ({stop_pct:.1f}%)"
+        reason = None
+        if pct <= -stop_pct:
+            reason = f"Stop-loss {pct:.2f}% ≤ -{stop_desc}"
+        elif HARD_TAKE_PROFIT_PCT > 0 and pct >= HARD_TAKE_PROFIT_PCT:
+            reason = f"Take-profit +{pct:.2f}% ≥ +{HARD_TAKE_PROFIT_PCT}%"
+        else:
+            # ── trailing stop, also ATR-scaled ───────────────────────────
+            if TRAIL_MODE == "atr" and atr_pct:
+                # Floors matter as much here as on the stop: without them a
+                # 0.10%-ATR instrument arms at +0.20% and exits on a 0.15%
+                # give-back, closing on noise for a rounding-error gain.
+                arm_pct  = max(TRAIL_ACTIVATE_ATR * atr_pct, TRAIL_ACTIVATE_MIN_PCT)
+                give_pct = max(TRAIL_ATR_MULT * atr_pct, TRAIL_MIN_PCT)
+                trail_desc = f"{TRAIL_ATR_MULT}xATR ({give_pct:.1f}%)"
             else:
-                stop_pct = STOP_LOSS_PCT
-                stop_desc = f"{STOP_LOSS_PCT}%"
+                arm_pct   = TRAIL_ACTIVATE_PCT
+                give_pct  = TRAIL_PCT
+                trail_desc = f"{TRAIL_PCT}%"
+            if peak_pct >= arm_pct and drop_from_peak >= give_pct:
+                reason = (
+                    f"Trailing stop {trail_desc} — locked +{pct:.2f}% "
+                    f"(peak +{peak_pct:.2f}%, gave back {drop_from_peak:.2f}%)"
+                )
 
-            reason = None
-            if pct <= -stop_pct:
-                reason = f"Stop-loss {pct:.2f}% ≤ -{stop_desc}"
-            elif HARD_TAKE_PROFIT_PCT > 0 and pct >= HARD_TAKE_PROFIT_PCT:
-                reason = f"Take-profit +{pct:.2f}% ≥ +{HARD_TAKE_PROFIT_PCT}%"
-            else:
-                # ── trailing stop, also ATR-scaled ───────────────────────────
-                if TRAIL_MODE == "atr" and atr_pct:
-                    # Floors matter as much here as on the stop: without them a
-                    # 0.10%-ATR instrument arms at +0.20% and exits on a 0.15%
-                    # give-back, closing on noise for a rounding-error gain.
-                    arm_pct  = max(TRAIL_ACTIVATE_ATR * atr_pct, TRAIL_ACTIVATE_MIN_PCT)
-                    give_pct = max(TRAIL_ATR_MULT * atr_pct, TRAIL_MIN_PCT)
-                    trail_desc = f"{TRAIL_ATR_MULT}xATR ({give_pct:.1f}%)"
-                else:
-                    arm_pct   = TRAIL_ACTIVATE_PCT
-                    give_pct  = TRAIL_PCT
-                    trail_desc = f"{TRAIL_PCT}%"
-                if peak_pct >= arm_pct and drop_from_peak >= give_pct:
+            # Profit ladder — books progressively more the higher it ran.
+            if not reason:
+                floor = locked_floor(peak_pct, ladder_for(strategy))
+                if floor is not None and pct <= floor:
                     reason = (
-                        f"Trailing stop {trail_desc} — locked +{pct:.2f}% "
-                        f"(peak +{peak_pct:.2f}%, gave back {drop_from_peak:.2f}%)"
+                        f"Profit ladder — banking +{pct:.2f}% "
+                        f"(peak +{peak_pct:.2f}% locked in +{floor:.1f}%)"
                     )
 
-                # Profit ladder — books progressively more the higher it ran.
-                if not reason:
-                    floor = locked_floor(peak_pct, ladder_for(strategy))
-                    if floor is not None and pct <= floor:
-                        reason = (
-                            f"Profit ladder — banking +{pct:.2f}% "
-                            f"(peak +{peak_pct:.2f}% locked in +{floor:.1f}%)"
-                        )
+        if not reason and DAILY_CRASH_PCT > 0:
+            prev_close = await _get_prev_close(symbol)
+            if prev_close and prev_close > 0:
+                day_drop = (prev_close - current) / prev_close * 100
+                if day_drop >= DAILY_CRASH_PCT:
+                    reason = (
+                        f"Daily crash -{day_drop:.2f}% "
+                        f"(prev close ${prev_close:.2f} → ${current:.2f}, "
+                        f"threshold -{DAILY_CRASH_PCT}%)"
+                    )
 
-            if not reason and DAILY_CRASH_PCT > 0:
-                prev_close = await _get_prev_close(symbol)
-                if prev_close and prev_close > 0:
-                    day_drop = (prev_close - current) / prev_close * 100
-                    if day_drop >= DAILY_CRASH_PCT:
-                        reason = (
-                            f"Daily crash -{day_drop:.2f}% "
-                            f"(prev close ${prev_close:.2f} → ${current:.2f}, "
-                            f"threshold -{DAILY_CRASH_PCT}%)"
-                        )
+        if not reason:
+            continue
 
-            if not reason:
-                continue
+        log.info(f"Closing {symbol}: {reason} | P&L ${pnl:+.2f}")
+        try:
+            await _close_position(symbol)
+            peaks.pop(symbol, None)
+            open_symbols.discard(symbol)
+            _record_exit(symbol, entry, current, qty, pnl, pct, reason)
+            send_whatsapp(
+                format_profit_alert(symbol, entry, current, pnl, pct, reason)
+            )
+        except Exception as e:
+            log.error(f"Failed to close {symbol}: {e}")
 
-            log.info(f"Closing {symbol}: {reason} | P&L ${pnl:+.2f}")
-            try:
-                await _close_position(symbol)
-                peaks.pop(symbol, None)
-                open_symbols.discard(symbol)
-                _record_exit(symbol, entry, current, qty, pnl, pct, reason)
-                send_whatsapp(
-                    format_profit_alert(symbol, entry, current, pnl, pct, reason)
-                )
-            except Exception as e:
-                log.error(f"Failed to close {symbol}: {e}")
-
-        # Prune peaks for positions that are no longer open.
-        peaks = {s: p for s, p in peaks.items() if s in open_symbols}
-        _save_peaks(peaks)
+    # Prune peaks for positions that are no longer open.
+    peaks = {s: p for s, p in peaks.items() if s in open_symbols}
+    _save_peaks(peaks)
 
 
 async def get_positions_for_status() -> tuple[list[dict], dict]:

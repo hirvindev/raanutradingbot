@@ -1016,19 +1016,35 @@ key, or "unknown" silently starts meaning something.
 
 ## ☁️ AWS Migration (in progress) — see aws/README.md
 
-Moving off Railway toward AWS serverless (Lambda + EventBridge Scheduler +
-DynamoDB), **built up incrementally in an isolated `aws/` folder that does
-not touch anything else in this repo** — Railway keeps serving production
-throughout. Full design and the "why" behind each choice lives in
-`aws/README.md` and `aws/ci-identity/README.md`; don't duplicate it here,
-just the current state:
+Moving off Railway toward AWS serverless (Lambda + EventBridge + DynamoDB),
+**built up incrementally** — Railway keeps serving production throughout.
+Full design and the "why" behind each choice lives in `aws/README.md` and
+`aws/ci-identity/README.md`; don't duplicate it here, just the current state:
 
-- **Phase 1 (current, not yet deployed to AWS): pipeline skeleton.** S3 +
-  CloudFront static page calling one dependency-free "hello world" Lambda
-  through a Function URL, deployed via GitHub Actions using OIDC — zero
-  AWS credentials stored anywhere in the repo. The point of this phase is
-  purely to prove the deploy pipeline is trustworthy before any real
-  trading logic goes near it.
+- **Phase 1 (done): pipeline skeleton.** S3 + CloudFront static page calling
+  one dependency-free "hello world" Lambda through a Function URL, deployed
+  via GitHub Actions using OIDC — zero AWS credentials stored anywhere in
+  the repo. Proved the deploy pipeline was trustworthy before any real
+  trading logic went near it. That placeholder page is now fully replaced.
+- **Phase 2 (current): the real bot, deployed but not yet live-trading.**
+  The dashboard now serves from S3/CloudFront for real; the FastAPI app
+  runs behind a second Lambda (`api_handler.py`, Mangum) reachable through
+  the *same* CloudFront distribution at `/api/*` and `/webhook/*` — one
+  browser-visible origin, so no CORS and zero dashboard JS changes. A
+  worker Lambda (`worker_handler.py`) replaces `server.py`'s three
+  background `asyncio` loops (pre-market scan, trade slots, profit
+  monitor) — Lambda has no persistent process to run them in, so it's
+  invoked every 5 minutes by an EventBridge rule and works out for itself
+  what's due, reusing `server.py`'s own DST-aware ET scheduling rather than
+  a UTC-only cron. Local JSON state files are replaced by one DynamoDB
+  table when `STATE_BACKEND=dynamodb` (Lambda only — Railway/local dev are
+  untouched); secrets load from SSM Parameter Store into `os.environ` at
+  cold start (`lambda_secrets.py`), so none of the ~40 existing
+  `os.getenv(...)` call sites needed to change.
+  **The worker's EventBridge trigger deploys DISABLED** — it can be invoked
+  manually to test, but nothing fires on a schedule from AWS until it's
+  explicitly enabled, so it never races Railway's own scheduler against the
+  same paper account and weekly limits.
 - **Tooling decisions already made, don't re-litigate without a reason**:
   AWS CDK in **Python** (not SAM) — chosen once the stack grew past
   Lambda-only, since CDK's constructs meaningfully cut the boilerplate for
@@ -1039,15 +1055,22 @@ just the current state:
   live in CDK's separate CloudFormation-execution-role, which only
   CloudFormation itself can assume. Lambda Function URLs, not API Gateway —
   no separate cost/service for auth features this app already implements
-  itself in ASGI middleware.
+  itself in ASGI middleware. **Lambda container images, not zip packages**
+  — pandas/numpy/yfinance are too heavy and native-wheel-fragile for a
+  zip-based Lambda's ~250MB unzipped limit; one `Dockerfile.lambda` (named
+  that, not `Dockerfile`, so Railway's auto-detection never picks it up)
+  builds one image both Lambdas share via a different `cmd` override.
 - **Dev environment**: a dev container (`.devcontainer/`) holds Node/AWS
-  CLI/`gh` so the host stays clean; the CDK CLI itself is pinned in
-  `aws/package.json`, not baked into the container image, so local and CI
-  can never drift apart on version.
-- **Not started yet**: porting `strategy.py`/`scanner.py`/`auto_trader.py`/
-  `profit_monitor.py` into a real `worker` Lambda, wrapping `server.py`
-  behind Mangum, replacing the JSON state files with DynamoDB. None of that
-  exists in `aws/` yet.
+  CLI/`gh`/Docker (Docker-in-Docker, added in Phase 2 — rebuild the
+  container if it was created before this) so the host stays clean; the
+  CDK CLI itself is pinned in `aws/package.json`, not baked into the
+  container image, so local and CI can never drift apart on version.
+- **Not started yet**: migrating Railway's actual trade history into
+  DynamoDB (safe to defer — the worker's scheduler starts disabled, so
+  empty starting state costs nothing), true SSE streaming for
+  `/api/scan/stream` on Lambda (degrades to a blocking response — Mangum
+  doesn't support Lambda response streaming), and actually flipping the
+  worker's schedule on to retire Railway.
 
 ---
 

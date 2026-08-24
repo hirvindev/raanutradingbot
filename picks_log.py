@@ -37,11 +37,11 @@ from typing import Optional
 
 import pandas as pd
 
-from datadir import state_path
+from datadir import state_load, state_save
 
 log = logging.getLogger("raanu.picks")
 
-LOG_PATH = state_path("picks_log.json")
+STATE_KEY = "picks_log.json"
 
 FORWARD_DAYS = (1, 5, 20)
 MAX_PER_SCAN = 5          # the top few are what a person would actually act on
@@ -49,19 +49,11 @@ BANDS = ((90, 200, "90+"), (80, 90, "80-89"), (70, 80, "70-79"), (0, 70, "60-69"
 
 
 def _load() -> dict:
-    if LOG_PATH.exists():
-        try:
-            return json.loads(LOG_PATH.read_text())
-        except Exception:
-            log.warning("[picks] log unreadable — starting fresh")
-    return {"picks": []}
+    return state_load(STATE_KEY, default={"picks": []})
 
 
 def _save(data: dict):
-    try:
-        LOG_PATH.write_text(json.dumps(data, indent=2, default=str))
-    except Exception as e:
-        log.error(f"[picks] could not write log: {e}")
+    state_save(STATE_KEY, data)
 
 
 def record(strategy: str, picks: list) -> int:

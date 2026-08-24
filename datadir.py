@@ -21,6 +21,7 @@ every redeploy, so all three broke silently on each deploy. Resolution order:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -68,3 +69,70 @@ def data_dir() -> Path:
 def state_path(filename: str) -> Path:
     """Absolute path for one piece of persistent state."""
     return data_dir() / filename
+
+
+# ---------- state_load / state_save ----------
+# Every module that persists a JSON blob (trades_log.json, position_peaks.json,
+# picks_log.json, push_subs.json, push_native.json, notifications.json,
+# last_picks*.json) goes through these two functions instead of touching
+# state_path()/read_text()/write_text() directly. STATE_BACKEND defaults to
+# "file" — Railway and local dev never set it, so their behavior is exactly
+# what it was before. It is set to "dynamodb" only in the Lambda environment,
+# where the local filesystem does not persist between invocations.
+def state_load(filename: str, default=None):
+    """Load one piece of persistent JSON state, whichever backend is active."""
+    if os.getenv("STATE_BACKEND", "file") == "dynamodb":
+        return _dynamo_load(filename, default)
+    p = state_path(filename)
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            log.warning(f"State file {filename} unreadable — using default")
+    return default
+
+
+def state_save(filename: str, obj) -> None:
+    """Persist one piece of JSON state, whichever backend is active."""
+    if os.getenv("STATE_BACKEND", "file") == "dynamodb":
+        _dynamo_save(filename, obj)
+        return
+    try:
+        state_path(filename).write_text(json.dumps(obj, indent=2, default=str))
+    except Exception as e:
+        log.error(f"Failed to write state {filename}: {e}")
+
+
+_dynamo_table = None
+
+
+def _dynamo_table_resource():
+    """Lazily create the boto3 DynamoDB table resource. boto3 is only ever
+    imported here, so Railway/local dev never needs it installed — it's
+    provided by the Lambda base image, the only place STATE_BACKEND=dynamodb
+    is ever set."""
+    global _dynamo_table
+    if _dynamo_table is None:
+        import boto3
+        _dynamo_table = boto3.resource("dynamodb").Table(os.environ["STATE_TABLE"])
+    return _dynamo_table
+
+
+def _dynamo_load(filename: str, default):
+    try:
+        item = _dynamo_table_resource().get_item(Key={"state_key": filename}).get("Item")
+        if item:
+            return json.loads(item["data"])
+    except Exception as e:
+        log.warning(f"DynamoDB state {filename} unreadable — using default: {e}")
+    return default
+
+
+def _dynamo_save(filename: str, obj) -> None:
+    try:
+        _dynamo_table_resource().put_item(Item={
+            "state_key": filename,
+            "data": json.dumps(obj, indent=2, default=str),
+        })
+    except Exception as e:
+        log.error(f"Failed to write DynamoDB state {filename}: {e}")
