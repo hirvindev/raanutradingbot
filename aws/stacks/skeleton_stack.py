@@ -167,15 +167,20 @@ class SkeletonStack(Stack):
 
         # NONE, not IAM — the app's own API_READ_TOKEN/TRADE_PIN middleware
         # is the real auth (see server.py), matching the security model this
-        # bot already uses on Railway. CORS here is only so the Function URL
-        # is directly curl/browser-testable; the real dashboard traffic goes
-        # through CloudFront below and never triggers a browser CORS check
-        # at all, since it's all one origin from the browser's perspective.
+        # bot already uses on Railway. CORS here is only for directly
+        # curl/browser-testing the Function URL itself — it's irrelevant to
+        # the real dashboard traffic, which goes through CloudFront below
+        # and is never actually cross-origin from the browser's perspective,
+        # so no browser CORS check ever applies to it either way. Can't
+        # include the CloudFront domain here even for convenience: that
+        # would make the Function URL depend on the Distribution's output
+        # while the Distribution depends on this Function URL as an origin
+        # (added below) — the same circular dependency the dropped
+        # ALLOWED_ORIGINS env var caused, CloudFormation can't resolve it.
         api_fn_url = api_fn.add_function_url(
             auth_type=lambda_.FunctionUrlAuthType.NONE,
             cors=lambda_.FunctionUrlCorsOptions(
                 allowed_origins=[
-                    f"https://{distribution.distribution_domain_name}",
                     "http://localhost:8000",
                     "http://127.0.0.1:8000",
                 ],
