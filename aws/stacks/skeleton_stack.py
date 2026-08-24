@@ -201,7 +201,15 @@ class SkeletonStack(Stack):
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                 cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
+                # NOT ALL_VIEWER: that forwards the viewer's Host header
+                # (the CloudFront domain) straight through to the Function
+                # URL origin, which rejects it because it doesn't match the
+                # origin's own hostname — a documented CloudFront + Lambda
+                # Function URL gotcha. This forwards everything else (the
+                # Authorization/X-Trade-Token headers server.py's auth gate
+                # needs, query strings for /api/scan/stream's ?token=) but
+                # lets CloudFront substitute the correct Host itself.
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
             )
 
         # Runs every 5 minutes; the worker itself decides what's actually
