@@ -1531,16 +1531,39 @@ el('scanBtn').onclick = async () => {
   const startedBody = await started.json().catch(()=>({}));
   if(!started.ok){ finish('Failed'); logLine('Scan failed to start: '+(startedBody.error||started.status),'err'); return; }
 
+  // The worker overwrites state to "running" as its very first step, but
+  // there's a short cold-start window right after the invoke fires where a
+  // poll can still see the PREVIOUS scan's terminal state. Don't trust a
+  // "done"/"error" as belonging to this run until a "running" has actually
+  // been observed in between — otherwise a stale old result would end the
+  // poll immediately, before the new scan has done any work at all.
+  let sawRunning = false, waited = 0;
   const tick = async () => {
     const d = await j('/api/scan/job');
     if(!d) return;
+    if(d.status==='running') sawRunning = true;
+    if(!sawRunning && d.status!=='running'){
+      // If the invoke silently failed to actually start the worker (e.g. a
+      // permissions issue), sawRunning would never flip and this would
+      // otherwise poll forever with no feedback. 30s of cold-start slack
+      // is generous — real cold starts land in a few seconds.
+      if((waited += 1500) > 30000){ finish('Failed to start'); logLine('Scan never started — worker may be unreachable','err'); }
+      return;
+    }
     if(d.status==='error'){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
       body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${d.error}</td></tr>`; return; }
     if(d.total) bar.style.width=Math.min(100,(d.scanned||0)/d.total*100)+'%';
-    el('scanStat').textContent = d.status==='done' ? 'Finishing' : `Screening ${d.total||0}`;
-    if(d.status!=='done') return;
+    // The worker writes its running total into `results` every 25 tickers,
+    // not just on completion — render what's arrived so far instead of a
+    // blank table for the whole ~3-4 minute scan. Only replaces the initial
+    // "Screening…" placeholder once something has actually been found.
     const res=(d.results||[]).slice().sort((a,b)=>b.score-a.score);
-    body.innerHTML = renderScanRows(res);
+    if(res.length) body.innerHTML = renderScanRows(res);
+    if(d.status!=='done'){
+      el('scanStat').textContent = `Screening ${d.scanned||0}/${d.total||0}${res.length?` · ${res.length} so far`:''}`;
+      return;
+    }
+    if(!res.length) body.innerHTML = renderScanRows(res);
     finish(`${d.scanned||d.total||0} screened · ${res.length} candidates`);
     logLine(`Scan done — ${d.scanned||d.total||0} screened, ${res.length} candidates`,'ok');
   };
