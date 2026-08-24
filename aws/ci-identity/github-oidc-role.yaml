@@ -103,6 +103,11 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-${AWS::Region}"
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+                  # Needed from Phase 2 on: publishing a container-image asset
+                  # (the API/worker Lambdas) pushes to ECR via this separate
+                  # bootstrap role, not file-publishing-role — that one only
+                  # covers the S3 staging bucket used for zip assets/templates.
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-image-publishing-role-${AWS::AccountId}-${AWS::Region}"
 
 Outputs:
   GitHubActionsRoleArn:
