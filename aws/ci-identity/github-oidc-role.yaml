@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  One-time, manually-deployed trust boundary letting GitHub Actions deploy
+  the RaanuTradingBot AWS skeleton via OIDC (no stored AWS access keys).
+  This template is deployed ONCE, by hand, with your own AWS credentials —
+  it is never deployed by the CI pipeline it authorizes, on purpose: the
+  pipeline should not be able to modify the trust that lets it run at all.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: hirvindev
+  GitHubRepo:
+    Type: String
+    Default: raanutradingbot
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Only workflow runs against this branch can assume the role.
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: >
+      Leave empty to create a new token.actions.githubusercontent.com OIDC
+      provider. If one already exists in this account from a prior project
+      (check first with `aws iam list-open-id-connect-providers`), paste its
+      ARN here instead — AWS allows only one provider per URL per account,
+      and creating a second one for the same URL fails.
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: >
+      The CDK bootstrap qualifier `cdk bootstrap` used (this is the
+      CDK-wide default — only change this if you passed --qualifier
+      explicitly).
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, ""]
+
+Resources:
+  # NOTE: as of writing, IAM automatically verifies GitHub's OIDC
+  # certificate chain for well-known providers rather than strictly relying
+  # on a manually pinned thumbprint, but the CloudFormation resource still
+  # expects a value. The thumbprint below is GitHub's long-standing,
+  # widely-published intermediate CA thumbprint. Verify it against current
+  # AWS/GitHub documentation before running this — if it's since changed,
+  # this is the one value in this template most likely to be stale.
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${GitHubRepo}-github-actions-deploy"
+      Description: >
+        Assumed by GitHub Actions via OIDC. Can do nothing on its own except
+        assume the CDK bootstrap's deploy-role and file-publishing-role -
+        the actual permission to create resources lives in the
+        CloudFormation-execution-role those roles delegate to, which this
+        role never touches directly.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+      Policies:
+        - PolicyName: AssumeCdkBootstrapRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+
+Outputs:
+  GitHubActionsRoleArn:
+    Value: !GetAtt GitHubActionsDeployRole.Arn
+    Description: >
+      Not a secret — a role ARN is useless without the trust policy above,
+      which only accepts tokens from this exact repo/branch. Put this in the
+      GitHub repo as a plain Actions variable named AWS_DEPLOY_ROLE_ARN.

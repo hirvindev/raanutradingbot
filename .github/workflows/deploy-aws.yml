@@ -1,0 +1,62 @@
+name: Deploy AWS skeleton
+
+# Manual only, on purpose: this is the validation phase. Once you've watched
+# a few runs and confirmed nothing leaks, add:
+#   push:
+#     branches: [main]
+#     paths: ['aws/**', '.github/workflows/deploy-aws.yml']
+on:
+  workflow_dispatch: {}
+
+# id-token:write is what lets this job request an OIDC token from GitHub —
+# no AWS access key is stored anywhere in this repo, ever.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: aws
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install CDK CLI (pinned in package.json)
+        run: npm ci
+
+      - name: Install CDK app dependencies
+        run: python3 -m pip install -r requirements.txt
+
+      # Exchanges GitHub's OIDC token for short-lived AWS credentials by
+      # assuming the narrow identity role from aws/ci-identity/ — that role
+      # can only assume the CDK deploy-role and file-publishing-role, it
+      # cannot touch S3/CloudFront/Lambda directly. See aws/README.md.
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Confirm assumed identity (audit log only, nothing sensitive)
+        run: aws sts get-caller-identity
+
+      - name: Deploy
+        run: npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
+
+      - name: Summarize outputs
+        run: |
+          {
+            echo '### Deployed'
+            echo '```json'
+            cat cdk-outputs.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

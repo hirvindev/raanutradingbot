@@ -1,6 +1,6 @@
 # RaanuTradingBot — Project Context for Claude
 > Paste this file at the start of every new Claude chat to restore full context.
-> Last updated: 16 August 2026
+> Last updated: 24 August 2026
 
 ---
 
@@ -1011,6 +1011,43 @@ did not stay cosmetic.
 defaults, which are identical to the S1 values. Same 2.5×ATR stop, same
 ladder — label only. Verify that equivalence before adding any per-strategy
 key, or "unknown" silently starts meaning something.
+
+---
+
+## ☁️ AWS Migration (in progress) — see aws/README.md
+
+Moving off Railway toward AWS serverless (Lambda + EventBridge Scheduler +
+DynamoDB), **built up incrementally in an isolated `aws/` folder that does
+not touch anything else in this repo** — Railway keeps serving production
+throughout. Full design and the "why" behind each choice lives in
+`aws/README.md` and `aws/ci-identity/README.md`; don't duplicate it here,
+just the current state:
+
+- **Phase 1 (current, not yet deployed to AWS): pipeline skeleton.** S3 +
+  CloudFront static page calling one dependency-free "hello world" Lambda
+  through a Function URL, deployed via GitHub Actions using OIDC — zero
+  AWS credentials stored anywhere in the repo. The point of this phase is
+  purely to prove the deploy pipeline is trustworthy before any real
+  trading logic goes near it.
+- **Tooling decisions already made, don't re-litigate without a reason**:
+  AWS CDK in **Python** (not SAM) — chosen once the stack grew past
+  Lambda-only, since CDK's constructs meaningfully cut the boilerplate for
+  the S3+CloudFront+OAC piece and keep the whole IaC surface in Python,
+  matching the rest of this codebase. CI assumes a narrow identity role via
+  GitHub OIDC that can only `sts:AssumeRole` on CDK's own bootstrap roles
+  (deploy-role, file-publishing-role) — real resource-creation permissions
+  live in CDK's separate CloudFormation-execution-role, which only
+  CloudFormation itself can assume. Lambda Function URLs, not API Gateway —
+  no separate cost/service for auth features this app already implements
+  itself in ASGI middleware.
+- **Dev environment**: a dev container (`.devcontainer/`) holds Node/AWS
+  CLI/`gh` so the host stays clean; the CDK CLI itself is pinned in
+  `aws/package.json`, not baked into the container image, so local and CI
+  can never drift apart on version.
+- **Not started yet**: porting `strategy.py`/`scanner.py`/`auto_trader.py`/
+  `profit_monitor.py` into a real `worker` Lambda, wrapping `server.py`
+  behind Mangum, replacing the JSON state files with DynamoDB. None of that
+  exists in `aws/` yet.
 
 ---
 

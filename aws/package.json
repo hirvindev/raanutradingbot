@@ -1,0 +1,8 @@
+{
+  "name": "raanutradingbot-aws-toolchain",
+  "private": true,
+  "description": "Pins the CDK CLI version so local and CI deploys stay in sync with aws-cdk-lib in requirements.txt. Run everything via `npx cdk ...`, not a global install.",
+  "devDependencies": {
+    "aws-cdk": "^2.170.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "app": "python3 app.py",
+  "watch": {
+    "include": ["**"],
+    "exclude": [
+      "README.md",
+      "cdk*.json",
+      "requirements*.txt",
+      "package*.json",
+      "**/__pycache__",
+      "**/*.pyc",
+      ".venv",
+      "node_modules"
+    ]
+  },
+  "context": {
+    "@aws-cdk/core:newStyleStackSynthesis": true
+  }
+}

@@ -42,3 +42,9 @@ twa/gradlew.bat
 twa/manifest-checksum.txt
 twa/settings.gradle
 tools/__pycache__/
+
+# AWS CDK app (aws/) — build/staging artifacts, not source
+aws/cdk.out/
+aws/cdk.context.json
+aws/.venv/
+aws/node_modules/
