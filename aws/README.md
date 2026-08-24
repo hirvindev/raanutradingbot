@@ -164,6 +164,33 @@ from CI.
    Plain tuning config (`STOP_ATR_MULT`, `WEEKLY_TRADE_LIMIT`, etc.) is
    **not** here — it's set directly as Lambda environment variables in
    `skeleton_stack.py`, same as it's a plain `.env` entry on Railway.
+4. Cap growth in the shared container-image repo `cdk bootstrap` created
+   (`cdk-hnb659fds-container-assets-<account>-<region>`). CDK tags every
+   unique image build permanently — its own default lifecycle rule only
+   expires *untagged* images after a year, which does nothing for these.
+   Left alone, every `requirements.txt` change (a new ~200-300MB layer)
+   accumulates forever instead of replacing the old one, and eventually
+   exceeds ECR's 500MB Always-Free tier. This caps it at the 15 most
+   recent images and expires untagged leftovers after a day instead of a
+   year:
+   ```
+   aws ecr put-lifecycle-policy \
+     --repository-name cdk-hnb659fds-container-assets-<YOUR_ACCOUNT_ID>-eu-central-1 \
+     --lifecycle-policy-text '{
+       "rules": [
+         {"rulePriority": 1, "description": "Expire untagged images fast",
+          "selection": {"tagStatus": "untagged", "countType": "sinceImagePushed", "countUnit": "days", "countNumber": 1},
+          "action": {"type": "expire"}},
+         {"rulePriority": 2, "description": "Cap total stored images",
+          "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 15},
+          "action": {"type": "expire"}}
+       ]
+     }'
+   ```
+   One-time per account/region — this repo is shared bootstrap infrastructure,
+   not owned by this stack, so CDK won't reapply it on `cdk deploy`. If this
+   account ever runs another CDK app with container images, the cap of 15
+   applies across all of them combined, since they'd share this same repo.
 
 ## Deploying locally (do this before ever trusting CI with it)
 

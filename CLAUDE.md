@@ -1056,10 +1056,30 @@ Full design and the "why" behind each choice lives in `aws/README.md` and
   CloudFormation itself can assume. Lambda Function URLs, not API Gateway —
   no separate cost/service for auth features this app already implements
   itself in ASGI middleware. **Lambda container images, not zip packages**
-  — pandas/numpy/yfinance are too heavy and native-wheel-fragile for a
-  zip-based Lambda's ~250MB unzipped limit; one `Dockerfile.lambda` (named
-  that, not `Dockerfile`, so Railway's auto-detection never picks it up)
-  builds one image both Lambdas share via a different `cmd` override.
+  — measured, not assumed: a real `pip install --platform manylinux2014_x86_64`
+  of this repo's `requirements.txt` comes to **266MB unzipped**, already over
+  the zip-Lambda 250MB ceiling before any future dependency, and getting
+  comfortable margin back means stripping `__pycache__`, which trades size
+  for slower cold starts — the exact thing zip was meant to buy. `curl_cffi`
+  (38MB, yfinance's TLS-fingerprint dependency, non-optional), `pandas`
+  (74MB) and `numpy`+`numpy.libs` (70MB) are most of it. One
+  `Dockerfile.lambda` (named that, not `Dockerfile`, so Railway's
+  auto-detection never picks it up) builds one image both Lambdas share via
+  a different `cmd` override.
+- **ECR lifecycle policy — one-time, applied 24 Aug 2026, not reapplied by
+  CDK.** Container-image Lambdas must live in ECR; CDK pushes into the
+  shared repo `cdk bootstrap` already created
+  (`cdk-hnb659fds-container-assets-<account>-<region>`), so no new
+  component to create. But CDK tags every build permanently, and that
+  repo's own default lifecycle rule only expires *untagged* images after a
+  year — doing nothing for tagged ones. Without a policy, every
+  `requirements.txt` change (a new ~200-300MB layer) piles up forever
+  instead of replacing the old one, eventually exceeding ECR's 500MB
+  Always-Free tier. Fixed with a policy capping the repo at the 15 most
+  recent images (see `aws/README.md`) — this repo is shared bootstrap
+  infra, not owned by this stack, so the cap applies account-wide to any
+  other CDK app's container images too, and needs reapplying if the
+  bootstrap qualifier or account ever changes.
 - **Dev environment**: a dev container (`.devcontainer/`) holds Node/AWS
   CLI/`gh`/Docker (Docker-in-Docker, added in Phase 2 — rebuild the
   container if it was created before this) so the host stays clean; the
