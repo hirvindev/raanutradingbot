@@ -457,5 +457,115 @@ def find_top_picks_s3(n: int = 3, max_stocks: Optional[int] = None) -> list[dict
     return results[:n]
 
 
+SCAN_JOB_KEY = "scan_job.json"
+
+
+def run_scan_job() -> None:
+    """Lambda-only alternative to server.py's `/api/scan/stream` SSE route.
+
+    Runs the exact same combined S1+S2+S3 scan that route does (same
+    scoring calls, same qualifying thresholds, same market-cap lookup),
+    but persists progress to the state store every 25 tickers instead of
+    yielding SSE lines — a single Lambda invocation (through CloudFront)
+    can't stay open for the ~3-4 minutes this scan actually takes, so
+    server.py's `/api/scan/job` triggers this asynchronously on the worker
+    Lambda and polls this state instead. Deliberately a separate
+    implementation rather than shared with the SSE generator: this
+    codebase already tolerates near-identical scan loops (there are two
+    SSE routes today), and keeping this one independent means Railway's
+    working SSE path is never at risk of a regression from changes made
+    for this Lambda-only path.
+    """
+    from datadir import state_save
+    from strategy3 import score_from_df_s3
+
+    def _cap_label(mc):
+        if not mc: return "—"
+        if mc >= 200e9: return "Mega"
+        if mc >= 10e9:  return "Large"
+        if mc >= 2e9:   return "Mid"
+        if mc >= 300e6: return "Small"
+        return "Micro"
+
+    def _fetch_market_cap(ticker):
+        try:
+            import yfinance as yf
+            return yf.Ticker(ticker).fast_info.market_cap
+        except Exception:
+            return None
+
+    universe = FALLBACK_UNIVERSE
+    total = len(universe)
+    state_save(SCAN_JOB_KEY, {"status": "running", "scanned": 0, "total": total, "results": []})
+
+    try:
+        bench = benchmark_return_3m()
+        results = []
+        scanned = 0
+        chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
+
+        for chunk in chunks:
+            data = batch_download(chunk)
+            for ticker in chunk:
+                df = data.get(ticker)
+                scanned += 1
+
+                mc_fetched = False
+                mc_val = None
+
+                r1 = score_from_df(ticker, df, bench_ret_3m=bench)
+                s1_pass = (r1.get("ok") and r1.get("uptrend")
+                        and r1.get("score", 0) >= 70
+                        and r1.get("rsi", 50) <= 68
+                        and r1.get("macd", 0) >= r1.get("macd_signal", 0)
+                        and (r1.get("rel_strength") or 0) > 0
+                        and (r1.get("mom_3m") or 0) > 0)
+                if s1_pass:
+                    r1["strategy"] = "s1"
+                    r1["total"] = total
+                    r1["name"] = get_ticker_name(ticker)
+                    mc_val = _fetch_market_cap(ticker)
+                    mc_fetched = True
+                    r1["cap_label"] = _cap_label(mc_val)
+                    results.append(r1)
+
+                r2 = score_from_df_s2(ticker, df, bench_ret_3m=bench)
+                s2_pass = (r2.get("ok") and r2.get("stage2")
+                        and r2.get("score", 0) >= 70
+                        and (r2.get("rel_strength") or 0) > 0)
+                if s2_pass:
+                    r2["strategy"] = "s2"
+                    r2["total"] = total
+                    r2["name"] = get_ticker_name(ticker)
+                    if not mc_fetched:
+                        mc_val = _fetch_market_cap(ticker)
+                        mc_fetched = True
+                    r2["cap_label"] = _cap_label(mc_val)
+                    results.append(r2)
+
+                r3 = score_from_df_s3(ticker, df, bench_ret_3m=bench)
+                if r3.get("ok") and r3.get("leader_dip") and r3.get("score", 0) >= 60:
+                    r3["strategy"] = "s3"
+                    r3["total"] = total
+                    r3["name"] = get_ticker_name(ticker)
+                    if not mc_fetched:
+                        mc_val = _fetch_market_cap(ticker)
+                    r3["cap_label"] = _cap_label(mc_val)
+                    results.append(r3)
+
+                if scanned % 25 == 0 or scanned == total:
+                    state_save(SCAN_JOB_KEY, {
+                        "status": "running", "scanned": scanned, "total": total, "results": results,
+                    })
+
+        state_save(SCAN_JOB_KEY, {
+            "status": "done", "scanned": scanned, "total": total,
+            "results": results, "emitted": len(results),
+        })
+    except Exception as e:
+        log.exception(f"[scan job] failed: {e}")
+        state_save(SCAN_JOB_KEY, {"status": "error", "error": str(e)})
+
+
 def get_universe_summary() -> dict:
     return {"exchange": "US", "total_stocks": len(FALLBACK_UNIVERSE)}

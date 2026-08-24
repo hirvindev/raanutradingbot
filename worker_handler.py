@@ -105,5 +105,15 @@ def handler(event, context):
             log.exception(f"[worker] trade log seeding failed: {e}")
         _seeded = True
 
+    # On-demand invocation from server.py's POST /api/scan/job — a scan
+    # takes minutes, far longer than a Lambda-through-CloudFront request
+    # can stay open, so the API Lambda fires this asynchronously and polls
+    # the state store for progress instead. Distinct from the time-based
+    # dispatch below, which only ever runs on the 5-minute schedule.
+    if event.get("task") == "scan":
+        import scanner
+        scanner.run_scan_job()
+        return {"ok": True}
+
     asyncio.run(_run_due_jobs())
     return {"ok": True}

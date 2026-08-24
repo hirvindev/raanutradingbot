@@ -1499,43 +1499,53 @@ async function renderOutcomes(){
       </div>`;}).join('')}</div>` : ''}`;
 }
 
-el('scanBtn').onclick = () => {
+function renderScanRows(res){
+  return res.length ? res.map(r=>`<tr>
+      <td data-label="Instrument"><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
+      <td data-label="Strategy">${stag(r.strategy)}</td>
+      <td data-label="Score" class="pri num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
+      <td data-label="Price" class="num">${money(r.price||0)}</td>
+      <td data-label="RSI" class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
+      <td data-label="1M" class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
+      <td data-label="3M" class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
+      <td data-label="vs SPY" class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
+      <td data-label="Signal" class="reason mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="9">Nothing in a confirmed uptrend right now</td></tr>';
+}
+
+// A full scan takes ~3-4 minutes — this fires it on the worker Lambda
+// (POST /api/scan/job) and polls for progress/results (GET /api/scan/job)
+// instead of holding one long connection open, which Lambda/CloudFront
+// can't sustain (Function URL origin timeout caps at 60s without an AWS
+// quota increase, and Mangum buffers the whole response regardless).
+el('scanBtn').onclick = async () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
   el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="9">Screening…</td></tr>';
-  const res=[]; let total=0, done=0;
-  // EventSource cannot set headers, so the READ token goes in the query here.
-  // It is the only place a token rides in a URL; see _presented_token() in
-  // server.py for why that is acceptable for a read-only token.
-  const es=new EventSource('/api/scan/stream'+(readToken()?'?token='+encodeURIComponent(readToken()):''));
-  const finish = msg => { es.close(); btn.disabled=false; btn.textContent='Scan market';
+
+  let poll;
+  const finish = msg => { clearInterval(poll); btn.disabled=false; btn.textContent='Scan market';
                           prog.style.display='none'; el('scanStat').textContent=msg; };
-  es.onmessage = e => {
-    let d; try{ d=JSON.parse(e.data); }catch(_){ return; }
-    if(d.failed){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
+  const started = await action('/api/scan/job', {method:'POST'});
+  if(!started || started.cancelled || started.denied){ finish('Cancelled'); return; }
+  const startedBody = await started.json().catch(()=>({}));
+  if(!started.ok){ finish('Failed'); logLine('Scan failed to start: '+(startedBody.error||started.status),'err'); return; }
+
+  const tick = async () => {
+    const d = await j('/api/scan/job');
+    if(!d) return;
+    if(d.status==='error'){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
       body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${d.error}</td></tr>`; return; }
-    if(d.status==='downloading'){ total=d.total||0; el('scanStat').textContent=`Screening ${total}`; return; }
-    if(d.progress){ done=d.progress; if(total) bar.style.width=Math.min(100,done/total*100)+'%'; return; }
-    if(d.done){
-      res.sort((a,b)=>b.score-a.score);
-      body.innerHTML = res.length ? res.map(r=>`<tr>
-          <td data-label="Instrument"><span class="sym">${r.ticker}</span>${r.name&&r.name!==r.ticker?`<div class="sub">${r.name}</div>`:''}</td>
-          <td data-label="Strategy">${stag(r.strategy)}</td>
-          <td data-label="Score" class="pri num" style="color:${r.score>=75?'var(--green)':r.score>=60?'var(--head)':'var(--muted)'}">${r.score}</td>
-          <td data-label="Price" class="num">${money(r.price||0)}</td>
-          <td data-label="RSI" class="num">${r.rsi!=null?Number(r.rsi).toFixed(0):'—'}</td>
-          <td data-label="1M" class="num ${cls(r.mom_1m||0)}">${r.mom_1m!=null?pct(r.mom_1m):'—'}</td>
-          <td data-label="3M" class="num ${cls(r.mom_3m||0)}">${r.mom_3m!=null?pct(r.mom_3m):'—'}</td>
-          <td data-label="vs SPY" class="num ${cls(r.rel_strength||0)}">${r.rel_strength!=null?pct(r.rel_strength):'—'}</td>
-          <td data-label="Signal" class="reason mut" style="text-align:left;white-space:normal;max-width:280px">${(r.reasons||[])[0]||''}</td></tr>`).join('')
-        : '<tr><td class="empty" colspan="9">Nothing in a confirmed uptrend right now</td></tr>';
-      finish(`${d.scanned||total} screened · ${res.length} candidates`);
-      logLine(`Scan done — ${d.scanned||total} screened, ${res.length} candidates`,'ok');
-      return;
-    }
-    if(d.ticker) res.push(d);
+    if(d.total) bar.style.width=Math.min(100,(d.scanned||0)/d.total*100)+'%';
+    el('scanStat').textContent = d.status==='done' ? 'Finishing' : `Screening ${d.total||0}`;
+    if(d.status!=='done') return;
+    const res=(d.results||[]).slice().sort((a,b)=>b.score-a.score);
+    body.innerHTML = renderScanRows(res);
+    finish(`${d.scanned||d.total||0} screened · ${res.length} candidates`);
+    logLine(`Scan done — ${d.scanned||d.total||0} screened, ${res.length} candidates`,'ok');
   };
-  es.onerror = () => finish('Connection lost');
+  poll = setInterval(tick, 1500);
+  tick();
 };
 
 /* ── strategy ──────────────────────────────────────────── */

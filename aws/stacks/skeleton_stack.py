@@ -141,10 +141,23 @@ class SkeletonStack(Stack):
             "WorkerFunction",
             code=worker_image,
             architecture=LAMBDA_ARCHITECTURE,
-            timeout=Duration.minutes(5),
+            # 10 min, not 5: a real on-demand scan measured ~3.5 minutes
+            # end to end, with yfinance retries on delisted tickers adding
+            # variance outside our control — 5 minutes left uncomfortably
+            # little margin.
+            timeout=Duration.minutes(10),
             memory_size=1024,
             environment=common_env,
         )
+
+        # Lets POST /api/scan/job (server.py) fire an async scan on the
+        # worker instead of running it inline — a scan takes minutes,
+        # longer than a Lambda-through-CloudFront request can stay open.
+        # One-directional (worker_fn doesn't reference api_fn or the
+        # distribution), so this doesn't reintroduce the circular
+        # dependency fixed earlier.
+        worker_fn.grant_invoke(api_fn)
+        api_fn.add_environment("WORKER_FUNCTION_NAME", worker_fn.function_name)
 
         state_table.grant_read_write_data(api_fn)
         state_table.grant_read_write_data(worker_fn)

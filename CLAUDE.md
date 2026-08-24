@@ -508,17 +508,24 @@ unnecessary when only uptrend pullbacks are ever bought.
 
 - `find_top_picks(n)` — auto-trader path. Batch-scores the curated universe,
   keeps only `uptrend == true AND score >= 60`, returns the top `n`.
-- `/api/scan/stream` (browser Live Signals) — screens the **same** curated
-  universe and streams **only confirmed-uptrend candidates** (emits a lightweight
-  `progress` tick per 25 tickers so the bar advances; non-uptrend names are
-  scored but never emitted).
+- `/api/scan/job` (browser Live Signals, POST to start + GET to poll) — the
+  same combined S1+S2+S3 scan `run_scan_job()` in scanner.py runs, with
+  progress written to the state store every 25 tickers instead of streamed.
+  Replaced the old `/api/scan/stream` SSE endpoint entirely (removed, along
+  with the unused `/api/scan/stream/s2`) — see the AWS Migration section for
+  why: a real scan takes minutes, not seconds, and neither Lambda nor
+  CloudFront can hold a request open that long.
 - Both compute the SPY relative-strength benchmark once per scan.
 
 **TEST_UNIVERSE** (used when `force=true`): AAPL, NVDA, MSFT, GOOGL, META
 
-**Performance:** curated universe scans in a few seconds (batched yfinance,
-`CHUNK_SIZE=250`). `get_universe()` (full Alpaca list) still exists but is no
-longer used for scanning — kept only for reference.
+**Performance:** a full curated-universe scan takes **~3-4 minutes** in
+practice (measured directly, not estimated) — batched yfinance calls plus
+retries on delisted tickers add up across 472 names. The "a few seconds"
+figure that used to be here was wrong and cost real debugging time: it's
+what the whole streaming-vs-async-job design decision above turned on.
+`get_universe()` (full Alpaca list) still exists but is no longer used for
+scanning — kept only for reference.
 
 **Note:** All tickers are US-listed and directly executable on Alpaca.
 
@@ -754,9 +761,10 @@ the token it carries must not be able to move money.
   protected the day it is written, not the day someone remembers to add it.
 - `GET /` (the HTML shell) stays public; it holds no data.
 - `/webhook/whatsapp` is outside `/api/` so Twilio can still reach it.
-- `/api/scan/stream` also accepts `?token=` because **EventSource cannot set
-  headers**. That is the only place a token rides in a URL, and it is why the
-  read token can never authorise an order — it will appear in access logs.
+- The old `/api/scan/stream` used to accept `?token=` too, because
+  **EventSource cannot set headers** — that route is gone (replaced by
+  `/api/scan/job`, ordinary header auth like everything else), so there is
+  no longer any place a token rides in a URL or could appear in access logs.
 - **The gate is skipped entirely when `API_READ_TOKEN` is unset**, logging a
   warning on every request. A deploy must not lock the owner out before the
   variable exists, but "temporarily open" must not go quiet either.
@@ -1085,12 +1093,23 @@ Full design and the "why" behind each choice lives in `aws/README.md` and
   container if it was created before this) so the host stays clean; the
   CDK CLI itself is pinned in `aws/package.json`, not baked into the
   container image, so local and CI can never drift apart on version.
+- **Live Signals scanning now requires the worker Lambda — Railway's
+  version of this feature is gone, not degraded.** The original plan kept
+  `/api/scan/stream`'s SSE endpoint as Railway-only and added a separate
+  Lambda path; that changed once the target became "build this properly
+  for AWS, stop carrying Railway-compatibility cost." A real scan measured
+  at ~3-4 minutes, well past what a live SSE connection can survive through
+  CloudFront (60s origin timeout ceiling) or what Mangum could stream even
+  if it survived (it buffers the whole response). `/api/scan/job`
+  (`POST` to start, `GET` to poll) replaced it outright — same combined
+  S1+S2+S3 scan, running on the worker Lambda, progress in the state store
+  instead of SSE. Since `server.py` is one shared codebase, Railway lost
+  its working Live Signals scan button the moment this shipped — a
+  deliberate, confirmed trade-off, not an oversight.
 - **Not started yet**: migrating Railway's actual trade history into
   DynamoDB (safe to defer — the worker's scheduler starts disabled, so
-  empty starting state costs nothing), true SSE streaming for
-  `/api/scan/stream` on Lambda (degrades to a blocking response — Mangum
-  doesn't support Lambda response streaming), and actually flipping the
-  worker's schedule on to retire Railway.
+  empty starting state costs nothing), and actually flipping the worker's
+  schedule on to retire Railway for real.
 
 ---
 

@@ -33,12 +33,18 @@ throughout, and both hitting the same paper account/weekly limits at once
 would double-count trades. Flip it on only once you're ready to retire
 Railway's scheduler (or accept the overlap deliberately).
 
+**Live Signals scanning is now Lambda-only.** `/api/scan/stream` (SSE) is
+gone — a real scan takes ~3-4 minutes, past what CloudFront/Lambda can hold
+a live connection open for regardless of tuning. `/api/scan/job` (`POST`
+to start, `GET` to poll) replaced it: fires the scan on the worker Lambda
+and reports progress through the state store. Since Railway runs this same
+`server.py`, its Live Signals scan button stops working too — a deliberate
+trade-off once the target became building this properly for AWS rather
+than preserving Railway compatibility.
+
 **Not done yet:** migrating Railway's actual trade history into DynamoDB
 (this deploys with empty state, which is safe exactly because the scheduler
-starts disabled), and true SSE streaming for `/api/scan/stream` (Lambda
-buffers the full response before returning it, so the live per-25-ticker
-progress ticks degrade to a blocking wait — the scan itself still finishes
-in a few seconds per `scanner.py`'s own numbers).
+starts disabled).
 
 ## Layout
 

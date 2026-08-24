@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
-                               RedirectResponse, StreamingResponse)
+                               RedirectResponse)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -793,17 +793,19 @@ def _record_fail(ip: str, presented: str):
 
 
 def _presented_token(request: Request) -> str:
-    """Read the caller's token from the header, or the query for SSE.
+    """Read the caller's token from the header.
 
-    EventSource cannot set request headers, so /api/scan/stream is the one route
-    that accepts ?token=. That does mean the token appears in access logs, which
-    is why it is the READ token only — it can never authorise an order.
+    Used to accept ?token= too, for /api/scan/stream's EventSource
+    connection — EventSource can't set request headers. That route is gone
+    (replaced by the async job + polling endpoints, /api/scan/job, which
+    use ordinary header auth like everything else), so this no longer
+    needs a query-string fallback — one less place a token could end up in
+    access logs or browser history.
     """
     auth = request.headers.get("authorization", "")
     if auth[:7].lower() == "bearer ":
         return auth[7:].strip()
-    return (request.headers.get("x-api-token")
-            or request.query_params.get("token") or "").strip()
+    return (request.headers.get("x-api-token") or "").strip()
 
 
 @app.middleware("http")
@@ -958,6 +960,10 @@ def health():
         "key_configured": bool(ALPACA_API_KEY),
         "telegram_configured": tg_configured(),
         "tradelog_seed": _seed_result,
+        # Operational visibility only — true once WORKER_FUNCTION_NAME is
+        # wired up (the AWS deployment), which is the same check
+        # /api/scan/job itself makes before firing an invoke.
+        "async_scan": bool(os.getenv("WORKER_FUNCTION_NAME", "").strip()),
         "state": {
             "data_dir":       str(_DATA_DIR),
             "persistent":     _persistent,
@@ -1607,117 +1613,40 @@ async def stocks_market_movers(top: int = 10):
     return {"gainers": data.get("gainers", []), "losers": data.get("losers", []), "source": "alpaca"}
 
 
-# ---------- STREAMING SCAN ----------
-@app.get("/api/scan/stream")
-async def scan_stream():
-    """
-    SSE endpoint — scans the curated universe with ALL THREE strategies (S1
-    pullback, S2 breakout, S3 leader dip) and streams qualifying stocks tagged
-    with which engine surfaced them. A ticker can appear more than once if it
-    passes several: those are different setups, not duplicates.
-    """
-    from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
-    from strategy import score_from_df, batch_download, benchmark_return_3m
-    from strategy2 import score_from_df_s2
-    from strategy3 import score_from_df_s3
+# ---------- SCAN JOB ----------
+# A full curated-universe scan (472 tickers) takes ~3-4 minutes. Lambda has
+# no way to hold a request open that long — CloudFront's origin timeout for
+# a Function URL caps at 60s without an AWS service-quota increase, and
+# Mangum buffers the whole response before returning anything regardless.
+# So this fires the scan on the worker Lambda asynchronously
+# (scanner.run_scan_job()) and the dashboard polls for progress/results
+# instead of holding a live connection open.
+@app.post("/api/scan/job")
+async def scan_job_start():
+    worker_fn_name = os.getenv("WORKER_FUNCTION_NAME", "").strip()
+    if not worker_fn_name:
+        return JSONResponse(
+            {"error": "WORKER_FUNCTION_NAME not set — this endpoint requires the worker Lambda"},
+            status_code=501,
+        )
+    from scanner import SCAN_JOB_KEY
+    if state_load(SCAN_JOB_KEY, default={}).get("status") == "running":
+        return {"status": "already_running"}
 
-    async def generator():
-        import json
-        loop = asyncio.get_event_loop()
-
-        universe = FALLBACK_UNIVERSE
-
-        bench = await loop.run_in_executor(None, benchmark_return_3m)
-
-        total = len(universe)
-        yield f"data: {json.dumps({'status': 'downloading', 'total': total})}\n\n"
-
-        scanned = 0
-        emitted = 0
-        chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
-
-        def _cap_label(mc):
-            if not mc: return "—"
-            if mc >= 200e9: return "Mega"
-            if mc >= 10e9:  return "Large"
-            if mc >= 2e9:   return "Mid"
-            if mc >= 300e6: return "Small"
-            return "Micro"
-
-        def _fetch_market_cap(ticker):
-            try:
-                import yfinance as yf
-                return yf.Ticker(ticker).fast_info.market_cap
-            except Exception:
-                return None
-
-        for chunk in chunks:
-            data = await loop.run_in_executor(None, batch_download, chunk)
-            for ticker in chunk:
-                df = data.get(ticker)
-                scanned += 1
-                if scanned % 25 == 0 or scanned == total:
-                    yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
-
-                mc_fetched = False
-                mc_val = None
-
-                # S1: Pullback-in-Uptrend — high conviction only
-                r1 = score_from_df(ticker, df, bench_ret_3m=bench)
-                s1_pass = (r1.get("ok") and r1.get("uptrend")
-                        and r1.get("score", 0) >= 70
-                        and r1.get("rsi", 50) <= 68
-                        and r1.get("macd", 0) >= r1.get("macd_signal", 0)
-                        and (r1.get("rel_strength") or 0) > 0
-                        and (r1.get("mom_3m") or 0) > 0)
-                if s1_pass:
-                    r1["strategy"] = "s1"
-                    r1["total"] = total
-                    r1["name"] = get_ticker_name(ticker)
-                    mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
-                    mc_fetched = True
-                    r1["cap_label"] = _cap_label(mc_val)
-                    yield f"data: {json.dumps(r1)}\n\n"
-                    emitted += 1
-
-                # S2: VCP Breakout — high conviction only
-                r2 = score_from_df_s2(ticker, df, bench_ret_3m=bench)
-                s2_pass = (r2.get("ok") and r2.get("stage2")
-                        and r2.get("score", 0) >= 70
-                        and (r2.get("rel_strength") or 0) > 0)
-                if s2_pass:
-                    r2["strategy"] = "s2"
-                    r2["total"] = total
-                    r2["name"] = get_ticker_name(ticker)
-                    if not mc_fetched:
-                        mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
-                    r2["cap_label"] = _cap_label(mc_val)
-                    yield f"data: {json.dumps(r2)}\n\n"
-                    emitted += 1
-
-                # S3: Leader Dip. Absent from this stream since S3 was written —
-                # the browser scanner has only ever shown S1 and S2, so the one
-                # strategy profitable in BOTH halves of the backtest was
-                # invisible on the screen used to eyeball candidates. Same
-                # omission that kept it out of the pre-market alerts.
-                r3 = score_from_df_s3(ticker, df, bench_ret_3m=bench)
-                if r3.get("ok") and r3.get("leader_dip") and r3.get("score", 0) >= 60:
-                    r3["strategy"] = "s3"
-                    r3["total"] = total
-                    r3["name"] = get_ticker_name(ticker)
-                    if not mc_fetched:
-                        mc_val = await loop.run_in_executor(None, _fetch_market_cap, ticker)
-                    r3["cap_label"] = _cap_label(mc_val)
-                    yield f"data: {json.dumps(r3)}\n\n"
-                    emitted += 1
-
-        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    import boto3
+    boto3.client("lambda").invoke(
+        FunctionName=worker_fn_name,
+        InvocationType="Event",
+        Payload=json.dumps({"task": "scan"}).encode(),
     )
+    return {"status": "started"}
+
+
+@app.get("/api/scan/job")
+async def scan_job_status():
+    """Poll target for scan_job_start() above."""
+    from scanner import SCAN_JOB_KEY
+    return state_load(SCAN_JOB_KEY, default={"status": "idle"})
 
 
 # ---------- STRATEGY COMPARISON ----------
@@ -2134,50 +2063,6 @@ def _booked_totals(round_trips: list[dict]) -> dict:
         "payoff":        round(abs((gross_profit / len(wins)) / (gross_loss / len(losses))), 2)
                          if wins and losses and gross_loss else 0,
     }
-
-
-@app.get("/api/scan/stream/s2")
-async def scan_stream_s2():
-    """SSE endpoint — scans the curated universe with Strategy 2 (VCP Breakout)."""
-    from scanner import FALLBACK_UNIVERSE, get_ticker_name, CHUNK_SIZE
-    from strategy2 import score_from_df_s2
-    from strategy import batch_download, benchmark_return_3m
-
-    async def generator():
-        import json
-        loop = asyncio.get_event_loop()
-        universe = FALLBACK_UNIVERSE
-        bench = await loop.run_in_executor(None, benchmark_return_3m)
-        total = len(universe)
-        yield f"data: {json.dumps({'status': 'downloading', 'total': total, 'strategy': 's2'})}\n\n"
-
-        scanned = 0
-        emitted = 0
-        chunks = [universe[i:i + CHUNK_SIZE] for i in range(0, len(universe), CHUNK_SIZE)]
-
-        for chunk in chunks:
-            data = await loop.run_in_executor(None, batch_download, chunk)
-            for ticker in chunk:
-                result = score_from_df_s2(ticker, data.get(ticker), bench_ret_3m=bench)
-                scanned += 1
-                if scanned % 25 == 0 or scanned == total:
-                    yield f"data: {json.dumps({'progress': True, 'scanned': scanned, 'total': total})}\n\n"
-                if not (result.get("ok") and result.get("stage2")):
-                    continue
-                if result.get("score", 0) < 60:
-                    continue
-                result["total"] = total
-                result["name"] = get_ticker_name(ticker)
-                yield f"data: {json.dumps(result)}\n\n"
-                emitted += 1
-
-        yield f"data: {json.dumps({'done': True, 'scanned': scanned, 'emitted': emitted, 'total': total})}\n\n"
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @app.post("/api/auto/scan-now/s2")
