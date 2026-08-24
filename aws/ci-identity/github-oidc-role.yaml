@@ -17,6 +17,19 @@ Parameters:
     Type: String
     Default: main
     Description: Only workflow runs against this branch can assume the role.
+  GitHubOwnerId:
+    Type: String
+    Default: "10034463"
+    Description: >
+      Numeric GitHub user/org ID. GitHub's OIDC sub claim now defaults to
+      "repo:{owner}@{ownerId}/{repo}@{repoId}:..." (immutable IDs survive a
+      rename/transfer that would otherwise let a stale trust policy match the
+      wrong repo). Get both IDs with:
+      `gh api repos/<org>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix`
+  GitHubRepoId:
+    Type: String
+    Default: "1344660520"
+    Description: Numeric GitHub repository ID — see GitHubOwnerId.
   ExistingOidcProviderArn:
     Type: String
     Default: ""
@@ -79,7 +92,7 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/${GitHubBranch}"
       Policies:
         - PolicyName: AssumeCdkBootstrapRoles
           PolicyDocument:
