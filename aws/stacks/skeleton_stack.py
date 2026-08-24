@@ -97,10 +97,17 @@ class SkeletonStack(Stack):
             ),
         )
 
+        # No ALLOWED_ORIGINS pointing at the distribution's own domain here —
+        # that would make the Lambda depend on the Distribution's output
+        # while the Distribution's behavior (below) depends on the Lambda's
+        # Function URL, a genuine circular dependency CloudFormation refuses
+        # to resolve. It isn't needed anyway: CloudFront makes the dashboard
+        # and the API the same origin from the browser's perspective, so no
+        # request here is ever actually cross-origin — the CORS check in
+        # server.py's middleware simply never has anything to enforce.
         common_env = {
             "STATE_BACKEND": "dynamodb",
             "STATE_TABLE": state_table.table_name,
-            "ALLOWED_ORIGINS": f"https://{distribution.distribution_domain_name}",
         }
 
         # Both Lambdas share one built image (same Dockerfile, same repo-root
