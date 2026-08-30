@@ -180,6 +180,31 @@ class TestScanJobRoutes:
 
         assert client.post("/api/scan/job?mode=cheap").json()["shards"] == 1
 
+    def test_universes_endpoint_lists_curated_first(self, client):
+        body = client.get("/api/scan/universes").json()
+        assert body["default"] == "curated"
+        assert body["universes"][0]["key"] == "curated"
+        assert {"nasdaq", "nyse", "nyse_arca"} <= {u["key"] for u in body["universes"]}
+
+    def test_universe_param_selects_what_gets_scanned(self, client, monkeypatch):
+        monkeypatch.setenv("WORKER_FUNCTION_NAME", "raanu-worker")
+        sent = []
+
+        class FakeLambda:
+            def invoke(self, **kw):
+                sent.append(kw)
+                return {"StatusCode": 202}
+
+        import boto3
+        monkeypatch.setattr(boto3, "client", lambda *a, **k: FakeLambda())
+
+        body = client.post("/api/scan/job?universe=nyse_american").json()
+        assert body["universe"] == "nyse_american"
+        assert body["total"] == 274          # NYSE American, not the curated 470
+        import json as _json
+        dispatched = [t for c in sent for t in _json.loads(c["Payload"])["tickers"]]
+        assert len(dispatched) == 274
+
     def test_a_second_start_while_running_does_not_fan_out_twice(self, client, monkeypatch):
         monkeypatch.setenv("WORKER_FUNCTION_NAME", "raanu-worker")
         monkeypatch.setenv("SCAN_SHARDS", "2")

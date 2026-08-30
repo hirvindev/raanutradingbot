@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from raanu import config
 from raanu.clock import BERLIN
+from raanu.market import exchanges
 from raanu.scanning import job
 from raanu.scanning.engine import top_picks
 from raanu.trading.schedule import _load_picks, _load_picks_s2, _save_picks, _save_picks_s2
@@ -78,9 +79,23 @@ async def scan_alert_now():
 # long here (CloudFront's Function URL origin timeout caps at 60s without an
 # AWS quota increase, and Mangum buffers the whole response anyway), so a
 # scan is a job: started asynchronously, polled for progress.
+@router.get("/api/scan/universes")
+async def scan_universes():
+    """What the dashboard's universe dropdown offers.
+
+    Curated first — it is the default. The exchange-wide entries are the
+    deliberate exception, and their counts are shown so it is obvious that
+    picking "Nasdaq" means 5,581 tickers rather than 470.
+    """
+    return {"universes": exchanges.catalog(), "default": exchanges.CURATED}
+
+
 @router.post("/api/scan/job")
-async def scan_job_start(mode: str = "fast"):
+async def scan_job_start(mode: str = "fast", universe: str = exchanges.CURATED):
     """Start a scan.
+
+    ``universe`` selects what to scan: ``curated`` (the default 470-name
+    list), an exchange key from /api/scan/universes, or ``all``.
 
     ``fast`` fans out across worker invocations for someone watching a
     progress bar; ``cheap`` runs it in one invocation for the scheduled
@@ -96,10 +111,12 @@ async def scan_job_start(mode: str = "fast"):
         # Re-entrancy guard: a double-click must not fan out twice.
         return {"status": "already_running"}
 
-    manifest = job.start_run(mode="cheap" if mode == "cheap" else "fast")
+    manifest = job.start_run(mode="cheap" if mode == "cheap" else "fast",
+                             universe_key=universe)
     job.dispatch(manifest)
     return {"status": "started", "run_id": manifest["run_id"],
-            "shards": manifest["shards"], "mode": manifest["mode"]}
+            "shards": manifest["shards"], "mode": manifest["mode"],
+            "universe": manifest["universe"], "total": manifest["total"]}
 
 
 @router.get("/api/scan/job")

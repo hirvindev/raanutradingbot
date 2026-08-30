@@ -180,6 +180,9 @@ tbody tr:hover{background:var(--wash)}
 .bar{display:flex;gap:7px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .chip{font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:3px;padding:5px 11px;cursor:pointer;user-select:none}
 .chip:hover{color:var(--text)}
+.sel{font:inherit;font-size:12px;color:var(--text);background:var(--card);
+     border:1px solid var(--line);border-radius:3px;padding:5px 9px;cursor:pointer}
+.sel:focus{outline:0;border-color:var(--accent)}
 .chip.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
 .btn{font:inherit;font-size:12px;color:#fff;background:var(--accent);border:0;border-radius:3px;padding:7px 14px;cursor:pointer}
 .btn:hover{background:var(--accent-dark)}
@@ -681,8 +684,12 @@ details .inner{padding:0 18px 16px}
     <h2>Live signals <em id="sigNote">screens the curated universe and shows only confirmed candidates</em></h2>
     <div class="bar">
       <button class="btn" id="scanBtn">Scan market</button>
+      <select id="scanUniverse" class="sel" title="What to scan">
+        <option value="curated">Curated list</option>
+      </select>
       <span class="chip mut" id="scanStat">Idle</span>
     </div>
+    <div class="mut" id="scanScope" style="font-size:12px;margin:-6px 0 10px"></div>
     <div class="prog" id="prog"><i></i></div>
     <div class="card scroll cards">
       <table>
@@ -1521,8 +1528,44 @@ function renderScanRows(res){
 // The server reports per-shard progress and its running result list on
 // every poll, so results appear as they are found rather than all at once
 // at the end.
+// Populate the universe dropdown once. "Curated list" is the default and
+// what the plain Scan button has always done; the exchange entries are the
+// full-scan option. Counts are shown because picking Nasdaq means 5,581
+// tickers rather than 470, and that should be obvious before clicking.
+let UNIVERSES = [];
+async function loadUniverses(){
+  const d = await j('/api/scan/universes');
+  if(!d || !d.universes) return;
+  UNIVERSES = d.universes;
+  const sel = el('scanUniverse');
+  sel.innerHTML = UNIVERSES.map(u =>
+    `<option value="${u.key}">${u.label} · ${u.total.toLocaleString()}</option>`).join('');
+  sel.value = d.default || 'curated';
+  describeUniverse();
+}
+
+function describeUniverse(){
+  const u = UNIVERSES.find(x => x.key === el('scanUniverse').value);
+  if(!u){ el('scanScope').textContent=''; return; }
+  if(u.key === 'curated'){
+    el('scanScope').textContent =
+      `${u.total.toLocaleString()} hand-picked liquid names across NYSE, Nasdaq and Arca.`;
+    return;
+  }
+  // Worth stating plainly: Arca and BZX are ETF venues, and these are
+  // equity strategies, so a full scan there mostly buys download time.
+  const etfHeavy = u.etfs > u.stocks;
+  el('scanScope').textContent =
+    `${u.total.toLocaleString()} listed — ${u.stocks.toLocaleString()} stocks, ` +
+    `${u.etfs.toLocaleString()} ETFs.` +
+    (etfHeavy ? ' Mostly ETFs; these are equity strategies, so expect few candidates.' : '') +
+    ` Cold scan takes a while — roughly ${Math.max(1, Math.round(u.total/20/60))} min if today's cache is empty.`;
+}
+el('scanUniverse').onchange = describeUniverse;
+
 el('scanBtn').onclick = async () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
+  const universe = el('scanUniverse').value || 'curated';
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
   el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="9">Screening…</td></tr>';
 
@@ -1534,7 +1577,7 @@ el('scanBtn').onclick = async () => {
     body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${detail}</td></tr>`;
   };
 
-  const started = await action('/api/scan/job', {method:'POST'});
+  const started = await action(`/api/scan/job?universe=${encodeURIComponent(universe)}`, {method:'POST'});
   if(!started || started.cancelled || started.denied){ finish('Cancelled'); return; }
   const startedBody = await started.json().catch(()=>({}));
   if(!started.ok){ fail('Failed', startedBody.error || started.status); return; }
@@ -1566,16 +1609,22 @@ el('scanBtn').onclick = async () => {
 
     if(d.status !== 'done'){
       const shards = d.shards > 1 ? ` · ${d.shards_done||0}/${d.shards} shards` : '';
-      const found  = res.length ? ` · ${res.length} found` : '';
-      el('scanStat').textContent = `Screening ${d.scanned||0}/${d.total||0}${shards}${found}`;
+      const found  = d.total_hits ? ` · ${d.total_hits} found` : '';
+      el('scanStat').textContent =
+        `Screening ${(d.scanned||0).toLocaleString()}/${(d.total||0).toLocaleString()}${shards}${found}`;
       return;
     }
 
     if(!res.length) body.innerHTML = renderScanRows(res);
     const partial = d.failed_shards ? ` (${d.failed_shards} shard(s) failed)` : '';
-    finish(`${d.scanned||d.total||0} screened · ${res.length} candidates · ${d.elapsed}s${partial}`);
-    logLine(`Scan done in ${d.elapsed}s — ${d.scanned||d.total||0} screened, `+
-            `${res.length} candidates${partial}`, d.failed_shards ? 'err' : 'ok');
+    // total_hits exceeds what is shown once a shard caps its list, so say
+    // "top N of M" rather than presenting a truncated list as the whole answer.
+    const total = d.total_hits ?? res.length;
+    const shown = total > res.length ? `top ${res.length} of ${total}` : `${res.length}`;
+    finish(`${(d.scanned||d.total||0).toLocaleString()} screened · ${shown} candidates · ${d.elapsed}s${partial}`);
+    logLine(`Scan done in ${d.elapsed}s (${d.universe_label||universe}) — `+
+            `${d.scanned||d.total||0} screened, ${shown} candidates${partial}`,
+            d.failed_shards ? 'err' : 'ok');
   };
   poll = setInterval(tick, 1500);
   tick();
@@ -1846,6 +1895,7 @@ el('tokenSave').onclick = () => {
   setToken(t);
   el('tokenGate').style.display='none';
   el('tokenInput').value='';
+  loadUniverses();
   load().then(()=>logLine('Dashboard loaded','ok'));
 };
 el('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') el('tokenSave').click(); });
@@ -1857,6 +1907,7 @@ if(location.hash) go(location.hash.slice(1));
 (async () => {
   const probe = await fetch(API+'/api/health', {headers: authHeaders()}).catch(()=>null);
   if(probe && probe.status === 401){ askForToken(); return; }
+  loadUniverses();
   load().then(()=>logLine('Dashboard loaded','ok'));
 })();
 setInterval(() => { if(el('tokenGate').style.display!=='flex') load(); }, 30000);

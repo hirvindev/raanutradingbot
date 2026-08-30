@@ -36,7 +36,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from raanu import config, state
-from raanu.market.universe import scannable_universe
+from raanu.market import exchanges
 from raanu.scanning.engine import enrich_market_caps, scan_universe
 
 log = logging.getLogger("raanu.scanning.job")
@@ -48,6 +48,31 @@ MANIFEST_KEY = "scan/current"
 # items never accumulate.
 _RUN_TTL_SECONDS = 24 * 3600
 
+# Tickers per shard the planner aims for when sizing a fan-out. A curated
+# 470-ticker scan stays at SCAN_SHARDS; a full-exchange scan gets more
+# shards rather than longer ones, so no single shard approaches the Lambda
+# timeout.
+_TARGET_PER_SHARD = 600
+
+# Concurrency ceiling. 8 shards measured ~20 tickers/s aggregate against a
+# ~6.2/s single-host rate — a 3.2x gain, not 8x, which says Yahoo is already
+# throttling partially. Going much wider is untested and may trip a harder
+# limit rather than going faster, so this stays conservative. Raise it only
+# with a measurement in hand.
+_MAX_SHARDS = 12
+
+# Hits each shard keeps, highest score first. A full-exchange scan projects
+# to ~880 hits at ~640 bytes each — over half a megabyte in every poll
+# response, at 1.5s intervals. Capping bounds both that and the DynamoDB
+# item. The true count is still reported as `total_hits`, so truncation is
+# visible rather than silent.
+#
+# Note this keeps each shard's OWN top N, which is not exactly the global
+# top N: a shard finding 40 strong names loses its weakest while an empty
+# shard contributes nothing. The very best names survive regardless, which
+# is what the screen is for.
+_MAX_HITS_PER_SHARD = 25
+
 # How long a run may go without completing before the aggregate reports it
 # as stalled. A shard that dies (OOM, timeout, a Lambda-level error) would
 # otherwise leave the UI polling a run that can never finish.
@@ -56,6 +81,13 @@ _STALL_AFTER_SECONDS = 15 * 60
 
 def _shard_key(run_id: str, index: int) -> str:
     return f"scan/{run_id}/shard/{index}"
+
+
+def shard_count_for(ticker_count: int) -> int:
+    """How many shards to fan a scan of this size across."""
+    import math
+    wanted = math.ceil(ticker_count / _TARGET_PER_SHARD) if ticker_count else 1
+    return max(config.scan_shards(), min(wanted, _MAX_SHARDS))
 
 
 def plan_shards(tickers: list[str], shard_count: int) -> list[list[str]]:
@@ -75,15 +107,18 @@ def plan_shards(tickers: list[str], shard_count: int) -> list[list[str]]:
     return shards
 
 
-def start_run(mode: str = "fast", tickers: list[str] | None = None) -> dict:
+def start_run(mode: str = "fast", tickers: list[str] | None = None,
+              universe_key: str = exchanges.CURATED) -> dict:
     """Create a run manifest and return it. Does not execute anything."""
-    universe = tickers if tickers is not None else scannable_universe()
-    shard_count = config.scan_shards() if mode == "fast" else 1
+    universe = tickers if tickers is not None else exchanges.tickers_for(universe_key)
+    shard_count = shard_count_for(len(universe)) if mode == "fast" else 1
     shards = plan_shards(universe, shard_count)
 
     manifest = {
         "run_id": uuid.uuid4().hex[:12],
         "mode": mode,
+        "universe": universe_key,
+        "universe_label": exchanges.label_for(universe_key),
         "shards": len(shards),
         "total": len(universe),
         "started_at": time.time(),
@@ -108,7 +143,14 @@ def run_shard(run_id: str, index: int, tickers: list[str]) -> None:
     total = len(tickers)
 
     def publish(status: str, scanned: int, hits: list[dict], error: str | None = None) -> None:
-        payload = {"status": status, "scanned": scanned, "total": total, "hits": hits}
+        ranked = sorted(hits, key=lambda h: h.get("score", 0), reverse=True)
+        payload = {
+            "status": status,
+            "scanned": scanned,
+            "total": total,
+            "hits": ranked[:_MAX_HITS_PER_SHARD],
+            "total_hits": len(ranked),
+        }
         if error:
             payload["error"] = error
         state.save(key, payload, ttl_seconds=_RUN_TTL_SECONDS)
@@ -187,8 +229,10 @@ def status() -> dict:
 
     scanned = sum(s.get("scanned", 0) for s in shards.values())
     hits: list[dict] = []
+    found = 0
     for shard in shards.values():
         hits.extend(shard.get("hits") or [])
+        found += shard.get("total_hits", len(shard.get("hits") or []))
     hits.sort(key=lambda h: h.get("score", 0), reverse=True)
 
     done = sum(1 for s in shards.values() if s.get("status") == "done")
@@ -212,7 +256,13 @@ def status() -> dict:
         "total": manifest.get("total", 0),
         "shards": shard_count,
         "shards_done": done,
+        "universe": manifest.get("universe", exchanges.CURATED),
+        "universe_label": manifest.get("universe_label", ""),
         "results": hits,
+        # Diverges from len(results) once a shard hits _MAX_HITS_PER_SHARD.
+        # Surfaced so the UI can say "showing N of M" instead of quietly
+        # presenting a truncated list as the whole answer.
+        "total_hits": found,
         "elapsed": round(time.time() - manifest.get("started_at", 0), 1),
     }
     if failed:
