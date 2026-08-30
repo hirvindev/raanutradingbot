@@ -792,8 +792,24 @@ function askForToken(msg){
 const j = async p => {
   try{
     const r = await fetch(API+p, {headers: authHeaders()});
-    if(r.status === 429){ const d=await r.json().catch(()=>({}));
-      askForToken(`Too many failed attempts. Try again in ${Math.ceil((d.retry_after_sec||900)/60)} minutes.`); return null; }
+    if(r.status === 429){
+      const d = await r.json().catch(()=>({}));
+      // Two very different things return 429, and conflating them told the
+      // user "Too many failed attempts, try again in 15 minutes" when they
+      // had made no attempts at all and no passphrase was even configured:
+      //   - the auth gate's lockout, which DOES send error/retry_after_sec
+      //   - AWS Lambda throttling (ConcurrentInvocationLimitExceeded),
+      //     which is transient, unrelated to credentials, and clears in
+      //     seconds once the running scan's shards finish
+      if(d.error === 'too_many_attempts'){
+        askForToken(`Too many failed attempts. Try again in ${Math.ceil((d.retry_after_sec||900)/60)} minutes.`);
+      } else {
+        // Never prompt for a credential the server did not ask for.
+        logLine('Server busy (throttled) — retrying on the next refresh','err');
+        el('scanStat') && (el('scanStat').textContent = 'Server busy — retrying');
+      }
+      return null;
+    }
     if(r.status === 401){ askForToken('That passphrase was not accepted. Try again.'); return null; }
     return r.ok ? await r.json() : null;
   }catch(e){ logLine('fetch failed '+p,'err'); return null; }

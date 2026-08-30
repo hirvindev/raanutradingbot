@@ -245,3 +245,42 @@ class TestHealth:
         from raanu import config
         assert int(client.get("/api/health").json()["config"]["min_signal_score"]) \
                == config.min_signal_score()
+
+
+class TestLockoutResponseShape:
+    """The dashboard distinguishes an auth lockout from an infrastructure
+    throttle by the response BODY, so the body has to stay distinguishable.
+
+    It previously keyed off the 429 status alone, which meant an AWS Lambda
+    ConcurrentInvocationLimitExceeded surfaced as "Too many failed attempts,
+    try again in 15 minutes" — on a deployment with no passphrase set at all.
+    """
+
+    def test_auth_lockout_is_self_identifying(self, secured):
+        from raanu.api import auth
+        auth._AUTH_FAILS.clear()
+        # Lockout counts DISTINCT wrong secrets, not attempts, so it takes
+        # different guesses to trip it.
+        last = None
+        for i in range(auth._MAX_FAILS + 2):
+            last = secured.get("/api/health", headers=bearer(f"wrong-{i}"))
+        assert last.status_code == 429
+        body = last.json()
+        assert body["error"] == "too_many_attempts"
+        assert isinstance(body["retry_after_sec"], int)
+        auth._AUTH_FAILS.clear()
+
+    def test_retyping_the_same_wrong_passphrase_does_not_lock_you_out(self, secured):
+        # Deliberate: fat-fingering one passphrase repeatedly is a user, not
+        # an attacker. Only many DIFFERENT guesses trip the lockout.
+        from raanu.api import auth
+        auth._AUTH_FAILS.clear()
+        for _ in range(auth._MAX_FAILS * 3):
+            assert secured.get("/api/health", headers=bearer("same")).status_code == 401
+        auth._AUTH_FAILS.clear()
+
+    def test_an_unset_passphrase_never_produces_a_lockout(self, client):
+        # With API_READ_TOKEN unset the gate is skipped, so no amount of
+        # requests should ever ask the user for a credential.
+        for _ in range(30):
+            assert client.get("/api/health").status_code == 200
