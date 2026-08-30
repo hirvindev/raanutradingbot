@@ -19,7 +19,8 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 
 from raanu import strategies
-from raanu.market.prices import batch_download, benchmark_return_3m
+from raanu.market.cache import get_bars
+from raanu.market.prices import benchmark_return_3m
 from raanu.market.universe import get_ticker_name, scannable_universe
 
 log = logging.getLogger("raanu.scanning.engine")
@@ -93,7 +94,10 @@ def scan_batch(
     if not tickers:
         return []
 
-    data = batch_download(tickers)
+    # Cache-aware: reads today's cached bars and downloads only what is
+    # missing. Downloads are throttled at ~6.2 tickers/s server-side and
+    # concurrency does not help, so not re-fetching is the only real win.
+    data = get_bars(tickers)
     hits: list[dict] = []
 
     for ticker in tickers:
