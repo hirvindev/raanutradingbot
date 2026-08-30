@@ -127,11 +127,34 @@ def data_dir_override() -> str:
 def scan_shards() -> int:
     """Fan-out width for a fast (interactive) scan.
 
-    8 is a balance, not a limit: more shards cut wall-clock further but each
-    pays its own cold start, and the whole fleet is far inside the Lambda
-    free tier either way, so there is nothing to save by going narrower.
+    Bounded by **account Lambda concurrency, not cost**. This AWS account
+    has a limit of 10 concurrent executions (the reduced quota AWS applies
+    to new accounts, not the 1,000 default), and every shard is one. Fan out
+    to 8 and a scan consumes almost the whole account: the API Lambda then
+    gets `ConcurrentInvocationLimitExceeded` and the dashboard dies with a
+    429 mid-scan, which is exactly what happened.
+
+    6 leaves room for the API Lambda and the 5-minute worker heartbeat.
+    Throttled *async* shard invokes are retried by AWS rather than lost, so
+    over-fanning degrades the dashboard rather than the scan — which makes
+    it easy to miss.
+
+    Reserved concurrency on the API function would be the sturdier fix, but
+    AWS refuses it unless unreserved stays >= 100, which a 10-limit account
+    cannot satisfy. Raise the quota (Service Quotas -> Lambda -> Concurrent
+    executions; free) and this can go up with it.
     """
-    return max(1, env_int("SCAN_SHARDS", 8))
+    return max(1, env_int("SCAN_SHARDS", 6))
+
+
+def scan_max_shards() -> int:
+    """Ceiling when the planner scales shards up for a large universe.
+
+    Same concurrency budget as above. Also: 8 shards measured only a 3.2x
+    speedup over one host, not 8x — partly Yahoo throttling, and partly
+    that some of those shards were queueing behind this very limit.
+    """
+    return max(1, env_int("SCAN_MAX_SHARDS", 6))
 
 
 def scan_batch_size() -> int:

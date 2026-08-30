@@ -108,11 +108,18 @@ class SkeletonStack(Stack):
         common_env = {
             "STATE_BACKEND": "dynamodb",
             "STATE_TABLE": state_table.table_name,
-            # Fan-out width for an interactive scan. Downloads are throttled
-            # server-side by Yahoo at ~6.2 tickers/s and concurrency does not
-            # beat that, so this exists for the cold-cache case and for
-            # spreading scoring — the real speedup is the bars cache.
-            "SCAN_SHARDS": "8",
+            # Fan-out width for an interactive scan. The binding constraint
+            # is ACCOUNT LAMBDA CONCURRENCY, not cost: this account's quota
+            # is 10 concurrent executions (AWS's reduced new-account limit,
+            # not the 1,000 default) and each shard is one. At 8, a scan ate
+            # nearly the whole account and the API Lambda started returning
+            # ConcurrentInvocationLimitExceeded — the dashboard 429'd
+            # mid-scan. 6 leaves slots for the API and the heartbeat.
+            #
+            # Raise both of these together if the quota is raised
+            # (Service Quotas -> Lambda -> Concurrent executions; free).
+            "SCAN_SHARDS": "6",
+            "SCAN_MAX_SHARDS": "6",
             # Small batches so progress is reported during a scan rather than
             # only after each download returns.
             "SCAN_BATCH_SIZE": "20",

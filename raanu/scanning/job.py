@@ -54,13 +54,6 @@ _RUN_TTL_SECONDS = 24 * 3600
 # timeout.
 _TARGET_PER_SHARD = 600
 
-# Concurrency ceiling. 8 shards measured ~20 tickers/s aggregate against a
-# ~6.2/s single-host rate — a 3.2x gain, not 8x, which says Yahoo is already
-# throttling partially. Going much wider is untested and may trip a harder
-# limit rather than going faster, so this stays conservative. Raise it only
-# with a measurement in hand.
-_MAX_SHARDS = 12
-
 # Hits each shard keeps, highest score first. A full-exchange scan projects
 # to ~880 hits at ~640 bytes each — over half a megabyte in every poll
 # response, at 1.5s intervals. Capping bounds both that and the DynamoDB
@@ -87,7 +80,10 @@ def shard_count_for(ticker_count: int) -> int:
     """How many shards to fan a scan of this size across."""
     import math
     wanted = math.ceil(ticker_count / _TARGET_PER_SHARD) if ticker_count else 1
-    return max(config.scan_shards(), min(wanted, _MAX_SHARDS))
+    # Ceiling is account Lambda concurrency, not cost — see
+    # config.scan_shards(). Over-fanning starves the API Lambda and 429s the
+    # dashboard rather than making the scan faster.
+    return max(config.scan_shards(), min(wanted, config.scan_max_shards()))
 
 
 def plan_shards(tickers: list[str], shard_count: int) -> list[list[str]]:
@@ -151,6 +147,13 @@ def run_shard(run_id: str, index: int, tickers: list[str]) -> None:
             "hits": ranked[:_MAX_HITS_PER_SHARD],
             "total_hits": len(ranked),
         }
+        if status in ("done", "error"):
+            # Stamped when the shard actually finishes. Without this the run's
+            # elapsed time is computed at POLL time, so a finished scan's
+            # duration keeps growing for as long as anyone keeps looking at
+            # it — a 15s scan read back as 297s simply because the poll came
+            # five minutes late.
+            payload["finished_at"] = time.time()
         if error:
             payload["error"] = error
         state.save(key, payload, ttl_seconds=_RUN_TTL_SECONDS)
@@ -248,6 +251,13 @@ def status() -> dict:
     else:
         status_value = "running"
 
+    started_at = manifest.get("started_at", 0)
+    if finished:
+        stamps = [s["finished_at"] for s in shards.values() if s.get("finished_at")]
+        elapsed = round(max(stamps) - started_at, 1) if stamps else None
+    else:
+        elapsed = round(time.time() - started_at, 1)
+
     out = {
         "status": status_value,
         "run_id": run_id,
@@ -263,7 +273,7 @@ def status() -> dict:
         # Surfaced so the UI can say "showing N of M" instead of quietly
         # presenting a truncated list as the whole answer.
         "total_hits": found,
-        "elapsed": round(time.time() - manifest.get("started_at", 0), 1),
+        "elapsed": elapsed,
     }
     if failed:
         # Surfaced rather than swallowed: partial results are useful, but the

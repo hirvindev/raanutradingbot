@@ -89,17 +89,27 @@ class TestTickersFor:
 
 class TestShardScaling:
     def test_small_universes_use_the_configured_width(self):
-        assert job.shard_count_for(470) == 8
+        from raanu import config
+        assert job.shard_count_for(470) == config.scan_shards()
 
-    def test_large_universes_get_more_shards_not_longer_ones(self):
+    def test_large_universes_get_more_shards_not_longer_ones(self, monkeypatch):
         # Otherwise a full-exchange shard would creep toward the Lambda
         # timeout instead of the fan-out absorbing the extra work.
-        assert job.shard_count_for(5581) > 8
+        monkeypatch.setenv("SCAN_SHARDS", "2")
+        monkeypatch.setenv("SCAN_MAX_SHARDS", "12")
+        assert job.shard_count_for(5581) > 2
 
-    def test_shard_count_is_capped(self):
-        # 8 shards measured a 3.2x gain, not 8x — Yahoo is already
-        # throttling, so unbounded width buys nothing and risks a harder limit.
-        assert job.shard_count_for(100_000) == job._MAX_SHARDS
+    def test_shard_count_is_capped_by_the_concurrency_budget(self, monkeypatch):
+        # The binding constraint is this account's Lambda concurrency limit
+        # of 10, NOT cost. Fanning past it starves the API Lambda and 429s
+        # the dashboard mid-scan.
+        monkeypatch.setenv("SCAN_MAX_SHARDS", "6")
+        assert job.shard_count_for(100_000) == 6
+
+    def test_default_fanout_leaves_headroom_under_a_10_concurrency_account(self):
+        from raanu import config
+        assert config.scan_shards() <= 7, "must leave slots for the API Lambda"
+        assert config.scan_max_shards() <= 7
 
     def test_every_ticker_lands_in_exactly_one_shard(self):
         tickers = exchanges.tickers_for("nyse")
