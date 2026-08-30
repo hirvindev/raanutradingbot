@@ -1,50 +1,40 @@
-# aws/ — AWS deployment (Phase 2, isolated from the live app)
+# aws/ — the AWS deployment
 
-This folder is a from-scratch AWS deployment for RaanuTradingBot, built up
-step by step. `server.py` and everything else at the repo root keeps
-running on Railway exactly as before while this is built and tested —
-nothing here touches Railway.
+**This is production.** Railway is retired: the code is AWS-only, and would
+501 on scanning there (no worker Lambda to invoke) with nothing to run the
+schedule.
 
-**Phase 1 (done): prove the pipeline.** A static page in S3 behind
-CloudFront, calling one "hello world" Lambda through a Function URL,
-deployed by GitHub Actions with zero stored AWS credentials. That
-skeleton's job was only to prove the deploy mechanics; it's now replaced.
+CloudFront serves the dashboard from a private S3 bucket and routes
+`/api/*` and `/webhook/*` to the API Lambda (FastAPI behind Mangum) as a
+second origin — so the browser only ever sees one origin, the dashboard's
+`const API = location.origin` needs no special casing, and there is no CORS
+to get wrong. A worker Lambda runs everything scheduled: the 03:30 ET
+pre-market scan, the 09:35/11:00 ET execution slots, the exit monitor, and
+individual scan shards. All persistent state lives in one DynamoDB table
+(`raanu/state`); secrets come from SSM Parameter Store at cold start.
 
-**Phase 2 (this phase): the real bot.** The dashboard (`RaanuTradingBot.html`
-and its assets) now serves from S3/CloudFront for real. The FastAPI app is
-wrapped by Mangum behind a second Lambda (`api_handler.py`), reachable
-through the *same* CloudFront distribution at `/api/*` and `/webhook/*` — so
-the browser only ever sees one origin and the dashboard's
-`const API = location.origin` needed zero changes. A worker Lambda
-(`worker_handler.py`) stands in for `server.py`'s three background
-`asyncio` loops (pre-market scan, scheduled trade slots, profit monitor) —
-Lambda has no persistent process to run them in, so it's invoked every 5
-minutes by an EventBridge rule and decides for itself what's due, reusing
-the exact DST-aware ET scheduling logic `server.py` already has. The local
-JSON state files (`trades_log.json`, `position_peaks.json`, etc.) are
-replaced by one DynamoDB table when running on Lambda — see `datadir.py`'s
-`state_load`/`state_save`, which fall back to the original files everywhere
-else (Railway, local dev) unchanged.
+Deploys run from GitHub Actions via OIDC — no AWS credentials are stored
+anywhere in this repo.
 
-**The worker's EventBridge trigger deploys DISABLED.** It can be invoked
-manually for testing, but no autonomous scheduled scan/trade happens from
-AWS until you explicitly enable it — Railway's own scheduler keeps running
-throughout, and both hitting the same paper account/weekly limits at once
-would double-count trades. Flip it on only once you're ready to retire
-Railway's scheduler (or accept the overlap deliberately).
+**The worker's EventBridge rule ships DISABLED.** It can be invoked by hand
+for testing, but nothing scans or trades autonomously until it is
+explicitly enabled.
 
-**Live Signals scanning is now Lambda-only.** `/api/scan/stream` (SSE) is
-gone — a real scan takes ~3-4 minutes, past what CloudFront/Lambda can hold
-a live connection open for regardless of tuning. `/api/scan/job` (`POST`
-to start, `GET` to poll) replaced it: fires the scan on the worker Lambda
-and reports progress through the state store. Since Railway runs this same
-`server.py`, its Live Signals scan button stops working too — a deliberate
-trade-off once the target became building this properly for AWS rather
-than preserving Railway compatibility.
+**Scanning is a job, and it is fast now.** `POST /api/scan/job` starts it,
+`GET /api/scan/job` polls merged per-shard progress. Measured on the
+deployment: **23.0s cold-cache, 6.8s warm**, against a 120s baseline.
 
-**Not done yet:** migrating Railway's actual trade history into DynamoDB
-(this deploys with empty state, which is safe exactly because the scheduler
-starts disabled).
+The win is mostly a **daily bars cache**, not the fan-out. yfinance
+downloads cap at ~6.2 tickers/sec per host and concurrency does not beat
+that (1/4/8/16 workers all benchmark identically), so re-downloading a
+year of daily history on every scan was the real cost. The scheduled scan
+warms the cache; the Scan button then reads it. Fan-out still helps on
+Lambda — separate execution environments get separate source IPs — which
+is why cold is 23s rather than the ~87s a single-host extrapolation
+predicted.
+
+Run `python -m tools.bench_scan` before touching `SCAN_SHARDS` or
+`SCAN_BATCH_SIZE`.
 
 ## Layout
 
@@ -55,8 +45,9 @@ aws/
 ├── requirements.txt        Python deps for the CDK app itself (not the bot)
 ├── package.json            pins the CDK CLI version (npx cdk ...)
 ├── stacks/
-│   └── skeleton_stack.py   the whole stack: S3, CloudFront, DynamoDB, both
-│                           Lambdas, the EventBridge rule, IAM grants
+│   └── skeleton_stack.py   the whole stack: S3, CloudFront, DynamoDB (with
+│                           TTL), both Lambdas, the market-hours EventBridge
+│                           rule, IAM grants
 ├── site/                   GENERATED at synth time from RaanuTradingBot.html
 │                           /sw.js/manifest.webmanifest/icons — gitignored,
 │                           never hand-edit; see skeleton_stack.py's
@@ -72,12 +63,11 @@ ends — porting the bot inherently means touching its actual code):
 │                       switch its own build mechanism away from Procfile.
 ├── .dockerignore       keeps the image to exactly the app — no .env, no
 │                       keystores, no git history.
-├── api_handler.py      Mangum(app, lifespan="off") — see its own docstring
-│                       for why lifespan="off" matters.
-├── worker_handler.py   the 5-minute dispatcher described above.
-└── lambda_secrets.py   loads SSM Parameter Store into os.environ at cold
-                        start, so every existing os.getenv(...) call site
-                        needed zero changes.
+├── handlers/api.py     Mangum(create_app(), lifespan="off") — see its own
+│                       docstring for why lifespan="off" matters.
+├── handlers/worker.py  scan shards, whole scans, and the ET time-slot
+│                       dispatcher.
+└── raanu/              the application package (see CLAUDE.md).
 ```
 
 ## Why these choices (the parts that aren't visible from the code alone)

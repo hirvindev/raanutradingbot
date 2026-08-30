@@ -28,6 +28,19 @@ def get_config():
     }
 
 
+def _state_health() -> dict:
+    backend = config.state_backend()
+    if backend == "dynamodb":
+        return {"backend": "dynamodb", "table": config.state_table(), "persistent": True}
+    return {
+        "backend": "file",
+        "data_dir": str(resolve_data_dir()),
+        # A non-persistent state dir silently breaks strategy attribution,
+        # the weekly trade limit and Kelly's minimum sample.
+        "persistent": bool(config.data_dir_override()) or DOTENV.exists(),
+    }
+
+
 @router.get("/api/health")
 def health():
     from raanu.notify.telegram import is_configured as tg_configured
@@ -35,7 +48,7 @@ def health():
     from raanu.trading.trader import weekly_limit_for as _weekly_limit_for
     # Surfaced because a non-persistent state dir silently breaks strategy
     # attribution, the weekly trade limit and Kelly's sample.
-    _persistent = bool(config.data_dir_override()) or DOTENV.exists()
+
     try:
         _trade_count = len(get_trader().tradelog.data.get("trades", []))
     except Exception:
@@ -53,11 +66,12 @@ def health():
         # wired up (the AWS deployment), which is the same check
         # /api/scan/job itself makes before firing an invoke.
         "async_scan": bool(config.env_str("WORKER_FUNCTION_NAME", "").strip()),
-        "state": {
-            "data_dir":       str(resolve_data_dir()),
-            "persistent":     _persistent,
-            "trade_log_entries": _trade_count,
-        },
+        # Report the backend actually in use. This used to always show a
+        # filesystem path, so on Lambda — where state lives in DynamoDB and
+        # that path is never touched — health displayed "/tmp" and
+        # "persistent: false", which reads as "your trade log is being
+        # thrown away" when it is not.
+        "state": _state_health(),
         # Read through the config accessors, NOT re-derived from raw env
         # with defaults repeated here. Repeating them is exactly how this
         # endpoint came to report min_signal_score 60 while the auto-trader

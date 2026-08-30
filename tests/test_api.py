@@ -203,7 +203,17 @@ class TestHealth:
         body = client.get("/api/health").json()
         assert body["status"] == "ok"
         assert body["mode"] == "paper"
+        assert body["state"]["backend"] == "file"
         assert "data_dir" in body["state"]
+
+    def test_reports_dynamodb_rather_than_a_filesystem_path_on_lambda(
+            self, client, monkeypatch):
+        # Showing "/tmp" and persistent:false while state actually lives in
+        # DynamoDB reads as "your trade log is being thrown away".
+        monkeypatch.setenv("STATE_BACKEND", "dynamodb")
+        monkeypatch.setenv("STATE_TABLE", "raanu-state")
+        state = client.get("/api/health").json()["state"]
+        assert state == {"backend": "dynamodb", "table": "raanu-state", "persistent": True}
 
     def test_reports_the_min_score_actually_enforced(self, client):
         # This used to report 60 while the auto-trader gated at 70.

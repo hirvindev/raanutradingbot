@@ -1,6 +1,6 @@
 # RaanuTradingBot — Project Context for Claude
 > Paste this file at the start of every new Claude chat to restore full context.
-> Last updated: 24 August 2026
+> Last updated: 30 August 2026
 
 ---
 
@@ -34,45 +34,64 @@ Concretely, in this project:
 **Target:** +4–5% monthly returns, max 5% stop loss  
 **Owner:** Archana Arjunraj (dev: Prakash Rajamani)  
 **Local URL:** http://localhost:8000  
-**Production:** https://raanu.up.railway.app (Railway project `fearless-abundance`)  
+**Production:** AWS — https://d2c2x91kx43y5d.cloudfront.net (CloudFront -> S3 + Lambda)  
+**Retired:** Railway (https://raanu.up.railway.app). The code is AWS-only now;
+Railway would 501 on scanning and has no worker to run the schedule.  
 **Platform:** macOS (python3, not python)
 
 ---
 
 ## 🗂 File Structure
+
+Restructured into a package (Aug 2026). Everything used to sit flat at the
+repo root; `server.py` alone was 2218 lines and ~50 routes.
+
 ```
-/Users/prakash.rajamani/raanutradingbot/
-├── server.py              ← FastAPI backend (uvicorn, port 8000)
-├── auto_trader.py         ← Auto-trading engine (5-gate scan loop + order logic)
-├── strategy.py            ← Indicator engine (RSI, MACD, BB, EMA) + batch_download
-├── scanner.py             ← Momentum scanner (42 US-listed tickers, batch yfinance)
-├── alpaca_data.py         ← Alpaca market data helper (skips non-US tickers)
-├── notifier.py            ← Telegram + Twilio WhatsApp alerts (pre/post-trade)
-├── push.py                ← Web push (VAPID) + native push (FCM v1), one fanout
-├── picks_log.py           ← Records every pick + its 1/5/20-day return vs SPY
-├── profit_monitor.py      ← Exit engine (ATR-scaled stop / trailing stop)
-├── strategy2.py           ← S2 breakout engine (Minervini stage-2 / VCP)
-├── strategy3.py           ← S3 leader-dip engine (Bollinger + MACD mean reversion)
-├── backtest.py            ← Walk-forward backtester (signal cache + fast sim)
-├── kelly.py               ← Kelly Criterion position sizing (Quarter Kelly)
-├── datadir.py             ← Resolves the persistent state dir (volume / local / tmp)
-├── RaanuTradingBot.html   ← Main dashboard (single-file, served at localhost:8000)
-├── sw.js                  ← Service worker — NEVER caches /api/**, see PWA note
-├── manifest.webmanifest   ← PWA manifest (installable from Chrome/Safari)
-├── icons/                 ← App icons: web, PWA, TWA, native
-├── mobile/                ← React Native app (Expo, package app.raanu.mobile)
-│   ├── src/api.ts         ←   read passphrase stored; trade PIN NEVER stored
-│   ├── src/push.ts        ←   FCM device-token registration
-│   └── apply-signing.sh   ←   re-applies release signing (prebuild wipes android/)
-├── twa/                   ← Bubblewrap TWA wrapper (Play Store)
-├── Procfile               ← Railway entrypoint
-├── start.sh               ← Start server on Mac
-├── setup.sh               ← One-time Mac setup
-├── requirements.txt       ← Python dependencies
-├── .env                   ← API keys (NOT in GitHub)
-├── .gitignore             ← Excludes .env, keystores, __pycache__, *.pyc
-└── CLAUDE.md              ← This file
+raanu/                      ← the application package
+├── config.py               ← EVERY env read, lazily. Nothing at import time.
+├── paths.py                ← PROJECT_ROOT anchor for on-disk assets
+├── clock.py                ← US_EAST / BERLIN / IST
+├── indicators.py           ← shared indicator math (pure, no imports)
+├── state/                  ← persistent JSON state
+│   ├── __init__.py         ←   load / save / load_many / delete
+│   └── backends.py         ←   file (local) | dynamodb (AWS)
+├── market/
+│   ├── prices.py           ←   yfinance OHLCV + SPY benchmark
+│   ├── cache.py            ←   DAILY BARS CACHE — the main perf mechanism
+│   ├── universe.py         ←   curated 472-ticker universe + names
+│   ├── rest.py             ←   Alpaca REST plumbing
+│   └── broker.py           ←   Alpaca market data
+├── strategies/
+│   ├── __init__.py         ←   REGISTRY: surfaces() vs tradable() bars
+│   ├── pullback.py         ←   S1
+│   ├── breakout.py         ←   S2 (Minervini stage-2 / VCP)
+│   └── leader_dip.py       ←   S3 (Bollinger + MACD mean reversion)
+├── scanning/
+│   ├── engine.py           ←   THE one scan implementation
+│   └── job.py              ←   run manifest, sharding, aggregation, stalls
+├── trading/
+│   ├── trader.py           ←   order executor + 5-gate system
+│   ├── exits.py            ←   ATR-scaled stop / trailing stop / ladder
+│   ├── sizing.py           ←   Kelly (Quarter Kelly)
+│   ├── schedule.py         ←   03:30 / 09:35 / 11:00 ET slot logic
+│   ├── reports.py          ←   FIFO round-trips + monthly report
+│   └── picks_log.py        ←   every pick + its 1/5/20-day return vs SPY
+├── notify/{telegram,push}.py
+└── api/
+    ├── app.py              ←   create_app() factory; loops only for local dev
+    ├── auth.py             ←   the two-token gate
+    └── routes/             ←   15 routers, one per domain
+handlers/{api,worker}.py    ← thin Lambda entrypoints
+tests/                      ← 191 tests
+tools/{backtest,bench_scan}.py
+RaanuTradingBot.html        ← dashboard (single file, no build step)
+sw.js, manifest.webmanifest, icons/
+Dockerfile.lambda           ← NOT "Dockerfile" — see the AWS section
+aws/                        ← CDK app
 ```
+
+**Run it locally:** `python -m raanu.api` (was `python3 server.py`).
+**Tests:** `pytest`. **Lint:** `ruff check raanu/ handlers/ tests/ tools/`.
 
 **Not in the repo, and must stay that way:** `.env`, the two Android keystores
 (`twa/android.keystore`, `mobile/android/app/raanu-native.keystore`) and
@@ -96,16 +115,20 @@ can never be updated again.
 
 ## 🚀 How to Start (macOS)
 ```bash
-python3 server.py
+python -m raanu.api      # local dev server, background loops enabled
+pytest                   # 191 tests
+ruff check raanu/ handlers/ tests/ tools/
 ```
-Or: `./start.sh`
 
 Then open: **http://localhost:8000**
 
 ---
 
-## 🔌 Server — server.py
+## 🔌 Server — raanu/api/
 - **Framework:** FastAPI + uvicorn (NOT Flask)
+- **App factory:** `create_app()`. Importing builds nothing; the background
+  loops start only under `create_app(with_loops=True)`, i.e. local dev. On
+  Lambda, Mangum runs with `lifespan="off"` and the worker owns the schedule.
 - **Port:** 8000
 - **Host:** 0.0.0.0
 - **Dashboard route:** `GET /` → serves `RaanuTradingBot.html`
@@ -129,7 +152,7 @@ Then open: **http://localhost:8000**
 
 ---
 
-## 🤖 Auto Trader — auto_trader.py
+## 🤖 Auto Trader — raanu/trading/trader.py
 - **Scans:** 03:30 ET (alert only), 09:35 ET and 11:00 ET (execute), plus one
   silent scan at server startup. There is **no periodic scan interval** — the
   old `SCAN_INTERVAL_SEC=1800` was reported by the API but no loop consumed it,
@@ -147,7 +170,10 @@ Then open: **http://localhost:8000**
 - **Weekly trade limit:** per strategy — S1 2, S2 1, S3 3 per rolling 7 days
   (configurable via .env). Counts BUYs only; exits do not consume the budget.
 - **Per trade max:** $500 USD (configurable via .env)
-- **Min signal score:** 60/100
+- **Min signal score:** 70/100 — the BUY gate. This used to be documented as
+  60 because `/api/health` reported 60 while `auto_trader` enforced 70; the
+  variable is unset on AWS so 70 was the live value. One definition now
+  (`config.min_signal_score()`), and health reports that same function.
 - **Position sizing:** min($500, 5% of free cash)
 
 ### 5-Gate System (all must pass before order is placed)
@@ -157,7 +183,7 @@ Then open: **http://localhost:8000**
 4. Free cash available (Alpaca account endpoint)
 5. Stock not already held (Alpaca positions endpoint)
 
-### WhatsApp Alerts (via notifier.py)
+### WhatsApp Alerts (via raanu/notify/telegram.py)
 - **Pre-trade alert** sent BEFORE placing order (gives time to cancel)
 - **Post-trade alert** sent AFTER order confirmed
 - Uses Twilio Sandbox WhatsApp
@@ -1022,96 +1048,79 @@ key, or "unknown" silently starts meaning something.
 
 ---
 
-## ☁️ AWS Migration (in progress) — see aws/README.md
+## ☁️ AWS Migration — DONE, and the performance work behind it
 
-Moving off Railway toward AWS serverless (Lambda + EventBridge + DynamoDB),
-**built up incrementally** — Railway keeps serving production throughout.
-Full design and the "why" behind each choice lives in `aws/README.md` and
-`aws/ci-identity/README.md`; don't duplicate it here, just the current state:
+Production is AWS. Railway is retired; the code no longer runs there.
 
-- **Phase 1 (done): pipeline skeleton.** S3 + CloudFront static page calling
-  one dependency-free "hello world" Lambda through a Function URL, deployed
-  via GitHub Actions using OIDC — zero AWS credentials stored anywhere in
-  the repo. Proved the deploy pipeline was trustworthy before any real
-  trading logic went near it. That placeholder page is now fully replaced.
-- **Phase 2 (current): the real bot, deployed but not yet live-trading.**
-  The dashboard now serves from S3/CloudFront for real; the FastAPI app
-  runs behind a second Lambda (`api_handler.py`, Mangum) reachable through
-  the *same* CloudFront distribution at `/api/*` and `/webhook/*` — one
-  browser-visible origin, so no CORS and zero dashboard JS changes. A
-  worker Lambda (`worker_handler.py`) replaces `server.py`'s three
-  background `asyncio` loops (pre-market scan, trade slots, profit
-  monitor) — Lambda has no persistent process to run them in, so it's
-  invoked every 5 minutes by an EventBridge rule and works out for itself
-  what's due, reusing `server.py`'s own DST-aware ET scheduling rather than
-  a UTC-only cron. Local JSON state files are replaced by one DynamoDB
-  table when `STATE_BACKEND=dynamodb` (Lambda only — Railway/local dev are
-  untouched); secrets load from SSM Parameter Store into `os.environ` at
-  cold start (`lambda_secrets.py`), so none of the ~40 existing
-  `os.getenv(...)` call sites needed to change.
-  **The worker's EventBridge trigger deploys DISABLED** — it can be invoked
-  manually to test, but nothing fires on a schedule from AWS until it's
-  explicitly enabled, so it never races Railway's own scheduler against the
-  same paper account and weekly limits.
-- **Tooling decisions already made, don't re-litigate without a reason**:
-  AWS CDK in **Python** (not SAM) — chosen once the stack grew past
-  Lambda-only, since CDK's constructs meaningfully cut the boilerplate for
-  the S3+CloudFront+OAC piece and keep the whole IaC surface in Python,
-  matching the rest of this codebase. CI assumes a narrow identity role via
-  GitHub OIDC that can only `sts:AssumeRole` on CDK's own bootstrap roles
-  (deploy-role, file-publishing-role) — real resource-creation permissions
-  live in CDK's separate CloudFormation-execution-role, which only
-  CloudFormation itself can assume. Lambda Function URLs, not API Gateway —
-  no separate cost/service for auth features this app already implements
-  itself in ASGI middleware. **Lambda container images, not zip packages**
-  — measured, not assumed: a real `pip install --platform manylinux2014_x86_64`
-  of this repo's `requirements.txt` comes to **266MB unzipped**, already over
-  the zip-Lambda 250MB ceiling before any future dependency, and getting
-  comfortable margin back means stripping `__pycache__`, which trades size
-  for slower cold starts — the exact thing zip was meant to buy. `curl_cffi`
-  (38MB, yfinance's TLS-fingerprint dependency, non-optional), `pandas`
-  (74MB) and `numpy`+`numpy.libs` (70MB) are most of it. One
-  `Dockerfile.lambda` (named that, not `Dockerfile`, so Railway's
-  auto-detection never picks it up) builds one image both Lambdas share via
-  a different `cmd` override.
-- **ECR lifecycle policy — one-time, applied 24 Aug 2026, not reapplied by
-  CDK.** Container-image Lambdas must live in ECR; CDK pushes into the
-  shared repo `cdk bootstrap` already created
-  (`cdk-hnb659fds-container-assets-<account>-<region>`), so no new
-  component to create. But CDK tags every build permanently, and that
-  repo's own default lifecycle rule only expires *untagged* images after a
-  year — doing nothing for tagged ones. Without a policy, every
-  `requirements.txt` change (a new ~200-300MB layer) piles up forever
-  instead of replacing the old one, eventually exceeding ECR's 500MB
-  Always-Free tier. Fixed with a policy capping the repo at the 15 most
-  recent images (see `aws/README.md`) — this repo is shared bootstrap
-  infra, not owned by this stack, so the cap applies account-wide to any
-  other CDK app's container images too, and needs reapplying if the
-  bootstrap qualifier or account ever changes.
-- **Dev environment**: a dev container (`.devcontainer/`) holds Node/AWS
-  CLI/`gh`/Docker (Docker-in-Docker, added in Phase 2 — rebuild the
-  container if it was created before this) so the host stays clean; the
-  CDK CLI itself is pinned in `aws/package.json`, not baked into the
-  container image, so local and CI can never drift apart on version.
-- **Live Signals scanning now requires the worker Lambda — Railway's
-  version of this feature is gone, not degraded.** The original plan kept
-  `/api/scan/stream`'s SSE endpoint as Railway-only and added a separate
-  Lambda path; that changed once the target became "build this properly
-  for AWS, stop carrying Railway-compatibility cost." A real scan measured
-  at ~3-4 minutes, well past what a live SSE connection can survive through
-  CloudFront (60s origin timeout ceiling) or what Mangum could stream even
-  if it survived (it buffers the whole response). `/api/scan/job`
-  (`POST` to start, `GET` to poll) replaced it outright — same combined
-  S1+S2+S3 scan, running on the worker Lambda, progress in the state store
-  instead of SSE. Since `server.py` is one shared codebase, Railway lost
-  its working Live Signals scan button the moment this shipped — a
-  deliberate, confirmed trade-off, not an oversight.
-- **Not started yet**: migrating Railway's actual trade history into
-  DynamoDB (safe to defer — the worker's scheduler starts disabled, so
-  empty starting state costs nothing), and actually flipping the worker's
-  schedule on to retire Railway for real.
+**Architecture**: CloudFront serves the dashboard from S3 and routes
+`/api/*` + `/webhook/*` to the API Lambda (FastAPI behind Mangum) — one
+browser-visible origin, so no CORS. A worker Lambda runs everything
+scheduled. All state is in one DynamoDB table. Secrets come from SSM
+Parameter Store at cold start.
 
----
+### The scan: 120s -> 23s cold, 6.8s warm (measured on the deployment)
+
+Two things got it there, and **the one I expected to matter mattered less
+than the one I found by measuring**:
+
+1. **A daily bars cache.** These are daily bars — they change once a
+   session — but every scan re-downloaded a year of history for all 470
+   tickers, which was ~80% of the runtime. Now the first scan of a session
+   pays for the download and every later one just scores. Payload is
+   gzipped and rounded to 4dp (a hundredth of a cent, past any precision an
+   indicator uses); Yahoo's float32 artefacts like `78.29000091552734`
+   tripled the stored size for no information.
+2. **Sharded fan-out**, 8 worker invocations.
+
+⚠️ **Benchmark locally before assuming concurrency helps.** yfinance
+downloads cap at **~6.2 tickers/sec from one host and adding workers does
+not move it** — 1, 4, 8 and 16 all measured the same. That killed the
+original "fan out for ~5x" plan before it cost a deploy. Fan-out *does*
+help on Lambda (23s vs an ~87s local extrapolation) because separate
+execution environments get separate source IPs, which is exactly the thing
+a single-machine benchmark cannot tell you. Both facts are true and neither
+is guessable from the other.
+
+Use `python -m tools.bench_scan` before changing `SCAN_SHARDS` or
+`SCAN_BATCH_SIZE`.
+
+### Cost — measured, not modelled
+
+Peak memory 375 MB of 1024 MB; 178 GB-s for two full scans. Projected
+~11,500 GB-s/month against a 400,000 GB-s always-free tier: **~3%**.
+Parallelism here is effectively free; the reason to bound it is cold-start
+waste, not cost.
+
+The heartbeat is `cron(0/5 13-21 ? * MON-FRI)` **UTC** — a deliberate
+superset of the session under both EST and EDT, because EventBridge cron
+has no timezone parameter and a tighter window would drift across DST. The
+worker's own US/Eastern logic still decides what runs. ~288 -> ~102
+invocations/day; every one removed was a no-op.
+
+**The schedule rule ships DISABLED.** Nothing trades autonomously until it
+is explicitly enabled.
+
+### Things that will bite the next person
+
+- **`Dockerfile.lambda`, not `Dockerfile`.** Railway auto-detects a bare
+  `Dockerfile` at repo root. Named this way even now that Railway is
+  retired, because renaming it buys nothing and un-naming it is a trap.
+- **Container image, not a zip.** Measured: this dependency set is 266 MB
+  unzipped, already past the 250 MB zip ceiling before anything is added.
+- **ECR has a lifecycle policy** capping the shared bootstrap repo at 15
+  images. CDK tags every build permanently and the repo's default rule only
+  expires *untagged* images, so without it every `requirements.txt` change
+  piles up a new ~200-300 MB layer forever. Applied by hand, account-wide,
+  not reapplied by `cdk deploy` — see `aws/README.md`.
+- **DynamoDB TTL is on `ttl`.** Scan shards and cached bars set it and
+  expire themselves. Nothing else deletes them.
+- **Two circular-dependency traps in the CDK stack**: the Lambda env must
+  not reference the CloudFront domain, and neither must the Function URL's
+  CORS config — the Distribution already depends on the Function URL as an
+  origin. Both were hit; both cost a deploy.
+- **CloudFront must not forward the viewer `Host` header** to a Function
+  URL origin (use `ALL_VIEWER_EXCEPT_HOST_HEADER`). With `ALL_VIEWER` the
+  origin rejects the request and you get `{"Message":null}`.
 
 ## 🐛 Known Issues / Gotchas
 
