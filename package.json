@@ -1,0 +1,12 @@
+{
+  "name": "raanutradingbot-dashboard-tooling",
+  "private": true,
+  "type": "module",
+  "description": "Lints the inline JavaScript in RaanuTradingBot.html. The dashboard carries ~1,100 lines of JS that no Python tooling sees, and `node --check` only validates syntax — see tools/lint_dashboard.mjs.",
+  "scripts": {
+    "lint:dashboard": "node tools/lint_dashboard.mjs"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

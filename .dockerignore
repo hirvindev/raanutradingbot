@@ -56,3 +56,7 @@ tests/
 .venv*/
 pyproject.toml
 *.bat
+/node_modules/
+package.json
+package-lock.json
+tools/lint_dashboard.mjs

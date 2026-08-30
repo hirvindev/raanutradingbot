@@ -55,3 +55,7 @@ aws/node_modules/
 # _stage_dashboard_site(). Those repo-root files stay the single source of
 # truth for both Railway and AWS; this is a build output, not source.
 aws/site/
+
+# Root JS tooling (dashboard linter) — see package.json
+/node_modules/
+.dashboard-inline.js

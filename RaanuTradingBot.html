@@ -1671,10 +1671,17 @@ el('scanBtn').onclick = async () => {
     // total_hits exceeds what is shown once a shard caps its list, so say
     // "top N of M" rather than presenting a truncated list as the whole answer.
     const total = d.total_hits ?? res.length;
-    const shown = total > res.length ? `top ${res.length} of ${total}` : `${res.length}`;
-    finish(`${(d.scanned||d.total||0).toLocaleString()} screened · ${shown} candidates · ${d.elapsed}s${partial}`);
+    // NOT named `shown` — that identifier is the render-dedupe counter
+    // declared in the enclosing scope. A `const shown` here shadowed it for
+    // the whole block, putting the earlier read in the temporal dead zone,
+    // so every tick threw ReferenceError before it could render or stop the
+    // interval: the UI froze on its first frame and polled forever while the
+    // scan completed fine. `node --check` passes this happily — TDZ is a
+    // runtime error, not a syntax one.
+    const summary = total > res.length ? `top ${res.length} of ${total}` : `${res.length}`;
+    finish(`${(d.scanned||d.total||0).toLocaleString()} screened · ${summary} candidates · ${d.elapsed}s${partial}`);
     logLine(`Scan done in ${d.elapsed}s (${d.universe_label||universe}) — `+
-            `${d.scanned||d.total||0} screened, ${shown} candidates${partial}`,
+            `${d.scanned||d.total||0} screened, ${summary} candidates${partial}`,
             d.failed_shards ? 'err' : 'ok');
   };
   poll = setInterval(tick, 1500);
