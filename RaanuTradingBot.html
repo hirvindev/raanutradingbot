@@ -787,6 +787,25 @@ function askForToken(msg){
   el('tokenInput').focus();
 }
 
+/* Run tasks a few at a time instead of all at once.
+
+   Every in-flight request is one concurrent Lambda execution, and this AWS
+   account's quota is 10. load() used to fire all eight of its reads through
+   Promise.all, so a refresh during a scan meant 8 + 6 shards = 14 against a
+   limit of 10: the overflow came back 429, j() returned null, panels went
+   blank and the scan poll lost its status feed. */
+async function pool(tasks, limit = 3){
+  const out = new Array(tasks.length);
+  let next = 0;
+  await Promise.all(Array.from({length: Math.min(limit, tasks.length)}, async () => {
+    while(next < tasks.length){
+      const i = next++;
+      out[i] = await tasks[i]();
+    }
+  }));
+  return out;
+}
+
 /* Every read goes through here so the header is attached in exactly one place
    and a 401 always surfaces as the token prompt rather than an empty panel. */
 const j = async p => {
@@ -932,10 +951,10 @@ function renderAlerts(){
 
 /* ── data ──────────────────────────────────────────────── */
 async function load(){
-  const [acct, pos, health, cmp, orders, auto, exit, alerts] = await Promise.all([
-    j('/api/account/cash'), j('/api/portfolio'), j('/api/health'),
-    j('/api/strategy/compare'), j('/api/history/orders?limit=500'),
-    j('/api/auto/status'), j('/api/exit-config'), j('/api/notifications')
+  const [acct, pos, health, cmp, orders, auto, exit, alerts] = await pool([
+    () => j('/api/account/cash'), () => j('/api/portfolio'), () => j('/api/health'),
+    () => j('/api/strategy/compare'), () => j('/api/history/orders?limit=500'),
+    () => j('/api/auto/status'), () => j('/api/exit-config'), () => j('/api/notifications')
   ]);
   S.pos=pos||[]; S.cfg=(health&&health.config)||{}; S.cmp=cmp||{}; S.health=health||{};
   S.orders=Array.isArray(orders)?orders:[]; S.exit=exit||{}; S.auto=auto||{};
@@ -1609,9 +1628,20 @@ el('scanBtn').onclick = async () => {
   // stale results. Matching on run_id makes that impossible rather than
   // merely unlikely.
   let waited = 0;
+  let unreadable = 0;
   const tick = async () => {
     const d = await j('/api/scan/job');
-    if(!d) return;
+    if(!d){
+      // j() returns null on a throttle/error. This used to `return` with no
+      // counter, so a run of failed polls span forever with the UI frozen on
+      // its first frame — the scan finished, nothing ever rendered, and the
+      // job endpoint kept being hit indefinitely.
+      if(++unreadable >= 12){
+        fail('Lost contact', 'could not read scan status — server busy or throttled');
+      }
+      return;
+    }
+    unreadable = 0;
     if(d.run_id !== runId){
       // 30s of cold-start slack, then admit the run never started rather
       // than polling forever with no feedback.

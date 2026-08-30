@@ -134,17 +134,23 @@ def scan_shards() -> int:
     gets `ConcurrentInvocationLimitExceeded` and the dashboard dies with a
     429 mid-scan, which is exactly what happened.
 
-    6 leaves room for the API Lambda and the 5-minute worker heartbeat.
+    4, not 6. The dashboard is itself a concurrency consumer: a refresh
+    fires several reads and the scan poll runs every 1.5s, each one an API
+    Lambda execution. At 6 shards a refresh mid-scan still pushed the
+    account over 10, the overflow came back 429, and the scan poll lost its
+    status feed. 4 shards + the browser's capped 3 concurrent reads + a poll
+    leaves genuine headroom.
+
     Throttled *async* shard invokes are retried by AWS rather than lost, so
-    over-fanning degrades the dashboard rather than the scan — which makes
-    it easy to miss.
+    over-fanning degrades the dashboard rather than the scan — which is
+    exactly why it took three rounds to spot.
 
     Reserved concurrency on the API function would be the sturdier fix, but
     AWS refuses it unless unreserved stays >= 100, which a 10-limit account
     cannot satisfy. Raise the quota (Service Quotas -> Lambda -> Concurrent
     executions; free) and this can go up with it.
     """
-    return max(1, env_int("SCAN_SHARDS", 6))
+    return max(1, env_int("SCAN_SHARDS", 4))
 
 
 def scan_max_shards() -> int:
@@ -154,7 +160,7 @@ def scan_max_shards() -> int:
     speedup over one host, not 8x — partly Yahoo throttling, and partly
     that some of those shards were queueing behind this very limit.
     """
-    return max(1, env_int("SCAN_MAX_SHARDS", 6))
+    return max(1, env_int("SCAN_MAX_SHARDS", 4))
 
 
 def scan_batch_size() -> int:

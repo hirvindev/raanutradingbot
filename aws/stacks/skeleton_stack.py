@@ -111,15 +111,18 @@ class SkeletonStack(Stack):
             # Fan-out width for an interactive scan. The binding constraint
             # is ACCOUNT LAMBDA CONCURRENCY, not cost: this account's quota
             # is 10 concurrent executions (AWS's reduced new-account limit,
-            # not the 1,000 default) and each shard is one. At 8, a scan ate
-            # nearly the whole account and the API Lambda started returning
-            # ConcurrentInvocationLimitExceeded — the dashboard 429'd
-            # mid-scan. 6 leaves slots for the API and the heartbeat.
+            # not the 1,000 default) and each shard is one.
             #
-            # Raise both of these together if the quota is raised
-            # (Service Quotas -> Lambda -> Concurrent executions; free).
-            "SCAN_SHARDS": "6",
-            "SCAN_MAX_SHARDS": "6",
+            # The dashboard competes for the same 10: each of its reads and
+            # each 1.5s scan poll is an API Lambda execution. At 8 shards the
+            # API itself 429'd; at 6, a page refresh mid-scan still tipped it
+            # over. 4 leaves room for the browser (now capped at 3 concurrent
+            # reads) plus the poll and the heartbeat.
+            #
+            # Raise these if the quota is raised (Service Quotas -> Lambda ->
+            # Concurrent executions; free, usually granted quickly).
+            "SCAN_SHARDS": "4",
+            "SCAN_MAX_SHARDS": "4",
             # Small batches so progress is reported during a scan rather than
             # only after each download returns.
             "SCAN_BATCH_SIZE": "20",
