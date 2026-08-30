@@ -12,13 +12,12 @@ State is persisted in trades_log.json so limits survive restart.
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 import httpx
 
 from raanu import config, state
-from raanu.strategies.pullback import scan, score_ticker
 
 STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Dip"}
 
@@ -70,8 +69,8 @@ class TradeLog:
     def save(self):
         state.save(self.STATE_KEY, self.data)
 
-    def trades_in_last_7_days(self, strategy: Optional[str] = None,
-                              action: Optional[str] = None):
+    def trades_in_last_7_days(self, strategy: str | None = None,
+                              action: str | None = None):
         """Log entries inside the rolling 7-day window.
 
         `action` filters by BUY/SELL. The weekly limit budgets *new orders*, so
@@ -80,13 +79,13 @@ class TradeLog:
         a closed round-trip consumed the opening budget. With
         WEEKLY_TRADE_LIMIT_S2=1 a single exit locked S2 out for a whole week.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cutoff = datetime.now(UTC) - timedelta(days=7)
         out = []
         for t in self.data.get("trades", []):
             try:
                 ts = datetime.fromisoformat(t["timestamp"])
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 if ts > cutoff:
                     if strategy and t.get("strategy") != strategy:
                         continue
@@ -107,7 +106,7 @@ class TradeLog:
         return True, f"[{label}] OK ({len(recent)}/{limit} this week)"
 
     def record(self, payload: dict):
-        payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+        payload["timestamp"] = datetime.now(UTC).isoformat()
         self.data.setdefault("trades", []).append(payload)
         self.save()
 
@@ -146,7 +145,7 @@ async def market_is_open() -> tuple[bool, str]:
         return False, f"Clock check failed: {e}"
 
 
-async def get_open_orders() -> Optional[list[dict]]:
+async def get_open_orders() -> list[dict] | None:
     """Orders submitted but not yet filled. None (not []) when the call fails,
     so callers can tell "no open orders" from "could not check"."""
     try:
@@ -175,7 +174,7 @@ def _order_cash_committed(order: dict) -> float:
     return qty * price
 
 
-async def get_free_cash() -> Optional[float]:
+async def get_free_cash() -> float | None:
     """
     Cash genuinely available to deploy, or None on error.
 
@@ -204,7 +203,7 @@ async def get_free_cash() -> Optional[float]:
     return max(0.0, cash - committed)
 
 
-async def get_held_symbols() -> Optional[set[str]]:
+async def get_held_symbols() -> set[str] | None:
     """
     Symbols we must not buy again — open positions *plus* symbols with an
     unfilled buy order already working.
@@ -243,7 +242,7 @@ async def get_held_symbols() -> Optional[set[str]]:
 
 
 async def alpaca_buy_notional(symbol: str, notional: float,
-                              strategy: Optional[str] = None) -> dict:
+                              strategy: str | None = None) -> dict:
     """Place a market buy order for a notional USD amount.
 
     The strategy is stamped into `client_order_id` so attribution survives
@@ -263,7 +262,7 @@ async def alpaca_buy_notional(symbol: str, notional: float,
     }
     if strategy:
         # Must be unique per order or Alpaca rejects it; 128-char limit.
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")[:-3]
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")[:-3]
         body["client_order_id"] = f"raanu-{strategy.lower()}-{symbol.upper()}-{stamp}"[:128]
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
@@ -288,12 +287,12 @@ class AutoTrader:
         # Set AUTO_TRADE_ENABLED=true on exactly ONE deployment.
         self.enabled = config.auto_trade_enabled()
         self.tradelog = TradeLog()
-        self.last_scan: Optional[dict] = None
-        self.last_decision: Optional[dict] = None
+        self.last_scan: dict | None = None
+        self.last_decision: dict | None = None
         self.events: list[dict] = []
 
-    def event(self, kind: str, msg: str, extra: Optional[dict] = None):
-        ev = {"ts": datetime.now(timezone.utc).isoformat(), "kind": kind, "msg": msg}
+    def event(self, kind: str, msg: str, extra: dict | None = None):
+        ev = {"ts": datetime.now(UTC).isoformat(), "kind": kind, "msg": msg}
         if extra:
             ev.update(extra)
         self.events.append(ev)
@@ -313,8 +312,8 @@ class AutoTrader:
         return {
             "enabled": self.enabled,
             "config": {
-                "weekly_limit":       WEEKLY_TRADE_LIMIT,
-                "per_trade_max_usd":  PER_TRADE_MAX_USD,
+                "weekly_limit":       config.weekly_trade_limit(),
+                "per_trade_max_usd":  config.per_trade_max_usd(),
                 "per_trade_max_by_strategy": {
                     s: per_trade_max_for(s) for s in ("s1", "s2", "s3")
                 },
@@ -337,7 +336,7 @@ class AutoTrader:
             "recent_events":   self.events[-30:],
         }
 
-    async def run_one_cycle(self, picks: Optional[list] = None,
+    async def run_one_cycle(self, picks: list | None = None,
                            force_market_open: bool = False,
                            strategy: str = "s1",
                            execute: bool = True):
@@ -362,7 +361,7 @@ class AutoTrader:
             self.event("scan", f"[{label}] Using pre-scanned picks ({len(picks)} candidates)")
 
         self.last_scan = {
-            "ts":      datetime.now(timezone.utc).isoformat(),
+            "ts":      datetime.now(UTC).isoformat(),
             "results": picks,
         }
 
@@ -453,7 +452,11 @@ class AutoTrader:
 
         # ── Notify BEFORE placing the order ──────────────────────────────
         try:
-            from raanu.notify.telegram import send_whatsapp, format_pre_trade_alert, format_trade_confirm
+            from raanu.notify.telegram import (
+                format_pre_trade_alert,
+                format_trade_confirm,
+                send_whatsapp,
+            )
             send_whatsapp(format_pre_trade_alert(
                 sym, sym, notional, best["score"],
                 free_cash, best.get("reasons", []),
@@ -542,7 +545,7 @@ def seed_tradelog_from_env() -> dict:
     def _key(t):
         return (t.get("timestamp"), (t.get("ticker") or "").upper(), t.get("action"))
 
-    existing = trader.tradelog.data.setdefault("trades", [])
+    existing = get_trader().tradelog.data.setdefault("trades", [])
     seen = {_key(t) for t in existing}
     added = 0
     for t in incoming:
@@ -556,7 +559,7 @@ def seed_tradelog_from_env() -> dict:
 
     if added:
         existing.sort(key=lambda t: t.get("timestamp") or "")
-        trader.tradelog.save()
+        get_trader().tradelog.save()
     log.info(f"TRADELOG_SEED: merged {added} new entries, "
              f"{len(incoming) - added} already present, total now {len(existing)}")
     return {"seeded": added, "skipped": len(incoming) - added, "total": len(existing)}

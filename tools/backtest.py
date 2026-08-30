@@ -36,19 +36,17 @@ import json
 import logging
 import math
 import statistics as st
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from raanu.market.prices import batch_download
-from raanu.indicators import ema
-from raanu.strategies.pullback import score_from_df
 from raanu.strategies.breakout import score_from_df_s2
 from raanu.strategies.leader_dip import score_from_df_s3
+from raanu.strategies.pullback import score_from_df
 
 log = logging.getLogger("raanu.backtest")
 
@@ -465,7 +463,7 @@ def _benchmark_frame(years: int):
         return None
 
 
-def risk_stats(equity_curve: list, bench: "pd.DataFrame",
+def risk_stats(equity_curve: list, bench: pd.DataFrame,
                trades: list = None, risk_free_pct: float = 4.0) -> dict:
     """Risk-ADJUSTED performance: alpha, beta, Sharpe, Sortino, exposure.
 
@@ -488,7 +486,6 @@ def risk_stats(equity_curve: list, bench: "pd.DataFrame",
     risk_free_pct is annual and defaults to 4%, roughly US T-bills across the
     2023–2026 window. Passing 0 (the common shortcut) inflates every Sharpe.
     """
-    import numpy as np
 
     if not equity_curve or len(equity_curve) < 30:
         return {"error": "not enough equity history"}
@@ -826,7 +823,7 @@ def main() -> None:
                                     trail_mode="atr", trail_activate_atr=2.0, trail_atr_mult=1.5)),
         ]
         spy = _benchmark_frame(args.years)
-        print(f"stability check — does the config work in BOTH halves?")
+        print("stability check — does the config work in BOTH halves?")
         print(f"  max_positions={pf.max_positions}   (rf {args.risk_free}%)\n")
         for label, ex in candidates:
             res = simulate(sig, prices, ex, pf)

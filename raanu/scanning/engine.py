@@ -67,7 +67,7 @@ def enrich_market_caps(hits: list[dict]) -> None:
         return
     try:
         with ThreadPoolExecutor(max_workers=min(_CAP_FETCH_WORKERS, len(tickers))) as pool:
-            caps = dict(zip(tickers, pool.map(_fetch_market_cap, tickers)))
+            caps = dict(zip(tickers, pool.map(_fetch_market_cap, tickers), strict=True))
     except Exception as e:
         log.warning(f"Market-cap enrichment failed: {e}")
         caps = {}

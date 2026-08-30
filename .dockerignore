@@ -31,7 +31,6 @@ aws/site/
 mobile/
 twa/
 play/
-icons/
 tools/
 
 # Regenerable/local-only — never the source of truth, and on Lambda this
@@ -49,12 +48,11 @@ last_picks_s2.json
 last_picks_s3.json
 raanu.db*
 
-# Not part of the live app. RaanuTradingBot.html is NOT excluded — server.py's
-# own GET / route serves it directly from disk, which matters if the Function
-# URL is ever hit directly rather than through CloudFront.
-backtest.py
-files.zip
-force_deploy.py
-fix_and_push.py
-fix_branding.py
+# Not part of the live app. RaanuTradingBot.html is NOT excluded — the static
+# routes serve it from disk, which matters if the Function URL is ever hit
+# directly rather than through CloudFront.
+tests/
+.venv/
+.venv*/
+pyproject.toml
 *.bat

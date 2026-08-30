@@ -33,7 +33,6 @@ Score range 0-100. Score >= 60 AND `leader_dip == true` is actionable.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -85,8 +84,8 @@ def _empty(ticker: str, reason: str, err: str) -> dict:
             "error": err, "leader_dip": False, "strategy": "s3"}
 
 
-def _score_core_s3(ticker: str, df: Optional[pd.DataFrame],
-                   bench_ret_3m: Optional[float] = None) -> dict:
+def _score_core_s3(ticker: str, df: pd.DataFrame | None,
+                   bench_ret_3m: float | None = None) -> dict:
     if df is None or len(df) < 210:
         return _empty(ticker, "Insufficient history (<210 bars)", "short series")
 
@@ -94,7 +93,7 @@ def _score_core_s3(ticker: str, df: Optional[pd.DataFrame],
     if len(close) < 210:
         return _empty(ticker, "Insufficient history (<210 bars)", "short series")
     vol  = df["Volume"].dropna() if "Volume" in df.columns else None
-    low  = df["Low"].dropna()    if "Low"    in df.columns else close
+    low  = df["Low"].dropna()    if "Low"    in df.columns else close  # noqa: F841 — kept for symmetry with the other extractors
 
     last = float(close.iloc[-1])
     if last <= 0:
@@ -246,7 +245,7 @@ def _score_core_s3(ticker: str, df: Optional[pd.DataFrame],
     }
 
 
-def score_ticker_s3(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
+def score_ticker_s3(ticker: str, bench_ret_3m: float | None = None) -> dict:
     from raanu.market.prices import benchmark_return_3m, fetch_ohlc
     df = fetch_ohlc(ticker)
     if bench_ret_3m is None:
@@ -255,7 +254,7 @@ def score_ticker_s3(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
 
 
 def score_from_df_s3(ticker: str, df: pd.DataFrame,
-                     bench_ret_3m: Optional[float] = None) -> dict:
+                     bench_ret_3m: float | None = None) -> dict:
     return _score_core_s3(ticker, df, bench_ret_3m)
 
 

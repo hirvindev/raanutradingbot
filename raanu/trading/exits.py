@@ -17,10 +17,8 @@ Closing a position also sends a notification.
 """
 
 import asyncio
-import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -43,7 +41,7 @@ def parse_ladder(spec: str) -> list[tuple[float, float]]:
     return sorted(rungs)
 
 
-def locked_floor(peak_pct: float, rungs: list[tuple[float, float]]) -> Optional[float]:
+def locked_floor(peak_pct: float, rungs: list[tuple[float, float]]) -> float | None:
     """Highest profit level locked in, given how far the position has run."""
     floor = None
     for threshold, lock in rungs:
@@ -94,7 +92,7 @@ def _save_peaks(peaks: dict) -> None:
     state.save(_PEAKS_KEY, peaks)
 
 
-async def _get_atr(symbol: str, period: int = 14) -> Optional[float]:
+async def _get_atr(symbol: str, period: int = 14) -> float | None:
     """
     Wilder's ATR in price units, from daily Alpaca bars.
 
@@ -201,7 +199,7 @@ async def _fetch_daily_bars(symbol: str, days: int) -> list[dict]:
     {"bars": null} rather than an error, which silently disabled every rule
     that depended on historical bars.
     """
-    start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    start = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
     try:
         async with httpx.AsyncClient(timeout=10) as c:
             r = await c.get(
@@ -223,7 +221,7 @@ async def _fetch_daily_bars(symbol: str, days: int) -> list[dict]:
         return []
 
 
-async def _get_prev_close(symbol: str) -> Optional[float]:
+async def _get_prev_close(symbol: str) -> float | None:
     """Previous trading-day close."""
     bars = await _fetch_daily_bars(symbol, days=10)
     if len(bars) >= 2:
@@ -341,7 +339,7 @@ async def run_monitor_once():
     once per invocation; `monitor_loop` wraps it in a sleep loop for local
     development, where there is a persistent process to sleep inside."""
     cfg = config.exit_config()
-    from raanu.notify.telegram import send_whatsapp, format_profit_alert
+    from raanu.notify.telegram import format_profit_alert, send_whatsapp
 
     if not await _market_is_open():
         log.debug("Profit monitor: market closed — skipping exit checks")

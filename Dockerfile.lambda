@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 # durable and copyable than a running process's environment.
 COPY . ${LAMBDA_TASK_ROOT}/
 
-CMD ["api_handler.handler"]
+CMD ["handlers.api.handler"]

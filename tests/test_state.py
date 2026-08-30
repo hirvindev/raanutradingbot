@@ -7,8 +7,6 @@ fails here instead of on deploy.
 
 from __future__ import annotations
 
-import pytest
-
 from raanu import state
 
 

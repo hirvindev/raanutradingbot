@@ -9,7 +9,6 @@ about where bars come from. Extracted from the old flat ``strategy.py``.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import pandas as pd
 import yfinance as yf
@@ -20,7 +19,7 @@ log = logging.getLogger("raanu.market.prices")
 
 
 # ---------- DATA ----------
-def fetch_ohlc(ticker: str, period: str = "1y") -> Optional[pd.DataFrame]:
+def fetch_ohlc(ticker: str, period: str = "1y") -> pd.DataFrame | None:
     """Daily candles via yfinance (fast, free, no API key needed)."""
     try:
         df = yf.download(
@@ -41,7 +40,7 @@ def fetch_ohlc(ticker: str, period: str = "1y") -> Optional[pd.DataFrame]:
     return df
 
 
-def benchmark_return_3m(period: str = "1y") -> Optional[float]:
+def benchmark_return_3m(period: str = "1y") -> float | None:
     """3-month return of SPY, used for relative-strength scoring. None on failure."""
     try:
         df = fetch_ohlc("SPY", period=period)

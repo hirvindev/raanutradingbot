@@ -31,8 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from raanu import config, state
 
@@ -63,7 +62,7 @@ def subscribe(sub: dict) -> dict:
         return {"ok": False, "error": "no endpoint"}
     subs = _load()
     subs = [s for s in subs if s.get("endpoint") != sub["endpoint"]]
-    subs.append({**sub, "added": datetime.now(timezone.utc).isoformat()})
+    subs.append({**sub, "added": datetime.now(UTC).isoformat()})
     _save(subs)
     log.info(f"[push] device registered ({len(subs)} total)")
     return {"ok": True, "devices": len(subs)}
@@ -89,7 +88,7 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/",
         return {"sent": 0, "skipped": "no devices registered"}
 
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import WebPushException, webpush
     except Exception as e:
         log.warning(f"[push] pywebpush unavailable: {e}")
         return {"sent": 0, "error": str(e)}
@@ -147,7 +146,7 @@ def register_native(token: str, platform: str = "android") -> dict:
         return {"ok": False, "error": "that does not look like an FCM token"}
     toks = [t for t in _load_native() if t.get("token") != token]
     toks.append({"token": token, "platform": platform,
-                 "added": datetime.now(timezone.utc).isoformat()})
+                 "added": datetime.now(UTC).isoformat()})
     _save_native(toks)
     log.info(f"[push] native device registered ({len(toks)} total)")
     return {"ok": True, "devices": len(toks)}
@@ -214,8 +213,8 @@ def status() -> dict:
                                 "credentials_valid": False, "detail": err}
         return out
     try:
-        from google.oauth2 import service_account
         from google.auth.transport.requests import Request as GRequest
+        from google.oauth2 import service_account
         creds = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
         creds.refresh(GRequest())                  # the real test
@@ -244,8 +243,8 @@ def send_native(title: str, body: str, sticky: bool = False) -> int:
         return 0
     try:
         import httpx
-        from google.oauth2 import service_account
         from google.auth.transport.requests import Request as GRequest
+        from google.oauth2 import service_account
 
         creds = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
@@ -316,7 +315,7 @@ def _record(title: str, body: str, tag: str):
     grows is one more thing to prune later.
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         items = state.load(NOTIF_KEY, default={}).get("items", [])
         items.insert(0, {"ts": now.isoformat(), "title": title,
                          "body": body, "tag": tag})
@@ -331,7 +330,7 @@ def _record(title: str, body: str, tag: str):
 def history() -> list:
     """Alerts from the retention window, newest first."""
     try:
-        cutoff = datetime.now(timezone.utc).timestamp() - config.notif_retain_hours() * 3600
+        cutoff = datetime.now(UTC).timestamp() - config.notif_retain_hours() * 3600
         items = state.load(NOTIF_KEY, default={}).get("items", [])
         return [i for i in items
                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff]
@@ -383,7 +382,7 @@ def _tech_lines(p: dict) -> list:
     return out
 
 
-def _exit_levels(entry: float, atr_pct: float, strategy: str) -> Optional[dict]:
+def _exit_levels(entry: float, atr_pct: float, strategy: str) -> dict | None:
     """Where this trade would actually be closed, from the LIVE exit config.
 
     Read from profit_monitor rather than restated here, so an alert can never
@@ -475,7 +474,7 @@ def notify_signal(p: dict, strategy: str):
 
 
 def notify_buy(ticker: str, usd: float, strategy: str, score=None,
-               pick: Optional[dict] = None):
+               pick: dict | None = None):
     """An order was actually placed. Carries the exit plan, not just the entry.
 
     The stop is the number worth knowing at 3am, and it was missing before —

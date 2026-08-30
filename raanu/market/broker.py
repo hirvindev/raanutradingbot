@@ -8,10 +8,9 @@ Set ALPACA_API_KEY and ALPACA_SECRET_KEY in your .env to enable.
 Falls back gracefully when keys are absent.
 """
 
-import os
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+import os
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pandas as pd
@@ -35,7 +34,7 @@ def is_configured() -> bool:
 
 # ---------- HISTORICAL BARS ----------
 
-def fetch_bars(ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
+def fetch_bars(ticker: str, days: int = 120) -> pd.DataFrame | None:
     """
     Fetch daily OHLCV bars from Alpaca Data API.
     Returns a DataFrame with columns Open/High/Low/Close/Volume, or None on failure.
@@ -48,7 +47,7 @@ def fetch_bars(ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
     if "." in ticker:
         return None
 
-    start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         resp = httpx.get(
             f"{DATA_URL}/stocks/bars",
@@ -172,7 +171,7 @@ def get_market_movers(top: int = 10) -> dict:
 
 # ---------- LATEST SNAPSHOT ----------
 
-def get_snapshot(ticker: str) -> Optional[dict]:
+def get_snapshot(ticker: str) -> dict | None:
     """
     Returns latest trade, quote, and bar for a symbol.
     Useful for fast price lookups without pulling full bars.

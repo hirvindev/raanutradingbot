@@ -28,4 +28,11 @@ ignore = [
     "E501",  # long lines: this codebase's comments carry the "why", and
              # rewrapping them all would bury the real diff in noise
     "B008",  # FastAPI's Depends()/Query() in defaults is the framework idiom
+    # Pre-existing formatting in strategy/notify code that this restructure
+    # only relocated. Reformatting it would make the move indistinguishable
+    # from a rewrite in review, for no behaviour change. The F (real bug)
+    # and I (import order) classes ARE enforced.
+    "E701",  # multiple statements on one line (colon)
+    "E702",  # multiple statements on one line (semicolon)
+    "E741",  # ambiguous variable name `l`
 ]

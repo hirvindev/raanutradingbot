@@ -1513,59 +1513,69 @@ function renderScanRows(res){
     : '<tr><td class="empty" colspan="9">Nothing in a confirmed uptrend right now</td></tr>';
 }
 
-// A full scan takes ~3-4 minutes — this fires it on the worker Lambda
-// (POST /api/scan/job) and polls for progress/results (GET /api/scan/job)
-// instead of holding one long connection open, which Lambda/CloudFront
-// can't sustain (Function URL origin timeout caps at 60s without an AWS
-// quota increase, and Mangum buffers the whole response regardless).
+// Scans run as a job on the worker (POST /api/scan/job) and are polled
+// (GET /api/scan/job): a cold scan is ~87s, far longer than Lambda behind
+// CloudFront can hold a request open. With the daily bars cache warm it is
+// only a few seconds, so most scans finish almost immediately.
+//
+// The server reports per-shard progress and its running result list on
+// every poll, so results appear as they are found rather than all at once
+// at the end.
 el('scanBtn').onclick = async () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
   el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="9">Screening…</td></tr>';
 
-  let poll;
+  let poll, shown = -1;
   const finish = msg => { clearInterval(poll); btn.disabled=false; btn.textContent='Scan market';
                           prog.style.display='none'; el('scanStat').textContent=msg; };
+  const fail = (label, detail) => {
+    finish(label); logLine('Scan failed: '+detail, 'err');
+    body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${detail}</td></tr>`;
+  };
+
   const started = await action('/api/scan/job', {method:'POST'});
   if(!started || started.cancelled || started.denied){ finish('Cancelled'); return; }
   const startedBody = await started.json().catch(()=>({}));
-  if(!started.ok){ finish('Failed'); logLine('Scan failed to start: '+(startedBody.error||started.status),'err'); return; }
+  if(!started.ok){ fail('Failed', startedBody.error || started.status); return; }
+  const runId = startedBody.run_id;
 
-  // The worker overwrites state to "running" as its very first step, but
-  // there's a short cold-start window right after the invoke fires where a
-  // poll can still see the PREVIOUS scan's terminal state. Don't trust a
-  // "done"/"error" as belonging to this run until a "running" has actually
-  // been observed in between — otherwise a stale old result would end the
-  // poll immediately, before the new scan has done any work at all.
-  let sawRunning = false, waited = 0;
+  // A poll landing in the gap between dispatch and the first shard writing
+  // its state would otherwise read the PREVIOUS run and finish instantly on
+  // stale results. Matching on run_id makes that impossible rather than
+  // merely unlikely.
+  let waited = 0;
   const tick = async () => {
     const d = await j('/api/scan/job');
     if(!d) return;
-    if(d.status==='running') sawRunning = true;
-    if(!sawRunning && d.status!=='running'){
-      // If the invoke silently failed to actually start the worker (e.g. a
-      // permissions issue), sawRunning would never flip and this would
-      // otherwise poll forever with no feedback. 30s of cold-start slack
-      // is generous — real cold starts land in a few seconds.
-      if((waited += 1500) > 30000){ finish('Failed to start'); logLine('Scan never started — worker may be unreachable','err'); }
+    if(d.run_id !== runId){
+      // 30s of cold-start slack, then admit the run never started rather
+      // than polling forever with no feedback.
+      if((waited += 1500) > 30000) fail('Failed to start', 'worker never picked up the scan');
       return;
     }
-    if(d.status==='error'){ finish('Failed'); logLine('Scan failed: '+d.error,'err');
-      body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${d.error}</td></tr>`; return; }
-    if(d.total) bar.style.width=Math.min(100,(d.scanned||0)/d.total*100)+'%';
-    // The worker writes its running total into `results` every 25 tickers,
-    // not just on completion — render what's arrived so far instead of a
-    // blank table for the whole ~3-4 minute scan. Only replaces the initial
-    // "Screening…" placeholder once something has actually been found.
-    const res=(d.results||[]).slice().sort((a,b)=>b.score-a.score);
-    if(res.length) body.innerHTML = renderScanRows(res);
-    if(d.status!=='done'){
-      el('scanStat').textContent = `Screening ${d.scanned||0}/${d.total||0}${res.length?` · ${res.length} so far`:''}`;
+    if(d.status === 'error'){ fail('Failed', d.error || 'every shard failed'); return; }
+    if(d.status === 'stalled'){ fail('Stalled', d.error || 'shards stopped reporting'); return; }
+
+    if(d.total) bar.style.width = Math.min(100, (d.scanned||0)/d.total*100)+'%';
+
+    // Re-render only when the count actually changed. Replacing innerHTML on
+    // every 1.5s poll resets scroll position and any hover mid-scan.
+    const res = d.results || [];
+    if(res.length !== shown){ body.innerHTML = renderScanRows(res); shown = res.length; }
+
+    if(d.status !== 'done'){
+      const shards = d.shards > 1 ? ` · ${d.shards_done||0}/${d.shards} shards` : '';
+      const found  = res.length ? ` · ${res.length} found` : '';
+      el('scanStat').textContent = `Screening ${d.scanned||0}/${d.total||0}${shards}${found}`;
       return;
     }
+
     if(!res.length) body.innerHTML = renderScanRows(res);
-    finish(`${d.scanned||d.total||0} screened · ${res.length} candidates`);
-    logLine(`Scan done — ${d.scanned||d.total||0} screened, ${res.length} candidates`,'ok');
+    const partial = d.failed_shards ? ` (${d.failed_shards} shard(s) failed)` : '';
+    finish(`${d.scanned||d.total||0} screened · ${res.length} candidates · ${d.elapsed}s${partial}`);
+    logLine(`Scan done in ${d.elapsed}s — ${d.scanned||d.total||0} screened, `+
+            `${res.length} candidates${partial}`, d.failed_shards ? 'err' : 'ok');
   };
   poll = setInterval(tick, 1500);
   tick();

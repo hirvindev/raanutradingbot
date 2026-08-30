@@ -12,12 +12,10 @@ NOT buy falling knives.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from raanu.market.prices import benchmark_return_3m, fetch_ohlc
 from raanu.indicators import (
     UPTREND_SCORE_CAP,
     atr_pct_from_df,
@@ -28,6 +26,7 @@ from raanu.indicators import (
     roc,
     rsi,
 )
+from raanu.market.prices import benchmark_return_3m, fetch_ohlc
 
 log = logging.getLogger("raanu.strategies.pullback")
 
@@ -37,7 +36,7 @@ def _empty(ticker: str, reason: str, err: str) -> dict:
     return {"ticker": ticker, "ok": False, "score": 0, "reasons": [reason], "error": err}
 
 
-def _score_core(ticker: str, df: Optional[pd.DataFrame], bench_ret_3m: Optional[float] = None) -> dict:
+def _score_core(ticker: str, df: pd.DataFrame | None, bench_ret_3m: float | None = None) -> dict:
     """
     Score one ticker from a pre-fetched OHLCV DataFrame using a trend +
     momentum + pullback model. `bench_ret_3m` is SPY's 3-month return for
@@ -230,7 +229,7 @@ def _score_core(ticker: str, df: Optional[pd.DataFrame], bench_ret_3m: Optional[
     }
 
 
-def score_ticker(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
+def score_ticker(ticker: str, bench_ret_3m: float | None = None) -> dict:
     """Download daily OHLCV and score one ticker."""
     df = fetch_ohlc(ticker)
     if bench_ret_3m is None:
@@ -238,7 +237,7 @@ def score_ticker(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
     return _score_core(ticker, df, bench_ret_3m)
 
 
-def score_from_df(ticker: str, df: pd.DataFrame, bench_ret_3m: Optional[float] = None) -> dict:
+def score_from_df(ticker: str, df: pd.DataFrame, bench_ret_3m: float | None = None) -> dict:
     """Score a ticker from a pre-fetched OHLCV DataFrame (skip download)."""
     return _score_core(ticker, df, bench_ret_3m)
 

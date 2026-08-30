@@ -8,11 +8,8 @@ them. Extracted from the old flat ``strategy.py``.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
-
 
 # Actionable threshold — a non-uptrend stock is capped just below this so it
 # can never become a pick. Keep in sync with MIN_SIGNAL_SCORE (default 60).
@@ -70,7 +67,7 @@ def _fractal_swings(high: np.ndarray, low: np.ndarray, k: int = 5):
 
 
 def golden_pocket(high: pd.Series, low: pd.Series, close: pd.Series,
-                  lookback: int = 80, k: int = 5) -> Optional[dict]:
+                  lookback: int = 80, k: int = 5) -> dict | None:
     """
     Identify the last up-impulse (swing low -> higher swing high) and the
     Fibonacci retracement zone the current price sits in.

@@ -5,11 +5,12 @@ Sends trade alerts, portfolio status, and profit/loss notifications
 to the configured Telegram chat. No session expiry — works 24/7.
 """
 
-import os
 import logging
-import httpx
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import httpx
 
 log = logging.getLogger("raanu.notifier")
 BERLIN = ZoneInfo("Europe/Berlin")

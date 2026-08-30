@@ -30,12 +30,8 @@ run on live data.
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional
-
-import pandas as pd
+from datetime import UTC, datetime
 
 from raanu import state
 
@@ -67,7 +63,7 @@ def record(strategy: str, picks: list) -> int:
         return 0
     try:
         data = _load()
-        day = datetime.now(timezone.utc).date().isoformat()
+        day = datetime.now(UTC).date().isoformat()
         have = {(p["date"], p["strategy"]) for p in data["picks"]}
         if (day, strategy) in have:
             return 0
@@ -77,7 +73,7 @@ def record(strategy: str, picks: list) -> int:
                 continue
             data["picks"].append({
                 "date": day,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "strategy": strategy,
                 "ticker": p["ticker"],
                 "name": p.get("name"),
@@ -146,7 +142,7 @@ def fill_forward_returns() -> dict:
     return {"filled": filled, "pending": still}
 
 
-def _agg(rows: list, day: str) -> Optional[dict]:
+def _agg(rows: list, day: str) -> dict | None:
     vals = [r["fwd"][day] for r in rows if (r.get("fwd") or {}).get(day) is not None]
     spy = [r["spy"][day] for r in rows if (r.get("spy") or {}).get(day) is not None]
     if not vals:

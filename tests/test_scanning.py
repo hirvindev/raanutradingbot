@@ -19,7 +19,8 @@ def fake_market(monkeypatch):
 
     AAA passes S1, BBB passes S2, CCC passes S3, everything else fails.
     """
-    monkeypatch.setattr(engine, "batch_download", lambda tickers: {t: object() for t in tickers})
+    # The engine reads bars through the cache now, so that is the seam.
+    monkeypatch.setattr(engine, "get_bars", lambda tickers: {t: object() for t in tickers})
     monkeypatch.setattr(engine, "benchmark_return_3m", lambda: 0.05)
     monkeypatch.setattr(engine, "get_ticker_name", lambda t: f"{t} Inc")
 
@@ -208,15 +209,14 @@ class TestRunLifecycle:
         assert snapshot["results"], "surviving shard's hits must still be returned"
 
     def test_all_shards_failing_is_an_error(self, fake_market, monkeypatch):
-        manifest = job.start_run(mode="cheap", tickers=fake_market)
         monkeypatch.setattr(job, "scan_universe", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-        job.run_inline(manifest)
+        job.run_inline(job.start_run(mode="cheap", tickers=fake_market))
         assert job.status()["status"] == "error"
 
     def test_a_run_that_never_finishes_is_reported_as_stalled(self, fake_market, monkeypatch):
         # Guards the UI against polling forever when a shard dies at the
         # Lambda level (OOM/timeout) and never writes a terminal state.
-        manifest = job.start_run(mode="cheap", tickers=fake_market)
+        job.start_run(mode="cheap", tickers=fake_market)
         stale = dict(state.load(job.MANIFEST_KEY))
         stale["started_at"] -= job._STALL_AFTER_SECONDS + 1
         state.save(job.MANIFEST_KEY, stale)

@@ -22,7 +22,6 @@ Score >= 60 AND stage2 == true  →  actionable breakout BUY.
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -69,8 +68,8 @@ def _empty(ticker: str, reason: str, err: str) -> dict:
             "error": err, "strategy": "s2"}
 
 
-def _score_core_s2(ticker: str, df: Optional[pd.DataFrame],
-                   bench_ret_3m: Optional[float] = None) -> dict:
+def _score_core_s2(ticker: str, df: pd.DataFrame | None,
+                   bench_ret_3m: float | None = None) -> dict:
     if df is None or len(df) < 60:
         return _empty(ticker, "Insufficient history (<60 bars)", "short series")
 
@@ -262,7 +261,7 @@ def _score_core_s2(ticker: str, df: Optional[pd.DataFrame],
     }
 
 
-def score_ticker_s2(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
+def score_ticker_s2(ticker: str, bench_ret_3m: float | None = None) -> dict:
     from raanu.market.prices import benchmark_return_3m, fetch_ohlc
     df = fetch_ohlc(ticker)
     if bench_ret_3m is None:
@@ -271,7 +270,7 @@ def score_ticker_s2(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
 
 
 def score_from_df_s2(ticker: str, df: pd.DataFrame,
-                     bench_ret_3m: Optional[float] = None) -> dict:
+                     bench_ret_3m: float | None = None) -> dict:
     return _score_core_s2(ticker, df, bench_ret_3m)
 
 

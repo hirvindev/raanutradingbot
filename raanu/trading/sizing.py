@@ -31,8 +31,8 @@ from __future__ import annotations
 import logging
 import os
 import statistics as st
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 log = logging.getLogger("raanu.kelly")
 
@@ -80,7 +80,7 @@ def kelly_f(win_rate: float, payoff_b: float) -> float:
     return (payoff_b * win_rate - (1.0 - win_rate)) / payoff_b
 
 
-def from_pnls(pnls: Iterable[float], fraction: Optional[float] = None) -> KellyResult:
+def from_pnls(pnls: Iterable[float], fraction: float | None = None) -> KellyResult:
     """
     Compute a sized risk budget from a sequence of realized trade P&Ls.
 
@@ -126,8 +126,8 @@ def from_pnls(pnls: Iterable[float], fraction: Optional[float] = None) -> KellyR
     )
 
 
-def from_trade_log(strategy: Optional[str] = None,
-                   fraction: Optional[float] = None) -> KellyResult:
+def from_trade_log(strategy: str | None = None,
+                   fraction: float | None = None) -> KellyResult:
     """
     Compute Kelly from the live trade log's realized SELL records.
 

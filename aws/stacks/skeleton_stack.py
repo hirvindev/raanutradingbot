@@ -30,8 +30,8 @@ LAMBDA_ARCHITECTURE = lambda_.Architecture.X86_64
 
 def _stage_dashboard_site(site_dir: Path) -> None:
     """Regenerate aws/site/ from the real dashboard files at synth time, so
-    RaanuTradingBot.html stays the single source of truth for both Railway
-    and AWS — aws/site/ itself is generated and gitignored, not hand-authored.
+    RaanuTradingBot.html stays the single source of truth — aws/site/ itself
+    is generated and gitignored, not hand-authored.
 
     An explicit allow-list, not "deploy the repo root minus some excludes":
     a deny-list risks a future new top-level file, or a typo in the excludes,
@@ -52,10 +52,9 @@ class SkeletonStack(Stack):
     real bot: the dashboard on S3/CloudFront, the FastAPI app wrapped by
     Mangum behind a second Lambda (also reachable through CloudFront, so the
     browser only ever sees one origin and no CORS is needed), a worker
-    Lambda standing in for server.py's three background loops (Lambda has
-    no persistent process to run them in), and DynamoDB replacing the local
-    JSON state files. See aws/README.md and CLAUDE.md's AWS Migration
-    section for the full "why" behind each choice.
+    Lambda standing in for the background loops a persistent process would
+    run, and DynamoDB for all persistent state. See aws/README.md and
+    CLAUDE.md's AWS Migration section for the full "why" behind each choice.
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -71,11 +70,9 @@ class SkeletonStack(Stack):
             auto_delete_objects=True,
         )
 
-        # One item per today's JSON state file (trades_log.json,
-        # position_peaks.json, picks_log.json, push_subs.json,
-        # push_native.json, notifications.json, last_picks*.json,
-        # scheduler_marks.json), keyed by that same filename — see
-        # datadir.py's state_load/state_save. RETAIN, not the site bucket's
+        # Every piece of persistent state: the trade log, position peaks,
+        # picks history, push subscriptions, scan runs and the daily bars
+        # cache — see raanu/state. RETAIN, not the site bucket's
         # DESTROY/auto-delete: this table will hold real trade history, and
         # a `cdk destroy` must not be able to erase it.
         state_table = dynamodb.Table(
@@ -84,6 +81,10 @@ class SkeletonStack(Stack):
             partition_key=dynamodb.Attribute(name="state_key", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
+            # Scan-run shards and cached daily bars write a `ttl` and expire
+            # themselves. Without this they would accumulate forever, since
+            # nothing else ever deletes them.
+            time_to_live_attribute="ttl",
         )
 
         distribution = cloudfront.Distribution(
@@ -102,12 +103,19 @@ class SkeletonStack(Stack):
         # while the Distribution's behavior (below) depends on the Lambda's
         # Function URL, a genuine circular dependency CloudFormation refuses
         # to resolve. It isn't needed anyway: CloudFront makes the dashboard
-        # and the API the same origin from the browser's perspective, so no
-        # request here is ever actually cross-origin — the CORS check in
-        # server.py's middleware simply never has anything to enforce.
+        # and the API the same origin from the browser's perspective, so the
+        # CORS middleware never has anything to enforce.
         common_env = {
             "STATE_BACKEND": "dynamodb",
             "STATE_TABLE": state_table.table_name,
+            # Fan-out width for an interactive scan. Downloads are throttled
+            # server-side by Yahoo at ~6.2 tickers/s and concurrency does not
+            # beat that, so this exists for the cold-cache case and for
+            # spreading scoring — the real speedup is the bars cache.
+            "SCAN_SHARDS": "8",
+            # Small batches so progress is reported during a scan rather than
+            # only after each download returns.
+            "SCAN_BATCH_SIZE": "20",
         }
 
         # Both Lambdas share one built image (same Dockerfile, same repo-root
@@ -117,13 +125,13 @@ class SkeletonStack(Stack):
             str(REPO_ROOT),
             file="Dockerfile.lambda",
             platform=LAMBDA_PLATFORM,
-            cmd=["api_handler.handler"],
+            cmd=["handlers.api.handler"],
         )
         worker_image = lambda_.DockerImageCode.from_image_asset(
             str(REPO_ROOT),
             file="Dockerfile.lambda",
             platform=LAMBDA_PLATFORM,
-            cmd=["worker_handler.handler"],
+            cmd=["handlers.worker.handler"],
         )
 
         api_fn = lambda_.DockerImageFunction(
@@ -141,16 +149,15 @@ class SkeletonStack(Stack):
             "WorkerFunction",
             code=worker_image,
             architecture=LAMBDA_ARCHITECTURE,
-            # 10 min, not 5: a real on-demand scan measured ~3.5 minutes
-            # end to end, with yfinance retries on delisted tickers adding
-            # variance outside our control — 5 minutes left uncomfortably
-            # little margin.
+            # 10 min: a cold-cache scan measures ~87s and a warm one ~7s,
+            # but the ceiling has to cover a cold cache plus Yahoo being
+            # slow, and this timeout costs nothing unless it is actually hit.
             timeout=Duration.minutes(10),
             memory_size=1024,
             environment=common_env,
         )
 
-        # Lets POST /api/scan/job (server.py) fire an async scan on the
+        # Lets POST /api/scan/job fire an async scan on the
         # worker instead of running it inline — a scan takes minutes,
         # longer than a Lambda-through-CloudFront request can stay open.
         # One-directional (worker_fn doesn't reference api_fn or the
@@ -232,10 +239,21 @@ class SkeletonStack(Stack):
         # user: no autonomous scheduled scan/trade from AWS until this is
         # explicitly enabled, so it never races Railway's own scheduler
         # against the same paper account and weekly limits.
+        # 13:30-22:00 UTC every weekday, every 5 minutes. That window is a
+        # deliberate SUPERSET of the US market session under both EST and
+        # EDT, so DST can never shift the market out of it — EventBridge
+        # cron is UTC-only and has no timezone parameter. The worker's own
+        # US/Eastern logic still decides what actually runs, so widening the
+        # window costs invocations but can never cause a mistimed trade.
+        #
+        # Replaces rate(5 minutes) around the clock: ~288 invocations/day
+        # became ~102, and the ~65% that were removed were pure no-ops (the
+        # exit engine self-gates on market-open).
         events.Rule(
             self,
             "WorkerSchedule",
-            schedule=events.Schedule.rate(Duration.minutes(5)),
+            schedule=events.Schedule.cron(
+                minute="0/5", hour="13-21", week_day="MON-FRI"),
             targets=[events_targets.LambdaFunction(worker_fn)],
             enabled=False,
         )

@@ -10,10 +10,8 @@ decision with a 12-tester/14-day gate behind it and real regulatory questions
 about a public stock-signal app; it must never be something a deploy script can
 do by accident.
 """
-import json
 import os
 import sys
-import time
 from pathlib import Path
 
 PACKAGE = "app.raanu.mobile"
