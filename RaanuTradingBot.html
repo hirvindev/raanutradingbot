@@ -1597,7 +1597,12 @@ el('scanBtn').onclick = async () => {
   if(!started || started.cancelled || started.denied){ finish('Cancelled'); return; }
   const startedBody = await started.json().catch(()=>({}));
   if(!started.ok){ fail('Failed', startedBody.error || started.status); return; }
+  // A scan may already be in flight — a double-click, or a scheduled run.
+  // The server hands back that run's id, so attach to it and show its
+  // progress rather than treating it as a failure to start.
   const runId = startedBody.run_id;
+  if(!runId){ fail('Failed', 'server did not return a run id'); return; }
+  if(startedBody.status === 'already_running') logLine('Attached to a scan already in progress');
 
   // A poll landing in the gap between dispatch and the first shard writing
   // its state would otherwise read the PREVIOUS run and finish instantly on

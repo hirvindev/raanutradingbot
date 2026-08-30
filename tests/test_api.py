@@ -205,6 +205,25 @@ class TestScanJobRoutes:
         dispatched = [t for c in sent for t in _json.loads(c["Payload"])["tickers"]]
         assert len(dispatched) == 274
 
+    def test_already_running_identifies_the_run_so_a_caller_can_attach(self, client, monkeypatch):
+        # Without run_id here the dashboard polled for a run it never knew
+        # the id of, spun 30s and reported "Failed to start" — while the
+        # scan itself was running perfectly.
+        monkeypatch.setenv("WORKER_FUNCTION_NAME", "raanu-worker")
+
+        class FakeLambda:
+            def invoke(self, **kw):
+                return {"StatusCode": 202}
+
+        import boto3
+        monkeypatch.setattr(boto3, "client", lambda *a, **k: FakeLambda())
+
+        first = client.post("/api/scan/job").json()
+        second = client.post("/api/scan/job").json()
+        assert second["status"] == "already_running"
+        assert second["run_id"] == first["run_id"]
+        assert second["total"] == first["total"]
+
     def test_a_second_start_while_running_does_not_fan_out_twice(self, client, monkeypatch):
         monkeypatch.setenv("WORKER_FUNCTION_NAME", "raanu-worker")
         monkeypatch.setenv("SCAN_SHARDS", "2")

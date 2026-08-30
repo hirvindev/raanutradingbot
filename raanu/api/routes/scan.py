@@ -107,9 +107,20 @@ async def scan_job_start(mode: str = "fast", universe: str = exchanges.CURATED):
             {"error": "WORKER_FUNCTION_NAME not set — this endpoint requires the worker Lambda"},
             status_code=501,
         )
-    if job.status().get("status") == "running":
-        # Re-entrancy guard: a double-click must not fan out twice.
-        return {"status": "already_running"}
+    current = job.status()
+    if current.get("status") == "running":
+        # Re-entrancy guard: a double-click must not fan out twice. Return
+        # the in-flight run's id so the caller can attach to it — without
+        # this the dashboard polled for a run_id it never received, spun for
+        # 30s and reported "Failed to start" while the scan ran fine.
+        return {
+            "status": "already_running",
+            "run_id": current.get("run_id"),
+            "shards": current.get("shards"),
+            "mode": current.get("mode"),
+            "universe": current.get("universe"),
+            "total": current.get("total"),
+        }
 
     manifest = job.start_run(mode="cheap" if mode == "cheap" else "fast",
                              universe_key=universe)
