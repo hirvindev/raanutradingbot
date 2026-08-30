@@ -1,0 +1,31 @@
+[project]
+name = "raanu"
+version = "2.0.0"
+description = "RaanuTradingBot — algorithmic trading bot on AWS Lambda"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+include = ["raanu*", "handlers*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests must never reach the network or a real AWS account. Anything that
+# needs either is explicitly marked and deselected by default; run them with
+# `pytest -m live`.
+addopts = "-q --strict-markers -m 'not live'"
+markers = [
+    "live: hits real network/AWS — excluded from the default run",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # long lines: this codebase's comments carry the "why", and
+             # rewrapping them all would bury the real diff in noise
+    "B008",  # FastAPI's Depends()/Query() in defaults is the framework idiom
+]

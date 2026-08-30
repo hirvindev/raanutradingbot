@@ -10,39 +10,25 @@ Hard rules (enforced before every order):
 State is persisted in trades_log.json so limits survive restart.
 """
 
-import os
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 import httpx
 
-from strategy import scan, score_ticker
-from scanner import find_top_picks, find_top_picks_s2, find_top_picks_s3
+from raanu import config, state
+from raanu.strategies.pullback import scan, score_ticker
 
 STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Dip"}
 
-log = logging.getLogger("raanu.auto")
-
-HERE = Path(__file__).parent
-from datadir import state_load, state_save
+log = logging.getLogger("raanu.trading.trader")
 
 
-# ---------- LIMITS (configurable via .env) ----------
-def _int_env(name, default):
-    try: return int(os.getenv(name, str(default)))
-    except: return default
-
-def _float_env(name, default):
-    try: return float(os.getenv(name, str(default)))
-    except: return default
-
-
-WEEKLY_TRADE_LIMIT = _int_env("WEEKLY_TRADE_LIMIT", 2)
-PER_TRADE_MAX_USD  = _float_env("PER_TRADE_MAX_USD", 1000.0)
-MIN_SIGNAL_SCORE   = _int_env("MIN_SIGNAL_SCORE", 70)
+# ---------- LIMITS ----------
+# All of these now come from raanu.config, read per call. They used to be
+# module-level constants computed from os.getenv at import time, which meant
+# the values were frozen before SSM secrets had loaded on Lambda.
 
 # The per-trade cap is PER STRATEGY. Capital follows conviction: S3 is the only
 # strategy that has ever stayed profitable across both halves of the backtest
@@ -51,15 +37,7 @@ MIN_SIGNAL_SCORE   = _int_env("MIN_SIGNAL_SCORE", 70)
 # A blank/absent value falls back to the global PER_TRADE_MAX_USD.
 def per_trade_max_for(strategy: str) -> float:
     """Per-trade USD cap for this strategy, falling back to the global cap."""
-    raw = os.getenv(f"PER_TRADE_MAX_USD_{(strategy or 's1').upper()}", "").strip()
-    if raw:
-        try:
-            return float(raw)
-        except ValueError:
-            pass
-    return {"s1": 1000.0, "s2": 100.0, "s3": 5000.0}.get(
-        (strategy or "s1").lower(), float(PER_TRADE_MAX_USD)
-    )
+    return config.per_trade_max_usd(strategy or "s1")
 
 
 # The weekly trade limit is PER STRATEGY too, and for the same reason as the
@@ -68,15 +46,7 @@ def per_trade_max_for(strategy: str) -> float:
 # sample growing. A blank/absent value falls back to the global limit.
 def weekly_limit_for(strategy: str) -> int:
     """Weekly trade limit for this strategy, falling back to the global limit."""
-    raw = os.getenv(f"WEEKLY_TRADE_LIMIT_{(strategy or 's1').upper()}", "").strip()
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
-    return {"s1": 2, "s2": 1, "s3": 3}.get(
-        (strategy or "s1").lower(), int(WEEKLY_TRADE_LIMIT)
-    )
+    return config.weekly_trade_limit(strategy or "s1")
 
 
 # NOTE: there is deliberately no periodic scan interval. Scans are driven by
@@ -84,7 +54,7 @@ def weekly_limit_for(strategy: str) -> int:
 # SCAN_INTERVAL_SEC setting used to be defined here and reported by the API,
 # but no loop ever consumed it — the dashboard displayed "30 min" for a scan
 # cadence that did not exist.
-WATCHLIST = [t.strip().upper() for t in os.getenv("WATCHLIST", "AAPL,MSFT,NVDA,GOOGL,AMZN").split(",") if t.strip()]
+WATCHLIST = config.watchlist()
 
 
 # ---------- TRADE LOG ----------
@@ -95,10 +65,10 @@ class TradeLog:
         self.data = self._load()
 
     def _load(self):
-        return state_load(self.STATE_KEY, default={"trades": []})
+        return state.load(self.STATE_KEY, default={"trades": []})
 
     def save(self):
-        state_save(self.STATE_KEY, self.data)
+        state.save(self.STATE_KEY, self.data)
 
     def trades_in_last_7_days(self, strategy: Optional[str] = None,
                               action: Optional[str] = None):
@@ -145,14 +115,14 @@ class TradeLog:
 # ---------- ALPACA HELPERS ----------
 def _alpaca_headers() -> dict:
     return {
-        "APCA-API-KEY-ID":     os.getenv("ALPACA_API_KEY", "").strip(),
-        "APCA-API-SECRET-KEY": os.getenv("ALPACA_SECRET_KEY", "").strip(),
+        "APCA-API-KEY-ID":     config.alpaca_key(),
+        "APCA-API-SECRET-KEY": config.alpaca_secret(),
         "Content-Type":        "application/json",
     }
 
 
 def _broker_base() -> str:
-    mode = os.getenv("ALPACA_MODE", "paper").strip().lower()
+    mode = config.alpaca_mode()
     return (
         "https://paper-api.alpaca.markets/v2"
         if mode != "live"
@@ -307,13 +277,6 @@ async def alpaca_buy_notional(symbol: str, notional: float,
 
 
 # ---------- AUTO TRADER ----------
-def _bool_env(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in ("1", "true", "yes", "on")
-
-
 class AutoTrader:
     def __init__(self):
         # Off unless explicitly enabled. This used to be a hardcoded True, so
@@ -323,7 +286,7 @@ class AutoTrader:
         # traders on one account, each with its own weekly counter (so double
         # the intended trades) and each seeing the other's fills as untagged.
         # Set AUTO_TRADE_ENABLED=true on exactly ONE deployment.
-        self.enabled = _bool_env("AUTO_TRADE_ENABLED", False)
+        self.enabled = config.auto_trade_enabled()
         self.tradelog = TradeLog()
         self.last_scan: Optional[dict] = None
         self.last_decision: Optional[dict] = None
@@ -358,7 +321,7 @@ class AutoTrader:
                 "weekly_limit_by_strategy": {
                     s: weekly_limit_for(s) for s in ("s1", "s2", "s3")
                 },
-                "min_score":          MIN_SIGNAL_SCORE,
+                "min_score":          config.min_signal_score(),
                 "watchlist":          WATCHLIST,
             },
             # Budgets count BUYs only, and they are per strategy — comparing an
@@ -393,7 +356,8 @@ class AutoTrader:
 
         if picks is None:
             self.event("scan", f"[{label}] Running scan...")
-            picks = {"s2": find_top_picks_s2, "s3": find_top_picks_s3}.get(strategy, find_top_picks)(3)
+            from raanu.scanning.engine import top_picks
+            picks = top_picks(strategy, limit=3)
         else:
             self.event("scan", f"[{label}] Using pre-scanned picks ({len(picks)} candidates)")
 
@@ -446,7 +410,7 @@ class AutoTrader:
         # ── Gate 4: best signal that is executable and not already held ───
         best = next(
             (p for p in picks
-             if p.get("score", 0) >= MIN_SIGNAL_SCORE
+             if p.get("score", 0) >= config.min_signal_score()
              and p.get(uptrend_key)
              and p.get("ticker")
              and p["ticker"].upper() not in held),
@@ -458,7 +422,7 @@ class AutoTrader:
             top = picks[0] if picks else {"ticker": "?", "score": 0}
             msg = (
                 f"No new executable signal — best: {top.get('ticker')} "
-                f"score {top.get('score', 0)} (need >={MIN_SIGNAL_SCORE}). "
+                f"score {top.get('score', 0)} (need >={config.min_signal_score()}). "
                 f"Already held: {held_str}"
             )
             self.event("hold", msg)
@@ -489,7 +453,7 @@ class AutoTrader:
 
         # ── Notify BEFORE placing the order ──────────────────────────────
         try:
-            from notifier import send_whatsapp, format_pre_trade_alert, format_trade_confirm
+            from raanu.notify.telegram import send_whatsapp, format_pre_trade_alert, format_trade_confirm
             send_whatsapp(format_pre_trade_alert(
                 sym, sym, notional, best["score"],
                 free_cash, best.get("reasons", []),
@@ -530,8 +494,26 @@ class AutoTrader:
         }
 
 
-# Module-level singleton
-trader = AutoTrader()
+_trader: Optional["AutoTrader"] = None
+
+
+def get_trader() -> "AutoTrader":
+    """Process-wide trader, built on first use.
+
+    This used to be ``trader = AutoTrader()`` at module scope, so merely
+    importing this module read the whole trade log from DynamoDB — on every
+    Lambda cold start, including requests that never touch trading.
+    """
+    global _trader
+    if _trader is None:
+        _trader = AutoTrader()
+    return _trader
+
+
+def reset_trader() -> None:
+    """Drop the cached trader. Tests only."""
+    global _trader
+    _trader = None
 
 
 def seed_tradelog_from_env() -> dict:
@@ -546,7 +528,7 @@ def seed_tradelog_from_env() -> dict:
     (timestamp, ticker, action), so leaving the variable set is harmless; unset
     it once the merge is confirmed.
     """
-    raw = os.getenv("TRADELOG_SEED", "").strip()
+    raw = config.env_str("TRADELOG_SEED")
     if not raw:
         return {"seeded": 0, "skipped": 0, "reason": "TRADELOG_SEED not set"}
     try:

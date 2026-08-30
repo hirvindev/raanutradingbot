@@ -44,9 +44,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from strategy import batch_download, score_from_df, ema
-from strategy2 import score_from_df_s2
-from strategy3 import score_from_df_s3
+from raanu.market.prices import batch_download
+from raanu.indicators import ema
+from raanu.strategies.pullback import score_from_df
+from raanu.strategies.breakout import score_from_df_s2
+from raanu.strategies.leader_dip import score_from_df_s3
 
 log = logging.getLogger("raanu.backtest")
 
@@ -456,7 +458,7 @@ def filter_signals(sig: dict, min_score: int, top_n: int) -> dict:
 def _benchmark_frame(years: int):
     """SPY OHLCV for the window, for the risk maths. Cached by yfinance."""
     try:
-        from strategy import batch_download
+        from raanu.market.prices import batch_download
         return batch_download(["SPY"], period=f"{years + 1}y").get("SPY")
     except Exception as e:
         print(f"  (benchmark unavailable for risk stats: {e})")
@@ -743,7 +745,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 
-    from scanner import FALLBACK_UNIVERSE
+    from raanu.market.universe import FALLBACK_UNIVERSE
     universe = FALLBACK_UNIVERSE[:args.universe_limit] if args.universe_limit else list(FALLBACK_UNIVERSE)
 
     pf = PortfolioConfig(

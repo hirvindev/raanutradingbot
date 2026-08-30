@@ -31,31 +31,30 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
-
-from datadir import state_load, state_save
 from typing import Optional
 
-log = logging.getLogger("raanu.push")
+from raanu import config, state
+
+log = logging.getLogger("raanu.notify.push")
 
 SUBS_KEY = "push_subs.json"
 
 
 def _load() -> list:
-    return state_load(SUBS_KEY, default={}).get("subs", [])
+    return state.load(SUBS_KEY, default={}).get("subs", [])
 
 
 def _save(subs: list):
-    state_save(SUBS_KEY, {"subs": subs})
+    state.save(SUBS_KEY, {"subs": subs})
 
 
 def public_key() -> str:
-    return os.getenv("VAPID_PUBLIC_KEY", "").strip()
+    return config.vapid_public_key()
 
 
 def configured() -> bool:
-    return bool(public_key() and os.getenv("VAPID_PRIVATE_KEY", "").strip())
+    return bool(public_key() and config.vapid_private_key())
 
 
 def subscribe(sub: dict) -> dict:
@@ -97,14 +96,14 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/",
 
     payload = json.dumps({"title": title, "body": body, "tag": tag, "url": url,
                           "requireInteraction": sticky})
-    claims = {"sub": os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@example.com")}
+    claims = {"sub": config.vapid_claim_email()}
     sent, dead = 0, []
 
     for s in subs:
         try:
             webpush(subscription_info={"endpoint": s["endpoint"], "keys": s["keys"]},
                     data=payload,
-                    vapid_private_key=os.getenv("VAPID_PRIVATE_KEY", "").strip(),
+                    vapid_private_key=config.vapid_private_key(),
                     vapid_claims=dict(claims))
             sent += 1
         except WebPushException as e:
@@ -132,11 +131,11 @@ NATIVE_KEY = "push_native.json"
 
 
 def _load_native() -> list:
-    return state_load(NATIVE_KEY, default={}).get("tokens", [])
+    return state.load(NATIVE_KEY, default={}).get("tokens", [])
 
 
 def _save_native(toks: list):
-    state_save(NATIVE_KEY, {"tokens": toks})
+    state.save(NATIVE_KEY, {"tokens": toks})
 
 
 def register_native(token: str, platform: str = "android") -> dict:
@@ -166,7 +165,7 @@ def _fcm_info():
     Base64 is one line and cannot be mangled, so it is the recommended form.
     Raw JSON still works when it survives the trip.
     """
-    raw = os.getenv("FCM_SERVICE_ACCOUNT_JSON", "").strip()
+    raw = config.fcm_service_account_json()
     if not raw:
         return None, "FCM_SERVICE_ACCOUNT_JSON is not set"
     try:
@@ -211,7 +210,7 @@ def status() -> dict:
         })
     info, err = _fcm_info()
     if info is None:
-        out["native"]["fcm"] = {"configured": bool(os.getenv("FCM_SERVICE_ACCOUNT_JSON")),
+        out["native"]["fcm"] = {"configured": bool(config.fcm_service_account_json()),
                                 "credentials_valid": False, "detail": err}
         return out
     try:
@@ -301,11 +300,12 @@ def send_native(title: str, body: str, sticky: bool = False) -> int:
 
 # ---------- event helpers (call these, not send()) ----------
 NOTIF_KEY = "notifications.json"
-NOTIF_RETAIN_HOURS = float(os.getenv("NOTIF_RETAIN_HOURS", "48"))
+# Read per call via config.notif_retain_hours() — this used to be a
+# module-level constant frozen at import, before SSM secrets had loaded.
 
 
 def _record(title: str, body: str, tag: str):
-    """Keep every alert for NOTIF_RETAIN_HOURS so it survives being dismissed.
+    """Keep every alert for config.notif_retain_hours() so it survives being dismissed.
 
     Tapping a notification opens the app and Android drops it, which is fine for
     a reminder and not fine for a trade signal — the alert carried the entry,
@@ -317,13 +317,13 @@ def _record(title: str, body: str, tag: str):
     """
     try:
         now = datetime.now(timezone.utc)
-        items = state_load(NOTIF_KEY, default={}).get("items", [])
+        items = state.load(NOTIF_KEY, default={}).get("items", [])
         items.insert(0, {"ts": now.isoformat(), "title": title,
                          "body": body, "tag": tag})
-        cutoff = now.timestamp() - NOTIF_RETAIN_HOURS * 3600
+        cutoff = now.timestamp() - config.notif_retain_hours() * 3600
         items = [i for i in items
                  if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff][:200]
-        state_save(NOTIF_KEY, {"items": items})
+        state.save(NOTIF_KEY, {"items": items})
     except Exception as e:
         log.warning(f"[push] could not record notification: {e}")
 
@@ -331,8 +331,8 @@ def _record(title: str, body: str, tag: str):
 def history() -> list:
     """Alerts from the retention window, newest first."""
     try:
-        cutoff = datetime.now(timezone.utc).timestamp() - NOTIF_RETAIN_HOURS * 3600
-        items = state_load(NOTIF_KEY, default={}).get("items", [])
+        cutoff = datetime.now(timezone.utc).timestamp() - config.notif_retain_hours() * 3600
+        items = state.load(NOTIF_KEY, default={}).get("items", [])
         return [i for i in items
                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff]
     except Exception:
@@ -393,14 +393,15 @@ def _exit_levels(entry: float, atr_pct: float, strategy: str) -> Optional[dict]:
     """
     if not entry or not atr_pct:
         return None
-    try:
-        from profit_monitor import _exit_config as cfg
-    except Exception:
-        return None
-    mult = cfg.get(f"stop_atr_mult_{strategy}") or cfg["stop_atr_mult"]
-    stop_pct = max(cfg["stop_min_pct"], min(cfg["stop_max_pct"], atr_pct * mult))
-    arm_pct  = max(cfg["trail_activate_min_pct"], cfg["trail_activate_atr"] * atr_pct)
-    trail_pct = max(cfg["trail_min_pct"], cfg["trail_atr_mult"] * atr_pct)
+    # Reads the shared config directly rather than reaching into the exit
+    # engine. That import used to point at profit_monitor._exit_config while
+    # profit_monitor imported push back — a genuine cycle that only stayed
+    # unbroken because both sides imported lazily, inside functions.
+    cfg = config.exit_config()
+    mult = cfg.stop_atr_mult_for(strategy)
+    stop_pct = max(cfg.stop_min_pct, min(cfg.stop_max_pct, atr_pct * mult))
+    arm_pct = max(cfg.trail_activate_min_pct, cfg.trail_activate_atr * atr_pct)
+    trail_pct = max(cfg.trail_min_pct, cfg.trail_atr_mult * atr_pct)
     return {"stop_pct": stop_pct, "stop_price": entry * (1 - stop_pct / 100),
             "arm_pct": arm_pct, "arm_price": entry * (1 + arm_pct / 100),
             "trail_pct": trail_pct}
@@ -511,7 +512,7 @@ def notify_scan(per_strategy: dict):
 
     Set PUSH_SCANS=0 to turn these off again without a code change.
     """
-    if os.getenv("PUSH_SCANS", "1").strip().lower() in ("0", "false", "no", "off"):
+    if not config.push_scans_enabled():
         return
     parts, total = [], 0
     for strat in ("s3", "s1", "s2"):          # best evidence first

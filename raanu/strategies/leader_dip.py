@@ -247,7 +247,7 @@ def _score_core_s3(ticker: str, df: Optional[pd.DataFrame],
 
 
 def score_ticker_s3(ticker: str, bench_ret_3m: Optional[float] = None) -> dict:
-    from strategy import fetch_ohlc, benchmark_return_3m
+    from raanu.market.prices import benchmark_return_3m, fetch_ohlc
     df = fetch_ohlc(ticker)
     if bench_ret_3m is None:
         bench_ret_3m = benchmark_return_3m()

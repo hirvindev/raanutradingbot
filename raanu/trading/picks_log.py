@@ -37,7 +37,7 @@ from typing import Optional
 
 import pandas as pd
 
-from datadir import state_load, state_save
+from raanu import state
 
 log = logging.getLogger("raanu.picks")
 
@@ -49,11 +49,11 @@ BANDS = ((90, 200, "90+"), (80, 90, "80-89"), (70, 80, "70-79"), (0, 70, "60-69"
 
 
 def _load() -> dict:
-    return state_load(STATE_KEY, default={"picks": []})
+    return state.load(STATE_KEY, default={"picks": []})
 
 
 def _save(data: dict):
-    state_save(STATE_KEY, data)
+    state.save(STATE_KEY, data)
 
 
 def record(strategy: str, picks: list) -> int:
@@ -97,7 +97,7 @@ def record(strategy: str, picks: list) -> int:
 
 def fill_forward_returns() -> dict:
     """Backfill forward returns for anything old enough. Never revises a value."""
-    from strategy import batch_download
+    from raanu.market.prices import batch_download
 
     data = _load()
     rows = data.get("picks", [])

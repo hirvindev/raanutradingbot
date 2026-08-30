@@ -139,11 +139,11 @@ def from_trade_log(strategy: Optional[str] = None,
     from scratch, and MIN_SAMPLE holds sizing at FALLBACK_RISK_PCT until there
     are enough trades under the current rules to estimate from.
     """
-    from auto_trader import trader
+    from raanu.trading.trader import get_trader
 
     pnls = [
         float(t["realized_pnl"])
-        for t in trader.tradelog.data.get("trades", [])
+        for t in get_trader().tradelog.data.get("trades", [])
         if t.get("action") == "SELL" and t.get("realized_pnl") is not None
         and (strategy is None or t.get("strategy") == strategy)
     ]
