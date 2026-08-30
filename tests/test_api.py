@@ -303,3 +303,43 @@ class TestLockoutResponseShape:
         # requests should ever ask the user for a credential.
         for _ in range(30):
             assert client.get("/api/health").status_code == 200
+
+
+class TestNoRouteReturns500:
+    """Every GET route must respond without an unhandled exception.
+
+    Added after /api/notifications shipped returning 500: it referenced
+    push.NOTIF_RETAIN_HOURS, a module constant removed when push.py moved to
+    lazy config. Ruff's F821 catches undefined *names* but not stale
+    *attribute* access on a module, and no test hit that route — so it
+    reached production and only surfaced in the browser's network tab.
+
+    This walks the OpenAPI schema, so a new route is covered the day it is
+    written rather than the day someone remembers to add it here.
+    """
+
+    @staticmethod
+    def _gettable(app):
+        for path, ops in app.openapi()["paths"].items():
+            if "get" not in ops or "{" in path:      # skip path-param routes
+                continue
+            yield path
+
+    def test_every_get_route_responds_without_a_server_error(self, client):
+        failures = []
+        for path in self._gettable(client.app):
+            status = client.get(path).status_code
+            # 4xx is legitimate here (no Alpaca key), and /.well-known/
+            # assetlinks.json deliberately 503s when unconfigured because an
+            # empty list silently fails Chrome's TWA verification. A bare
+            # 500 is never legitimate — it means the handler raised.
+            if status == 500:
+                failures.append(f"{path} -> {status}")
+        assert not failures, "routes raising: " + ", ".join(failures)
+
+    def test_the_walk_actually_covers_the_api(self, client):
+        # Guards the guard: a broken _gettable would make the test above
+        # pass vacuously.
+        covered = list(self._gettable(client.app))
+        assert len(covered) >= 20
+        assert "/api/notifications" in covered

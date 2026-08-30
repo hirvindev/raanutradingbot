@@ -275,6 +275,22 @@ class SkeletonStack(Stack):
             destination_bucket=site_bucket,
             distribution=distribution,
             distribution_paths=["/*"],
+            # Without an explicit Cache-Control, S3 sends none — and both
+            # CloudFront and the BROWSER then fall back to heuristic
+            # caching. That is how a deployed dashboard fix failed to reach
+            # a user for hours: the service worker is network-first for
+            # navigations, but its fetch was being served out of the
+            # browser's own HTTP cache and never hit the network. A
+            # CloudFront invalidation cannot fix that, because the stale
+            # copy is on the client.
+            #
+            # no-cache means "revalidate before using", not "do not store" —
+            # with ETags each check is a cheap 304, and this whole site is a
+            # few hundred KB.
+            cache_control=[
+                s3deploy.CacheControl.no_cache(),
+                s3deploy.CacheControl.must_revalidate(),
+            ],
         )
 
         CfnOutput(self, "CloudFrontURL", value=f"https://{distribution.distribution_domain_name}")

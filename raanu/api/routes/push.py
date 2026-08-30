@@ -6,6 +6,8 @@ import logging
 
 from fastapi import APIRouter, Request
 
+from raanu import config
+
 log = logging.getLogger("raanu.api.routes.push")
 
 router = APIRouter()
@@ -57,7 +59,7 @@ async def push_native_register(request: Request):
 
 @router.get("/api/notifications")
 async def notifications():
-    """Alerts from the last NOTIF_RETAIN_HOURS (default 48), newest first.
+    """Alerts from the retention window (default 48h), newest first.
 
     Exists because a tapped notification is gone, and a trade signal is the
     wrong thing to lose — it carried the entry, stop and reasoning.
@@ -65,7 +67,7 @@ async def notifications():
     from raanu.notify import push
     items = push.history()
     return {"items": items, "count": len(items),
-            "retain_hours": push.NOTIF_RETAIN_HOURS}
+            "retain_hours": config.notif_retain_hours()}
 
 
 @router.get("/api/push/status")
