@@ -43,20 +43,40 @@ ALL_KEYS=(
 die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 1; }
 
 command -v aws >/dev/null || die "aws CLI not found"
+command -v python3 >/dev/null || die "python3 not found"
 aws sts get-caller-identity --profile "$PROFILE" --region "$REGION" >/dev/null 2>&1 \
   || die "profile '$PROFILE' cannot authenticate — check ~/.aws/credentials"
 
-# jq would be the obvious way to build the request body, but that means
-# shell-quoting the secret into an argument. So the value travels on **stdin**
-# the whole way — into python, then into the AWS CLI:
+# Created and trapped together, before anything can be written into it — a
+# cleanup registered later is a cleanup that does not run if the script dies
+# in between.
+BODY=$(mktemp "${TMPDIR:-/tmp}/raanu-seed.XXXXXX") || die "could not create a temp file"
+chmod 600 "$BODY"
+trap 'rm -f "$BODY"' EXIT INT TERM
+
+# The secret must not become a command-line argument: argv is world-readable
+# through `ps auxww`, to every other user on the machine, for as long as the
+# command runs. Shell history is the other leak, and `--value "$SECRET"` hits
+# both.
 #
-#   * argv is world-readable through `ps auxww`, to every user on the box;
-#   * the environment is not much better — /proc/<pid>/environ is readable by
-#     anything running as the same user, which is everything you run;
-#   * stdin is neither, and `printf` is a shell builtin so it forks nothing.
+# The obvious fix — pipe the request body in on stdin — does NOT work:
 #
-# python also does the JSON escaping, which matters: a PEM body or a base64
-# blob will contain characters that would otherwise need quoting decisions.
+#     ... | aws ssm put-parameter --cli-input-json file:///dev/stdin
+#
+# AWS CLI v2's file:// handler cannot read a non-seekable stream. Tested
+# against 2.36.29: /dev/stdin, the documented `-`, and /dev/fd/N all fail with
+# "Invalid JSON received", while an ordinary file works. This script shipped
+# with that construct and was broken on every invocation.
+#
+# So: a real file, created under `umask 077` so it is owner-only from the
+# instant it exists, and removed on any exit path including Ctrl-C. That is a
+# genuinely smaller exposure than argv — one process's owner for a few
+# milliseconds, rather than every user on the box — but it is not *nothing*,
+# and pretending otherwise is how the previous version of this comment was
+# wrong.
+#
+# python builds the JSON so the escaping is right: a PEM body or a base64 blob
+# contains characters that would otherwise need quoting decisions.
 put_parameter() {
   local name="$1" value="$2"
   printf '%s' "$value" \
@@ -65,10 +85,11 @@ put_parameter() {
       "Value": sys.stdin.read(),
       "Type": "SecureString",
       "Overwrite": True,
-  }, sys.stdout)' \
-  | aws ssm put-parameter \
-      --cli-input-json file:///dev/stdin \
+  }, sys.stdout)' > "$BODY"
+  aws ssm put-parameter \
+      --cli-input-json "file://$BODY" \
       --profile "$PROFILE" --region "$REGION" >/dev/null
+  : > "$BODY"                          # truncate immediately; trap unlinks
 }
 
 exists() {

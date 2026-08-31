@@ -181,15 +181,34 @@ class SkeletonStack(Stack):
 
         # SSM parameters under /raanutradingbot/* are seeded by hand (see
         # aws/README.md) — CDK never creates or touches the values
-        # themselves, only grants read access to this path. WithDecryption
-        # needs kms:Decrypt on the default SSM key too.
+        # themselves, only grants read access to this path.
         ssm_read = iam.PolicyStatement(
             actions=["ssm:GetParameter", "ssm:GetParametersByPath"],
             resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter/raanutradingbot/*"],
         )
+        # WithDecryption=True on a SecureString needs kms:Decrypt as well.
+        #
+        # This used to name `alias/aws/ssm` as the resource, which never
+        # matched anything: IAM resolves key ARNs in the Resource element, not
+        # alias ARNs. It went unnoticed because it is also unnecessary for the
+        # AWS-managed key — that key's own policy grants Decrypt to
+        # Principal "*" conditioned on kms:CallerAccount + kms:ViaService
+        # ssm.<region>.amazonaws.com, which authorises the call directly
+        # rather than delegating to IAM. Verified: a SecureString loaded fine
+        # with the broken statement in place.
+        #
+        # Resource "*" is the AWS-documented form when the key ARN is not
+        # known up front; the conditions are what actually bound it, to this
+        # account and to calls arriving through SSM. Now the grant is real, so
+        # moving to a customer-managed key (whose policy would NOT grant to
+        # "*") keeps working instead of failing at the first cold start.
         ssm_decrypt = iam.PolicyStatement(
             actions=["kms:Decrypt"],
-            resources=[f"arn:aws:kms:{self.region}:{self.account}:alias/aws/ssm"],
+            resources=["*"],
+            conditions={"StringEquals": {
+                "kms:ViaService": f"ssm.{self.region}.amazonaws.com",
+                "kms:CallerAccount": self.account,
+            }},
         )
         for fn in (api_fn, worker_fn):
             fn.add_to_role_policy(ssm_read)
