@@ -41,6 +41,7 @@ from raanu.api.routes import (
     strategy,
     webhooks,
 )
+from raanu.paths import DOTENV
 
 log = logging.getLogger("raanu.api")
 
@@ -175,6 +176,42 @@ async def _monthly_report_loop():
             log.exception(f"Monthly report failed: {e}")
 
 
+def _load_dotenv_for_local_dev() -> None:
+    """Read ``.env`` into the environment. Local dev only.
+
+    This did not exist until 31 Aug 2026, and its absence was invisible in the
+    worst way: ``.env`` was *documented* as where local config lives, and the
+    file was already being read — but only ``.exists()``, as a marker for "am
+    I running locally" in state/backends.py and health.py. Nothing ever loaded
+    the contents. So a developer who put API_READ_TOKEN in ``.env`` got an
+    UNAUTHENTICATED local server, because an unset token disables the gate.
+    Configured-looking and wide open is the one combination worth ruling out.
+
+    Deliberately called from ``main()`` and nowhere else:
+
+      * not at import, because raanu.config exists precisely so that nothing
+        reads the environment at import time;
+      * not in ``create_app()``, because the tests call that, and conftest
+        clears the environment specifically so a developer's real
+        ALPACA_API_KEY cannot leak into a test run;
+      * not on Lambda, which has no ``.env`` — SSM populates os.environ there
+        (raanu/secrets.py).
+
+    ``override=False`` matches the SSM loader: a variable already exported in
+    the shell wins over the file, so a one-off `API_READ_TOKEN=x python -m
+    raanu.api` behaves the way anyone would expect.
+    """
+    if not DOTENV.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        log.warning("%s exists but python-dotenv is not installed — ignoring it", DOTENV)
+        return
+    load_dotenv(DOTENV, override=False)
+    log.info("Loaded local config from %s", DOTENV)
+
+
 def main() -> None:
     """Local development entrypoint: ``python -m raanu.api``."""
     import uvicorn
@@ -182,5 +219,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
+    _load_dotenv_for_local_dev()
+    if not config.api_read_token():
+        # The gate is skipped when this is unset. Fine on a laptop, but it
+        # should be a thing you know, not a thing you discover.
+        log.warning("API_READ_TOKEN is not set — this server is UNAUTHENTICATED")
     uvicorn.run(create_app(with_loops=True), host="0.0.0.0",
                 port=config.env_int("PORT", 8000))

@@ -402,3 +402,58 @@ class TestRemovedEndpoints:
         for path in ("/api/push/key", "/api/push/subscribe",
                      "/api/push/unsubscribe", "/api/push/status"):
             assert path in secured.app.openapi()["paths"]
+
+
+class TestLocalDotenv:
+    """``.env`` is where local config is documented to live, and for a long
+    time nothing loaded it — the file was only stat'd as a "am I local?"
+    marker. A passphrase put there therefore did nothing, and an unset
+    passphrase DISABLES the gate, so local dev looked configured and was
+    wide open."""
+
+    def test_dotenv_is_actually_loaded(self, tmp_path, monkeypatch):
+        from raanu import config
+        from raanu.api import app as app_mod
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("API_READ_TOKEN=from-dotenv\n")
+        monkeypatch.setattr(app_mod, "DOTENV", env_file)
+        monkeypatch.delenv("API_READ_TOKEN", raising=False)
+
+        assert config.api_read_token() == ""
+        app_mod._load_dotenv_for_local_dev()
+        assert config.api_read_token() == "from-dotenv"
+
+    def test_a_real_env_var_beats_the_file(self, tmp_path, monkeypatch):
+        # override=False, matching the SSM loader — so a one-off
+        # `API_READ_TOKEN=x python -m raanu.api` does what it looks like.
+        from raanu import config
+        from raanu.api import app as app_mod
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("API_READ_TOKEN=from-dotenv\n")
+        monkeypatch.setattr(app_mod, "DOTENV", env_file)
+        monkeypatch.setenv("API_READ_TOKEN", "from-shell")
+
+        app_mod._load_dotenv_for_local_dev()
+        assert config.api_read_token() == "from-shell"
+
+    def test_a_missing_dotenv_is_not_an_error(self, tmp_path, monkeypatch):
+        from raanu.api import app as app_mod
+        monkeypatch.setattr(app_mod, "DOTENV", tmp_path / "nope.env")
+        app_mod._load_dotenv_for_local_dev()      # must not raise
+
+    def test_creating_an_app_does_NOT_read_dotenv(self, tmp_path, monkeypatch):
+        """Tests call create_app(), and conftest clears the environment on
+        purpose so a developer's real ALPACA_API_KEY cannot leak into a run.
+        Loading .env there would defeat that."""
+        from raanu import config
+        from raanu.api import app as app_mod
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("ALPACA_API_KEY=leaked-from-dotenv\n")
+        monkeypatch.setattr(app_mod, "DOTENV", env_file)
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+
+        app_mod.create_app()
+        assert config.alpaca_key() == ""

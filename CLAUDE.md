@@ -606,7 +606,31 @@ Single-file HTML dashboard. No build step required.
 
 ---
 
-## 🔑 Environment Variables — .env
+## 🔑 Environment Variables
+
+**Where each of these actually lives depends on where the code is running:**
+
+| | Local dev | AWS |
+|---|---|---|
+| Secrets | `.env` (gitignored) | SSM Parameter Store, SecureString |
+| Tuning knobs | `.env` | Lambda env vars in `skeleton_stack.py` |
+| Loaded by | `_load_dotenv_for_local_dev()` in `api/app.py` | `raanu/secrets.py` at cold start |
+
+Seed the AWS side with `./aws/seed-secrets.sh` — never
+`aws ssm put-parameter --value "<secret>"`, which leaks into shell history
+and `ps auxww`.
+
+⚠️ **`.env` was inert until 31 Aug 2026.** `python-dotenv` was in
+`requirements.txt` and `.env` was documented as local config, but
+`load_dotenv()` was never called — the file was only `.exists()`-checked as
+an "am I local?" marker in `state/backends.py` and `health.py`. So a
+passphrase put there did nothing, and **an unset `API_READ_TOKEN` disables
+the auth gate**, meaning local dev looked configured and was wide open.
+`main()` now loads it (with `override=False`, so a shell variable still
+wins) and logs a warning when the gate is off. Deliberately NOT loaded in
+`create_app()` — the tests call that, and `conftest.py` clears the
+environment precisely so a developer's real keys cannot leak into a run.
+
 ```
 # Alpaca paper trading
 ALPACA_API_KEY=<your-alpaca-key-id>
