@@ -421,10 +421,6 @@ def vapid_claim_email() -> str:
     return env_str("VAPID_CLAIM_EMAIL", "mailto:admin@example.com")
 
 
-def fcm_service_account_json() -> str:
-    return env_str("FCM_SERVICE_ACCOUNT_JSON")
-
-
 def push_scans_enabled() -> bool:
     return env_bool("PUSH_SCANS", True)
 
@@ -446,15 +442,10 @@ def twilio_whatsapp_from() -> str:
 
 
 def user_whatsapp() -> str:
+    """Sole gate on /webhook/whatsapp, which can place orders. Unset means
+    reject everything — see raanu/api/routes/webhooks.py."""
     return env_str("USER_WHATSAPP")
 
-
-# ── android / TWA ────────────────────────────────────────────────────────────
-
-
-def twa_fingerprint() -> str:
-    return env_str("TWA_SHA256_FINGERPRINT")
-
-
-def twa_package_name() -> str:
-    return env_str("TWA_PACKAGE_NAME", "app.raanu.mobile")
+# FCM_SERVICE_ACCOUNT_JSON, TWA_SHA256_FINGERPRINT and TWA_PACKAGE_NAME were
+# removed on 31 Aug 2026 with the Android apps. Web push (VAPID) stays — the
+# dashboard is still a PWA and that is the desktop notification channel.

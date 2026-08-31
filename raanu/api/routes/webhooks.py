@@ -151,10 +151,34 @@ async def whatsapp_webhook(
     Twilio sends incoming WhatsApp messages here.
     Returns TwiML immediately so we stay well within Twilio's 15s timeout.
     Command handling runs in a background task.
+
+    ⚠️ This route is OUTSIDE `/api/`, so `api_auth_gate` never sees it: no
+    read passphrase, no trade PIN. The sender check below is the only thing
+    standing in front of `BUY`/`SELL`, which place real orders.
+
+    It used to fail OPEN, twice over:
+
+      * `if From and From != expected` — omitting the form field entirely
+        made the condition false and skipped the check. A bare
+        `curl -d 'Body=BUY NVDA 5000' .../webhook/whatsapp`, with no
+        credentials of any kind, reached the order path. Verified against
+        this code, not inferred.
+      * the expected number was a hardcoded default in the source, so the
+        check "passed" against a value published in the repository.
+
+    Now it fails CLOSED: unset `USER_WHATSAPP` rejects everything. That is
+    the safe default precisely because Twilio is retired — there is no
+    legitimate sender left, so the correct behaviour for an unconfigured
+    deployment is to accept nothing.
     """
-    expected_from = os.getenv("USER_WHATSAPP", "whatsapp:+919176911755").strip()
-    if From and From != expected_from:
-        log.warning(f"WhatsApp message from unknown number: {From}")
+    expected_from = config.user_whatsapp()
+    if not expected_from or not From or From != expected_from:
+        # Deliberately identical response in every rejected case: telling a
+        # caller *why* it was refused tells them how to look like the owner.
+        log.warning(
+            "Rejected /webhook/whatsapp: "
+            f"{'USER_WHATSAPP not configured' if not expected_from else 'sender not recognised'}"
+        )
         return PlainTextResponse("<?xml version='1.0'?><Response/>", media_type="text/xml")
 
     cmd = Body.strip().upper()

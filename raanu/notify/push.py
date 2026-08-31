@@ -1,9 +1,13 @@
 """
-push.py — Web Push notifications to the installed app
-======================================================
-Sends system notifications to the phone for the events worth interrupting
-someone about. Telegram remains the full record; this is the tap on the
-shoulder.
+push.py — Web Push notifications to the browser
+================================================
+Sends system notifications for the events worth interrupting someone about.
+Telegram remains the full record; this is the tap on the shoulder.
+
+**Web push is the only transport.** The native (FCM) half went with the
+Android apps on 31 Aug 2026 — see the Notifications section of CLAUDE.md.
+The dashboard is still a PWA, so "installed to the home screen" continues to
+work; it is the browser's service worker receiving these, not an app.
 
 What gets pushed, and why only these
 ------------------------------------
@@ -18,10 +22,12 @@ narrative and can be read at leisure.
 
 Delivery reality
 ----------------
-  * Android, installed from Play or the browser: works when the app is closed.
+  * Desktop browser: reliable, and the channel this is really for.
+  * Android Chrome, dashboard added to the home screen: works with the tab
+    closed.
   * iPhone: only when installed via Safari's "Add to Home Screen" (iOS 16.4+),
-    and iOS drops the subscription if the app goes unopened for a while. Treat
-    it as best-effort there, never as the channel a stop-loss depends on.
+    and iOS drops the subscription if it goes unopened for a while. Treat it
+    as best-effort there, never as the channel a stop-loss depends on.
 
 Subscriptions live on the persistent volume; a wiped file means silent phones
 and nothing worse, so failures here never propagate to the trading path.
@@ -120,181 +126,17 @@ def send(title: str, body: str, tag: str = "raanu", url: str = "/",
     return {"sent": sent, "pruned": len(dead), "devices": len(subs) - len(dead)}
 
 
-# ---------- native (FCM / Expo) ----------
-# The web path above uses VAPID and speaks to browser push services. A native
-# Android app cannot use that: it needs FCM. Tokens therefore live in their own
-# file and are sent through a different transport, but BOTH are fanned out by
-# the same notify_* helpers, so a buy reaches every registered client without
-# the trading code knowing which kind each one is.
-NATIVE_KEY = "push_native.json"
-
-
-def _load_native() -> list:
-    return state.load(NATIVE_KEY, default={}).get("tokens", [])
-
-
-def _save_native(toks: list):
-    state.save(NATIVE_KEY, {"tokens": toks})
-
-
-def register_native(token: str, platform: str = "android") -> dict:
-    if not token:
-        return {"ok": False, "error": "no token"}
-    if len(token) < 100:
-        # A real FCM registration token is ~140+ chars. A short string is a
-        # test artefact, and once stored it fails on every future send.
-        return {"ok": False, "error": "that does not look like an FCM token"}
-    toks = [t for t in _load_native() if t.get("token") != token]
-    toks.append({"token": token, "platform": platform,
-                 "added": datetime.now(UTC).isoformat()})
-    _save_native(toks)
-    log.info(f"[push] native device registered ({len(toks)} total)")
-    return {"ok": True, "devices": len(toks)}
-
-
-def _fcm_info():
-    """Parse FCM_SERVICE_ACCOUNT_JSON, accepting base64 as well as raw JSON.
-
-    Raw JSON loses to the paste box: the service-account private_key is a
-    multi-line PEM, and pasting it into a dashboard variable field mangles the
-    newlines often enough that the value ends up unparseable. That is exactly
-    how this was broken — the variable was set, looked right in the UI, and was
-    not JSON at all.
-
-    Base64 is one line and cannot be mangled, so it is the recommended form.
-    Raw JSON still works when it survives the trip.
-    """
-    raw = config.fcm_service_account_json()
-    if not raw:
-        return None, "FCM_SERVICE_ACCOUNT_JSON is not set"
-    try:
-        return json.loads(raw), None
-    except Exception:
-        pass
-    try:
-        import base64
-        return json.loads(base64.b64decode(raw + "===")), None
-    except Exception:
-        pass
-    # Say what it actually looks like WITHOUT leaking it — this is a private key.
-    return None, (f"not valid JSON and not valid base64 "
-                  f"(length {len(raw)}, starts with {raw[:1]!r}). "
-                  f"Re-add it base64-encoded, on one line.")
-
-
 def status() -> dict:
-    """What is actually registered, and can the server actually send?
+    """What is registered, and can the server actually send?
 
-    Written while native push had been 'not working' for days with no way to
-    tell WHICH half was broken — the phone never registering, or the server
-    unable to deliver. Those need opposite fixes, and guessing between them
-    wasted more time than this endpoint took to write.
+    Exists because "push is broken" was ambiguous between *the browser never
+    registered* and *the server cannot deliver* — opposite fixes, and guessing
+    between them wasted more time than this took to write.
 
-    It mints a real FCM access token rather than just checking the variable is
-    set: a service-account key from the wrong project, or with the Cloud
-    Messaging API disabled, is present-but-useless and looks identical from the
-    outside.
+    The native (FCM) half was removed on 31 Aug 2026 along with the Android
+    apps. Web push is the only transport now.
     """
-    out = {
-        "web": {"configured": configured(), "subs": len(_load())},
-        "native": {"devices": [], "fcm": {}},
-    }
-    for t in _load_native():
-        tok = t.get("token", "")
-        out["native"]["devices"].append({          # never echo a whole token
-            "platform": t.get("platform"),
-            "added": t.get("added"),
-            "token_tail": tok[-8:] if tok else None,
-            "token_len": len(tok),
-        })
-    info, err = _fcm_info()
-    if info is None:
-        out["native"]["fcm"] = {"configured": bool(config.fcm_service_account_json()),
-                                "credentials_valid": False, "detail": err}
-        return out
-    try:
-        from google.auth.transport.requests import Request as GRequest
-        from google.oauth2 import service_account
-        creds = service_account.Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
-        creds.refresh(GRequest())                  # the real test
-        out["native"]["fcm"] = {"configured": True, "credentials_valid": True,
-                                "project_id": info.get("project_id"),
-                                "client_email": info.get("client_email")}
-    except Exception as e:
-        out["native"]["fcm"] = {"configured": True, "credentials_valid": False,
-                                "detail": f"{type(e).__name__}: {e}"[:300]}
-    return out
-
-
-def send_native(title: str, body: str, sticky: bool = False) -> int:
-    """Deliver via FCM v1. Returns how many devices were reached.
-
-    Requires FCM_SERVICE_ACCOUNT_JSON — the service-account key from the
-    Firebase project. Without it this is a no-op that says so, rather than
-    failing somewhere deep in a trade path.
-    """
-    toks = _load_native()
-    if not toks:
-        return 0
-    info, err = _fcm_info()
-    if info is None:
-        log.warning(f"[push] native skipped — {err}")
-        return 0
-    try:
-        import httpx
-        from google.auth.transport.requests import Request as GRequest
-        from google.oauth2 import service_account
-
-        creds = service_account.Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/firebase.messaging"])
-        creds.refresh(GRequest())
-        url = f"https://fcm.googleapis.com/v1/projects/{info['project_id']}/messages:send"
-        headers = {"Authorization": f"Bearer {creds.token}"}
-        sent, dead = 0, []
-        for t in toks:
-            # An iPhone registers an APNs token, not an FCM one. Firing it at
-            # FCM returns 404, which this loop reads as "unregistered" and
-            # prunes — so an iOS device would silently unregister itself on the
-            # first send and the owner would only notice by never being
-            # notified. Skip it loudly instead.
-            #
-            # Real iOS push needs an APNs auth key, and Apple only issues those
-            # to paid Developer Program members. It is gated behind the $99/yr
-            # either way, so there is nothing to implement here until that is
-            # a decision that has been made.
-            if (t.get("platform") or "android").lower() != "android":
-                log.warning(f"[push] skipping {t.get('platform')} token — "
-                            f"FCM cannot deliver to APNs; iOS needs an APNs key")
-                continue
-            # sticky=True: pops up as a heads-up banner AND stays in the shade
-            # until dismissed by hand, instead of vanishing on tap. A signal you
-            # glanced at on a lock screen and lost is a signal you did not read.
-            # The 'trades' channel is registered IMPORTANCE_HIGH by the app,
-            # which is what permits the heads-up at all.
-            android_note = {"channel_id": "trades"}
-            if sticky:
-                android_note["sticky"] = True
-                android_note["notification_priority"] = "PRIORITY_MAX"
-                android_note["default_vibrate_timings"] = True
-            payload = {"message": {"token": t["token"],
-                                   "notification": {"title": title, "body": body},
-                                   "android": {"priority": "high",
-                                               "notification": android_note}}}
-            r = httpx.post(url, headers=headers, json=payload, timeout=15)
-            if r.status_code == 200:
-                sent += 1
-            elif r.status_code in (400, 404):
-                dead.append(t["token"])      # unregistered; stop trying
-            else:
-                log.warning(f"[push] FCM {r.status_code}: {r.text[:120]}")
-        if dead:
-            _save_native([t for t in toks if t["token"] not in dead])
-            log.info(f"[push] pruned {len(dead)} dead native token(s)")
-        return sent
-    except Exception as e:
-        log.warning(f"[push] native send failed: {e}")
-        return 0
+    return {"web": {"configured": configured(), "subs": len(_load())}}
 
 
 # ---------- event helpers (call these, not send()) ----------
@@ -339,12 +181,16 @@ def history() -> list:
 
 
 def _fanout(title: str, body: str, tag: str, sticky: bool = False):
-    """One call, every registered client — browser and native alike."""
+    """One call, every registered browser.
+
+    Kept as a seam even though there is only one transport left: every
+    notify_* helper goes through here, so recording-before-sending stays in
+    one place rather than being repeated five times.
+    """
     _record(title, body, tag)          # before sending: a delivery failure
                                        # must not also lose the record of it
     web = send(title, body, tag=tag, sticky=sticky)
-    nat = send_native(title, body, sticky=sticky)
-    log.info(f"[push] {tag}: {web.get('sent', 0)} web, {nat} native")
+    log.info(f"[push] {tag}: {web.get('sent', 0)} web")
 
 
 def _strat_name(strategy: str) -> str:

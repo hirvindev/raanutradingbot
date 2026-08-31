@@ -1,81 +1,69 @@
 # Deploying
 
-## Server, dashboard, API — already automatic
+## There is only one deploy, and it is manual
 
-`git push` to `main` → Railway builds and deploys. Nothing else to do.
+```bash
+git push                                        # does NOT deploy
+gh workflow run "Deploy AWS skeleton" && gh run watch
+```
 
-That covers `server.py`, every strategy and engine module, `RaanuTradingBot.html`,
-`sw.js` and the manifest. If you changed only those, pushing **is** the deploy.
+⚠️ **Pushing to `main` deploys nothing.** `.github/workflows/deploy-aws.yml`
+is `workflow_dispatch`-only, deliberately — this is still the validation phase
+and a deploy should be a decision, not a side effect of a commit. The header
+comment in that file has the two lines to uncomment when that changes.
+
+One run deploys everything: the whole `raanu/` package, the Lambda handlers,
+the CDK stack, `RaanuTradingBot.html`, `sw.js`, the manifest and the icons.
+Both Lambdas share one container image, so the slow part is the Docker build.
+
+CI authenticates through GitHub OIDC and holds no AWS access key — see
+`aws/ci-identity/README.md`.
 
 Check it landed:
 
 ```bash
-curl -s https://raanu.up.railway.app/api/health | python3 -m json.tool
+curl -s https://d2c2x91kx43y5d.cloudfront.net/api/health | python3 -m json.tool
 ```
 
-Give it 2–4 minutes. `state.persistent` must be `true` and `state.data_dir`
-must read `/data` — if it says `/tmp`, the volume did not mount and the trade
-log will be wiped on the next redeploy.
+Give it a few minutes for the image build. `state.persistent` must be `true`
+and `state.backend` must read `dynamodb`.
 
-## Android app — one command
+The dashboard is served from S3 with `Cache-Control: no-cache,
+must-revalidate`, and the deploy invalidates CloudFront — so a hard refresh
+picks up a change immediately. Without that header the browser's own heuristic
+cache once held a fix back for hours, and no CloudFront invalidation can reach
+a copy that is already on the client.
+
+## Secrets
+
+Never `aws ssm put-parameter --value "<secret>"` by hand — that lands in shell
+history and in `ps auxww`. Use:
 
 ```bash
-./deploy-mobile.sh
+./aws/seed-secrets.sh                  # prompts for each, input hidden
+./aws/seed-secrets.sh API_READ_TOKEN   # or just one
 ```
 
-Bumps the version code, builds the bundle, verifies it, uploads it to Play
-internal testing. `--build` stops after the build if you only want the file.
+Secrets are read at Lambda **cold start**, so a running container keeps the old
+values. Redeploy, or wait out the idle timeout, before testing a change.
 
-It exists because every step of doing this by hand went wrong at least once:
+## The PWA
 
-- a release signed with the **debug key** (Play rejects it, with an error that
-  names the symptom and not the cause)
-- a version code that **reverted on `expo prebuild`**, because it lived only in
-  `build.gradle` and not in `app.json`
-- **three bundles stacked in one release**, which Play errors on as "completely
-  shadowed" and refuses to roll out
+There is no separate app release. The dashboard is a Progressive Web App:
+Add to Home Screen on Android Chrome or iOS Safari (16.4+) gives an app icon,
+no browser chrome, and web push. It updates whenever the dashboard does,
+because it *is* the dashboard.
 
-The script checks all three: it writes the version code to both files, asserts
-the built bundle carries the release certificate, and sets the track's version
-list explicitly so a release can only ever contain one.
-
-It targets the **internal** track and nothing else. Production has a
-12-tester/14-day gate and unresolved regulatory questions about a public
-stock-signal app; that must never be reachable by a script.
-
-### One-time setup for the upload step
-
-Until this is done, `./deploy-mobile.sh` builds and verifies, then tells you the
-bundle is on your Desktop to upload by hand. Only the account owner can do this.
-
-1. **Play Console → Setup → API access** → link a Google Cloud project
-2. **Create a service account** (it hands you off to Google Cloud) →
-   **Keys → Add key → JSON** → download
-3. Back in **Play Console → Users and permissions**, find the service account
-   and grant it, for `app.raanu.mobile` only:
-   - *Release to testing tracks*
-   - *View app information*
-   Do **not** grant production release rights. The script cannot use them, and
-   an account that cannot do a thing cannot do it by accident.
-4. Move the key somewhere sane:
-
-```bash
-mkdir -p ~/.secrets && chmod 700 ~/.secrets
-mv ~/Downloads/<the-key>.json ~/.secrets/play-service-account.json
-chmod 600 ~/.secrets/play-service-account.json
-```
-
-Override the path with `PLAY_SERVICE_ACCOUNT_JSON` if you keep it elsewhere.
-
-Permissions can take a few minutes to propagate; a 401 on the first run usually
-means "too soon", not "wrong key".
+The native React Native app, the TWA wrapper, `deploy-mobile.sh` and
+`tools/play_upload.py` were **deleted on 31 Aug 2026** — see the Pending
+section of `CLAUDE.md` for why, and what you would have to settle before
+bringing one back.
 
 ## What is deliberately NOT automated
 
-**iOS.** APNs auth keys are issued only to paid Apple Developer Program members
-($99/year, recurring), so there is nothing to automate until that is a decision
-that has been made. See the iPhone section in `CLAUDE.md`.
-
-**Production releases on Play.** See above.
+**The EventBridge worker schedule ships DISABLED.** Nothing scans or trades
+autonomously until it is explicitly enabled in the console.
 
 **`ALPACA_MODE`.** Stays `paper`. No script touches it.
+
+**Production trading.** No script flips anything to live.

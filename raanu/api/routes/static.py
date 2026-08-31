@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -24,48 +23,14 @@ def kite_alias():
     return RedirectResponse("/", status_code=307)
 
 
-@router.get("/privacy")
-def privacy_policy():
-    """Public privacy policy — Play Console requires a reachable URL for the
-    Data safety declaration, and it must not sit behind the token gate because
-    Google's reviewers fetch it without credentials."""
-    p = paths.PRIVACY_HTML
-    if not p.exists():
-        return JSONResponse({"error": "privacy.html not found"}, status_code=404)
-    return FileResponse(p, media_type="text/html")
-
-
-@router.get("/.well-known/assetlinks.json")
-def asset_links():
-    """Digital Asset Links — proves this site and the Android app are the same owner.
-
-    Without it the TWA still runs but opens with a browser address bar across the
-    top, which is the giveaway that it is a wrapped web page rather than an app.
-    Chrome fetches this over HTTPS at install and verifies the certificate
-    fingerprint of the APK against the list here.
-
-    TWA_SHA256_FINGERPRINT comes from the signing key created at build time, and
-    from Play itself once Play App Signing re-signs the upload — those are
-    DIFFERENT fingerprints, and both must be listed or the app verifies in
-    testing and then shows the address bar in production. Comma-separate them.
-    """
-    fps = [f.strip().upper() for f in
-           os.getenv("TWA_SHA256_FINGERPRINT", "").split(",") if f.strip()]
-    pkg = os.getenv("TWA_PACKAGE_NAME", "app.raanu.twa").strip()
-    if not fps:
-        # Explicit over an empty list: an empty [] looks like a valid answer to
-        # Chrome and fails verification silently.
-        return JSONResponse(
-            {"error": "TWA_SHA256_FINGERPRINT is not set — run the bubblewrap "
-                      "build, then set it to the signing key's SHA-256"},
-            status_code=503,
-        )
-    return JSONResponse([{
-        "relation": ["delegate_permission/common.handle_all_urls"],
-        "target": {"namespace": "android_app",
-                   "package_name": pkg,
-                   "sha256_cert_fingerprints": fps},
-    }])
+# GET /privacy and GET /.well-known/assetlinks.json were removed on
+# 31 Aug 2026 with the Android apps.
+#
+# privacy.html existed for the Play Console Data safety declaration;
+# assetlinks.json was Digital Asset Links, which proved the site and the TWA
+# shared an owner so the wrapper opened without a browser address bar.
+# Neither has a consumer now, and assetlinks in particular was a route that
+# 503'd on every request because TWA_SHA256_FINGERPRINT was never set.
 
 
 # ---------- PWA ----------

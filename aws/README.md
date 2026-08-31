@@ -143,23 +143,39 @@ from CI.
 2. Follow `aws/ci-identity/README.md` to create the GitHub OIDC trust and
    the CI identity role — this is the piece that lets GitHub Actions deploy
    without ever holding an AWS access key.
-3. Seed the secrets Lambda reads at cold start (`lambda_secrets.py`) into
+3. Seed the secrets Lambda reads at cold start (`raanu/secrets.py`) into
    SSM Parameter Store — CDK only grants the Lambdas read access to this
    path, it never creates or touches the values themselves:
    ```
-   aws ssm put-parameter --name /raanutradingbot/ALPACA_API_KEY     --type SecureString --value "<...>"
-   aws ssm put-parameter --name /raanutradingbot/ALPACA_SECRET_KEY  --type SecureString --value "<...>"
-   aws ssm put-parameter --name /raanutradingbot/API_READ_TOKEN     --type SecureString --value "<...>"
-   aws ssm put-parameter --name /raanutradingbot/TRADE_PIN          --type SecureString --value "<...>"
-   # ...and any of TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID*, TWILIO_ACCOUNT_SID,
-   # TWILIO_AUTH_TOKEN, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
-   # FCM_SERVICE_ACCOUNT_JSON, USER_WHATSAPP, TWILIO_WHATSAPP_FROM you want
-   # working — an unset one just means that feature silently no-ops, same
-   # as an unset .env value does today.
+   ./aws/seed-secrets.sh                  # prompts for each, input hidden
+   ./aws/seed-secrets.sh API_READ_TOKEN   # or just one
    ```
+   **Use the script rather than `aws ssm put-parameter --value "<secret>"`
+   by hand.** That form leaks the secret twice: into `~/.bash_history`, and
+   into `ps auxww` for as long as the command runs, where any other user on
+   the machine can read it. The script prompts with echo off and pipes the
+   value to the CLI on stdin, so it never becomes an argument, an
+   environment variable, or a file.
+
+   It covers `API_READ_TOKEN`, `TRADE_PIN`, `ALPACA_API_KEY`,
+   `ALPACA_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+   `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`. Leaving one unset just means that feature
+   silently no-ops, exactly as an unset `.env` value does — with one
+   exception worth knowing: **`API_READ_TOKEN` unset means the API has no
+   authentication at all** and is reachable by anyone with the CloudFront
+   URL. It logs a warning on every request in that state.
+
+   `TWILIO_*` is deliberately absent: Twilio is no longer a dependency (the
+   alert path is Telegram, and `send_whatsapp()` is an alias for
+   `send_telegram()`).
+
    Plain tuning config (`STOP_ATR_MULT`, `WEEKLY_TRADE_LIMIT`, etc.) is
    **not** here — it's set directly as Lambda environment variables in
-   `skeleton_stack.py`, same as it's a plain `.env` entry on Railway.
+   `skeleton_stack.py`.
+
+   Secrets are read at **cold start**, so a running container keeps the old
+   values until it is replaced. Redeploy, or wait out the idle timeout,
+   before testing a change.
 4. Cap growth in the shared container-image repo `cdk bootstrap` created
    (`cdk-hnb659fds-container-assets-<account>-<region>`). CDK tags every
    unique image build permanently — its own default lifecycle rule only

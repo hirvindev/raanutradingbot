@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 
 from fastapi import APIRouter
 
@@ -27,32 +26,15 @@ def telegram_test():
     }
 
 
-@router.get("/api/test/twilio")
-async def test_twilio():
-    """Debug endpoint — shows what Twilio credentials Railway sees and tests them."""
-    import httpx
-    sid   = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
-    token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
-    frm   = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886").strip()
-    to    = os.getenv("USER_WHATSAPP", "whatsapp:+919176911755").strip()
-
-    if not sid or not token:
-        return {"error": "missing_creds", "sid_set": bool(sid), "token_set": bool(token)}
-
-    try:
-        resp = httpx.post(
-            f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
-            auth=(sid, token),
-            data={"From": frm, "To": to, "Body": "RaanuBot test message ✅"},
-            timeout=15,
-        )
-        return {
-            "status_code": resp.status_code,
-            "sid_prefix":  sid[:8] + "...",
-            "token_prefix": token[:6] + "...",
-            "from": frm,
-            "to":   to,
-            "twilio_response": resp.json(),
-        }
-    except Exception as e:
-        return {"error": str(e)}
+# GET /api/test/twilio was removed here, deliberately. It echoed
+# `sid[:8]` and `token[:6]` of the live Twilio credentials straight back in
+# the response body — credential material handed out by an endpoint that
+# only needed the read passphrase, and logged wherever the response went.
+#
+# It was also dead: Twilio is no longer a dependency of this project. The
+# WhatsApp path was replaced by Telegram and `send_whatsapp()` is now a
+# one-line alias for `send_telegram()` (see raanu/notify/telegram.py); no
+# code reads TWILIO_ACCOUNT_SID, and `twilio` is not in requirements.txt.
+#
+# On top of that it SENT a real message on a GET, so anything that prefetches
+# links — a browser, a crawler, a chat client unfurling a URL — could fire it.

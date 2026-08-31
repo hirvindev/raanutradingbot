@@ -7,8 +7,8 @@ only because every module sat at the repo root. Two of those were
 load-bearing and would have broken silently once the code moved into a
 package:
 
-  * ``server.py`` served privacy.html / sw.js / manifest.webmanifest /
-    icons/ / both dashboards relative to its own location
+  * ``server.py`` served sw.js / manifest.webmanifest / icons/ / both
+    dashboards relative to its own location
   * ``datadir.py`` decided whether state was persistent by testing for a
     ``.env`` file next to itself
 
@@ -27,7 +27,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DASHBOARD_HTML = PROJECT_ROOT / "RaanuTradingBot.html"
 LEGACY_DASHBOARD_HTML = PROJECT_ROOT / "RaanuTradingBot.legacy.html"
-PRIVACY_HTML = PROJECT_ROOT / "privacy.html"
 SERVICE_WORKER_JS = PROJECT_ROOT / "sw.js"
 WEB_MANIFEST = PROJECT_ROOT / "manifest.webmanifest"
 ICONS_DIR = PROJECT_ROOT / "icons"

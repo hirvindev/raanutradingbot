@@ -293,8 +293,8 @@ details .inner{padding:0 18px 16px}
 --------------------------------------------------------------------------- */
 /* Both conditions on purpose. max-width reads the VIEWPORT, which Chrome's
    "Desktop site" setting reports as ~980px and thereby defeats every
-   breakpoint — the app is a TWA, so it inherits that per-site setting and
-   the owner had to know to turn it off in Chrome to use their own app.
+   breakpoint. An installed PWA inherits that per-site setting, so a stray
+   toggle in Chrome would silently give the phone the desktop layout.
    max-device-width reads the physical SCREEN, which the toggle cannot
    change, so a phone gets the phone layout either way. */
 @media(max-width:560px),(max-device-width:560px){
@@ -770,15 +770,44 @@ const cls    = n => n>=0?'up':'down';
 const pct    = n => (n>=0?'+':'')+n.toFixed(2)+'%';
 const el     = id => document.getElementById(id);
 /* ── API tokens ──────────────────────────────────────────
-   Two, matching the server: a read token for everything the dashboard shows,
-   and a trade token for anything that moves money. The read token is stored so
-   the app opens straight to data; the trade token is asked for each time an
-   action needs it and is never persisted, so a borrowed or stolen phone cannot
-   place an order. */
-const TOKEN_KEY = 'raanu.readToken';
-const readToken  = () => localStorage.getItem(TOKEN_KEY) || '';
-const setToken   = t => t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
-const authHeaders = () => readToken() ? {'Authorization':'Bearer '+readToken()} : {};
+   Two, matching the server: a read passphrase for everything the dashboard
+   shows, and a trade PIN for anything that moves money.
+
+   NEITHER IS STORED BY THIS PAGE. The passphrase is POSTed once to
+   /api/auth/session and comes back as an HttpOnly cookie, which the browser
+   attaches to every later request on its own — script here cannot read it,
+   so there is nothing for an injected script to steal. Before this the raw
+   passphrase lived in localStorage in plain text, on every machine the
+   dashboard had ever been opened on, and it was the server's own permanent
+   secret rather than something that expires.
+
+   The trade PIN is asked for per action and never persisted, so a borrowed
+   or stolen phone cannot place an order. */
+
+/* Requests must opt in to sending the cookie. 'same-origin' rather than
+   'include': the dashboard and the API are one origin behind CloudFront, and
+   this way the credential can never ride along to anywhere else. */
+const withCreds = (opts = {}) => ({...opts, credentials: 'same-origin'});
+
+/* One-time cleanup of the old scheme. Without this the previous plaintext
+   passphrase would simply sit in localStorage forever on every browser that
+   ever loaded the old page — fixing where the secret lives does nothing if
+   the old copy is left behind. */
+try{ localStorage.removeItem('raanu.readToken'); }catch(e){}
+
+async function openSession(passphrase){
+  const r = await fetch(API+'/api/auth/session', withCreds({
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({passphrase})
+  })).catch(()=>null);
+  if(!r) return {ok:false, msg:'Could not reach the server. Check your connection.'};
+  if(r.status === 429){
+    const d = await r.json().catch(()=>({}));
+    return {ok:false, msg:`Too many failed attempts. Try again in ${Math.ceil((d.retry_after_sec||900)/60)} minutes.`};
+  }
+  if(r.status === 401) return {ok:false, msg:'That passphrase was not accepted. Try again.'};
+  return r.ok ? {ok:true} : {ok:false, msg:'Unlock failed ('+r.status+').'};
+}
 
 function askForToken(msg){
   const box = el('tokenGate');
@@ -810,7 +839,7 @@ async function pool(tasks, limit = 3){
    and a 401 always surfaces as the token prompt rather than an empty panel. */
 const j = async p => {
   try{
-    const r = await fetch(API+p, {headers: authHeaders()});
+    const r = await fetch(API+p, withCreds());
     if(r.status === 429){
       const d = await r.json().catch(()=>({}));
       // Two very different things return 429, and conflating them told the
@@ -839,9 +868,9 @@ const j = async p => {
 async function action(path, opts){
   const pin = prompt('Trade PIN — required to place or change orders');
   if(!pin) return {cancelled:true};
-  const r = await fetch(API+path, {...opts, headers:{
-    'Content-Type':'application/json', ...authHeaders(), 'X-Trade-Token': pin.trim(),
-    ...((opts||{}).headers||{})}});
+  const r = await fetch(API+path, withCreds({...opts, headers:{
+    'Content-Type':'application/json', 'X-Trade-Token': pin.trim(),
+    ...((opts||{}).headers||{})}}));
   if(r.status === 403){ logLine('Trade PIN rejected','err'); alert('Trade PIN rejected.'); return {denied:true}; }
   if(r.status === 401){ askForToken('Session expired. Enter your passphrase.'); return {denied:true}; }
   return r;
@@ -1880,9 +1909,9 @@ async function toggleBell(){
 
   if(st==='on'){
     const sub = await reg.pushManager.getSubscription();
-    if(sub){ await fetch(API+'/api/push/unsubscribe',{method:'POST',
-        headers:{'Content-Type':'application/json',...authHeaders()},
-        body:JSON.stringify({endpoint:sub.endpoint})}); await sub.unsubscribe(); }
+    if(sub){ await fetch(API+'/api/push/unsubscribe',withCreds({method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({endpoint:sub.endpoint})})); await sub.unsubscribe(); }
     logLine('Notifications off','ok'); return paintBell();
   }
 
@@ -1894,14 +1923,14 @@ async function toggleBell(){
   if(!k || !k.configured){ alert('Push is not configured on the server.'); return; }
   const sub = await reg.pushManager.subscribe({userVisibleOnly:true,
       applicationServerKey:b64ToU8(k.key)});
-  const r = await fetch(API+'/api/push/subscribe',{method:'POST',
-      headers:{'Content-Type':'application/json',...authHeaders()},
-      body:JSON.stringify(sub.toJSON())});
+  const r = await fetch(API+'/api/push/subscribe',withCreds({method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(sub.toJSON())}));
   if(r.ok){
     logLine('Notifications on — buys, exits and errors','ok');
     // Prove it immediately. Silent success is indistinguishable from failure,
     // which is exactly how this looked broken the first time.
-    const t = await fetch(API+'/api/push/test',{method:'POST',headers:authHeaders()});
+    const t = await fetch(API+'/api/push/test',withCreds({method:'POST'}));
     const res = await t.json().catch(()=>({}));
     if(res.sent) logLine('Test notification sent — check your phone','ok');
     else { logLine('Registered, but the test push failed: '+(res.error||res.skipped||t.status),'err');
@@ -1912,11 +1941,13 @@ async function toggleBell(){
   }
   paintBell();
 }
-/* Two channels by design: this one for the desktop browser, the native app for
-   the phone. They do not overlap because they run on different devices — the
-   problem earlier was subscribing BOTH on the same phone, where every event
-   arrived twice and a web push opened the TWA rather than the app in use.
-   Subscribing this on a phone will reintroduce that; use the app there. */
+/* Web push is the only push channel now — the native Android app and the TWA
+   were removed on 31 Aug 2026, and with them the dual-subscription problem
+   this comment used to warn about (both apps registered, so every event
+   arrived twice and tapping either opened the TWA, because a web push belongs
+   to the service worker that registered it).
+   Subscribing on a phone is fine, and is now the intended way: Add to Home
+   Screen, then turn the bell on. */
 el('bellBtn').onclick = toggleBell;
 paintBell();
 paintBell();
@@ -1947,12 +1978,24 @@ el('themeBtn').onclick = () => applyTheme(currentTheme()==='dark' ? 'light' : 'd
 addEventListener('resize', syncDayBar);
 
 /* ── boot ──────────────────────────────────────────────── */
-el('tokenSave').onclick = () => {
+el('tokenSave').onclick = async () => {
+  const btn = el('tokenSave');
   const t = el('tokenInput').value.trim();
-  if(!t) return;
-  setToken(t);
-  el('tokenGate').style.display='none';
+  if(!t || btn.disabled) return;
+  // The passphrase now costs a round trip (it is exchanged for a cookie
+  // server-side), so the button has to say so — and must not be clickable
+  // twice, which would spend two attempts off the lockout counter.
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'Unlocking…';
+  const res = await openSession(t);
+  btn.disabled = false;
+  btn.textContent = was;
+  if(!res.ok){ el('tokenMsg').textContent = res.msg; el('tokenInput').select(); return; }
+  // Cleared on success only: a wrong passphrase should leave the field
+  // populated so a single typo does not mean retyping the whole thing.
   el('tokenInput').value='';
+  el('tokenGate').style.display='none';
   loadUniverses();
   load().then(()=>logLine('Dashboard loaded','ok'));
 };
@@ -1960,11 +2003,18 @@ el('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') el('tokenS
 
 if(location.hash) go(location.hash.slice(1));
 
-// Ask before the first request rather than after a wall of failed panels. If
-// the server has no token configured the probe succeeds and the gate never shows.
+// Ask before the first request rather than after a wall of failed panels.
+//
+// /api/auth/status rather than a 401 off /api/health: it answers "is this
+// server protected, and am I signed in?" with plain booleans and WITHOUT
+// spending a failed attempt on the lockout counter. Probing with a real
+// endpoint meant every unauthenticated page load recorded an auth failure.
 (async () => {
-  const probe = await fetch(API+'/api/health', {headers: authHeaders()}).catch(()=>null);
-  if(probe && probe.status === 401){ askForToken(); return; }
+  const s = await fetch(API+'/api/auth/status', withCreds())
+    .then(r => r.ok ? r.json() : null).catch(()=>null);
+  // Unreachable is not the same as unauthorised — asking for the passphrase
+  // when the server is simply down teaches the user to retype it at noise.
+  if(s && s.protected && !s.authenticated){ askForToken(); return; }
   loadUniverses();
   load().then(()=>logLine('Dashboard loaded','ok'));
 })();

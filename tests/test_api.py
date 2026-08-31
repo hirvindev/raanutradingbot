@@ -119,7 +119,7 @@ class TestGateEnabled:
 
 
 class TestPublicRoutes:
-    @pytest.mark.parametrize("path", ["/", "/legacy", "/privacy", "/sw.js",
+    @pytest.mark.parametrize("path", ["/", "/legacy", "/sw.js",
                                       "/manifest.webmanifest"])
     def test_static_assets_resolve(self, client, path):
         # These are served relative to PROJECT_ROOT; the package move would
@@ -129,15 +129,20 @@ class TestPublicRoutes:
     def test_kite_alias_redirects_to_the_dashboard(self, client):
         assert client.get("/kite", follow_redirects=False).status_code == 307
 
-    def test_assetlinks_refuses_to_serve_an_empty_list(self, client):
-        # Deliberate: an empty [] looks like a valid answer to Chrome and
-        # fails TWA verification silently, so unconfigured must be an error.
-        assert client.get("/.well-known/assetlinks.json").status_code == 503
+    def test_the_pwa_survived_the_android_cleanup(self, client):
+        """sw.js and the manifest are the WEB dashboard's, not an app's — they
+        are what makes it installable and what receives web push. Removing the
+        Android apps must not have taken them along."""
+        assert client.get("/sw.js").status_code == 200
+        assert client.get("/manifest.webmanifest").status_code == 200
+        assert client.get("/api/push/key").status_code == 200
 
-    def test_assetlinks_serves_the_fingerprints_when_configured(self, client, monkeypatch):
-        monkeypatch.setenv("TWA_SHA256_FINGERPRINT", "AA:BB")
-        body = client.get("/.well-known/assetlinks.json").json()
-        assert body[0]["target"]["sha256_cert_fingerprints"] == ["AA:BB"]
+    @pytest.mark.parametrize("path", ["/privacy", "/.well-known/assetlinks.json"])
+    def test_android_only_routes_are_gone(self, client, path):
+        # privacy.html served the Play Console Data safety declaration and
+        # assetlinks.json was the TWA's Digital Asset Links proof. Both went
+        # with the Android apps on 31 Aug 2026.
+        assert client.get(path).status_code == 404
 
 
 class TestScanJobRoutes:
@@ -329,10 +334,8 @@ class TestNoRouteReturns500:
         failures = []
         for path in self._gettable(client.app):
             status = client.get(path).status_code
-            # 4xx is legitimate here (no Alpaca key), and /.well-known/
-            # assetlinks.json deliberately 503s when unconfigured because an
-            # empty list silently fails Chrome's TWA verification. A bare
-            # 500 is never legitimate — it means the handler raised.
+            # 4xx is legitimate here (no Alpaca key). A bare 500 is never
+            # legitimate — it means the handler raised.
             if status == 500:
                 failures.append(f"{path} -> {status}")
         assert not failures, "routes raising: " + ", ".join(failures)

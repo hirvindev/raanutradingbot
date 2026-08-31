@@ -93,10 +93,13 @@ aws/                        ← CDK app
 **Run it locally:** `python -m raanu.api` (was `python3 server.py`).
 **Tests:** `pytest`. **Lint:** `ruff check raanu/ handlers/ tests/ tools/`.
 
-**Not in the repo, and must stay that way:** `.env`, the two Android keystores
-(`twa/android.keystore`, `mobile/android/app/raanu-native.keystore`) and
-`~/.secrets/`. **Back the keystores up** — losing one means the Play listing
-can never be updated again.
+**Not in the repo, and must stay that way:** `.env` and `~/.secrets/`.
+
+The Android keystores are no longer relevant — `mobile/` (React Native),
+`twa/` (the Play wrapper) and `deploy-mobile.sh` were **deleted on 31 Aug
+2026**. The dashboard is a PWA; Add to Home Screen is the phone story now.
+The keystores themselves were never committed and are still in `~/.secrets/`;
+keep them only if you might ever want the Play listing back.
 
 ---
 
@@ -107,7 +110,7 @@ can never be updated again.
 | Frontend | Vanilla HTML/CSS/JS, Chart.js 4.4.1 |
 | Broker | Alpaca paper trading REST API v2 |
 | Price Data | Yahoo Finance via yfinance (batch download) |
-| Notifications | Twilio WhatsApp API |
+| Notifications | Telegram Bot API + Web Push (VAPID) |
 | Fonts | Inter + IBM Plex Mono (Google Fonts) |
 | Version Control | Git + GitHub |
 
@@ -183,10 +186,12 @@ Then open: **http://localhost:8000**
 4. Free cash available (Alpaca account endpoint)
 5. Stock not already held (Alpaca positions endpoint)
 
-### WhatsApp Alerts (via raanu/notify/telegram.py)
+### Trade Alerts (via raanu/notify/telegram.py)
 - **Pre-trade alert** sent BEFORE placing order (gives time to cancel)
 - **Post-trade alert** sent AFTER order confirmed
-- Uses Twilio Sandbox WhatsApp
+- **Telegram, not Twilio.** The function is still called `send_whatsapp()`,
+  but it is a one-line alias for `send_telegram()` — the name is the only
+  thing left of the WhatsApp path. See the Notifications section.
 
 ---
 
@@ -608,11 +613,9 @@ ALPACA_API_KEY=<your-alpaca-key-id>
 ALPACA_SECRET_KEY=<secret>
 ALPACA_MODE=paper
 
-# Twilio WhatsApp alerts
-TWILIO_ACCOUNT_SID=<your-twilio-account-sid>
-TWILIO_AUTH_TOKEN=<secret>
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-USER_WHATSAPP=whatsapp:+919176911755
+# Twilio — RETIRED. Not a dependency: `twilio` is not in requirements.txt,
+# nothing reads TWILIO_ACCOUNT_SID, and send_whatsapp() is an alias for
+# send_telegram(). Do not seed these; do not buy credentials for them.
 
 # API auth — see the API Authentication section. Two secrets, not one:
 # a phone is the most losable device here, so what it carries must not
@@ -628,7 +631,6 @@ TELEGRAM_BOT_TOKEN=<secret>
 TELEGRAM_CHAT_ID_S1=<per-strategy chats>
 VAPID_PUBLIC_KEY=<web push>
 VAPID_PRIVATE_KEY=<secret>
-FCM_SERVICE_ACCOUNT_JSON=<base64 of the service-account JSON, ONE line>
 PUSH_SCANS=1                # 0 disables the daily scan digest on push
 
 # Persistence — REQUIRED on Railway. Without it every module falls back
@@ -768,7 +770,7 @@ logger can never break a scan.
 
 ---
 
-## 🔐 API Authentication — server.py
+## 🔐 API Authentication — raanu/api/auth.py
 
 Before this the deployed API was **completely open**: `curl .../api/account/cash`
 with no credentials returned the live balance, and `/api/orders/buy`,
@@ -786,7 +788,18 @@ the token it carries must not be able to move money.
 - Non-GET is denied **by method, not by a path list** — a new POST route is
   protected the day it is written, not the day someone remembers to add it.
 - `GET /` (the HTML shell) stays public; it holds no data.
-- `/webhook/whatsapp` is outside `/api/` so Twilio can still reach it.
+- ⚠️ **`/webhook/whatsapp` is outside `/api/`, so the gate never sees it** — and
+  its `BUY`/`SELL` commands place real orders. It **failed open** until
+  31 Aug 2026: the check read `if From and From != expected`, so *omitting*
+  the form field skipped it entirely, and the expected number was a hardcoded
+  default committed to this repo. A bare
+  `curl -d 'Body=BUY NVDA 5000' .../webhook/whatsapp` — no passphrase, no
+  trade PIN — reached the order path. Verified against the running app, then
+  fixed to fail closed: unset `USER_WHATSAPP` now rejects everything.
+  **Delete this route.** Twilio is retired so nothing legitimate calls it, and
+  a `From` field is not authentication — Twilio's actual protection is the
+  `X-Twilio-Signature` HMAC, which this never implemented. If chat commands
+  are ever wanted back, use Telegram's webhook with a secret token.
 - The old `/api/scan/stream` used to accept `?token=` too, because
   **EventSource cannot set headers** — that route is gone (replaced by
   `/api/scan/job`, ordinary header auth like everything else), so there is
@@ -797,80 +810,100 @@ the token it carries must not be able to move money.
 - `ALLOWED_ORIGINS` replaces `"*"`. With tokens in play, a wildcard origin lets
   any page the user visits read their account.
 
-Dashboard: `j()` attaches the read token to every read so a 401 always surfaces
-as the token prompt rather than empty panels; `action()` prompts for the trade
-PIN per action and **never stores it**. The gate runs before the first data
-request, so account figures never render behind a login prompt.
+### The browser never holds the passphrase
+
+The dashboard used to keep the raw `API_READ_TOKEN` in
+`localStorage['raanu.readToken']` and replay it as a bearer token. That put
+**the server's own permanent secret** — the one SSM holds — in script-readable
+storage on every machine the dashboard had ever been opened on. Any XSS on the
+origin exfiltrates it, DevTools shows it in plain text, and it never expires.
+
+It is now exchanged, once, for a cookie:
+
+    POST /api/auth/session {"passphrase": …}
+      → Set-Cookie: raanu_session=v1.<expiry>.<hmac>
+                    HttpOnly; Secure; SameSite=Strict; Max-Age=43200
+
+`HttpOnly` is the point: JavaScript cannot read it, so there is nothing left
+for an injected script to steal. The passphrase crosses the wire exactly once,
+in a TLS body, and is never written down client-side.
+
+- **The cookie is stateless** — an HMAC over its own expiry, verified rather
+  than looked up. A session table would mean a DynamoDB read on the critical
+  path of every request, including the 1.5s scan poll.
+- **The HMAC key is derived from `API_READ_TOKEN` itself.** No second secret
+  to seed, and **rotating the passphrase signs every device out** — that is
+  the revocation switch, with no infrastructure behind it. Re-run
+  `./aws/seed-secrets.sh API_READ_TOKEN` if a laptop goes missing.
+- **PBKDF2, not a bare hash** (200k rounds, derived once per cold start and
+  cached). Otherwise a stolen cookie is an offline guessing target against a
+  deliberately *memorable* passphrase.
+- **Bearer auth still works, unchanged.** curl, the CLI and any future client
+  have no cookie jar worth relying on; breaking them to fix the browser would
+  trade one problem for another.
+- **CSRF**: `SameSite=Strict` covers reads, and writes are covered by
+  construction — a cross-site request cannot set `X-Trade-Token`, so ambient
+  cookie authority can never move money.
+- `GET /api/auth/status` returns **booleans only** and is outside the gate, so
+  the dashboard can ask "protected? signed in?" without firing a request it
+  expects to 401. Probing with a real endpoint put a failed attempt on the
+  lockout counter at **every page load**.
+- The dashboard **actively deletes** the legacy `raanu.readToken` key on load.
+  Moving where the secret lives does nothing if the old plaintext copy stays
+  behind in every browser.
+
+`action()` still prompts for the trade PIN per action and never stores it.
+
+⚠️ **The phone app still stores the passphrase** in `AsyncStorage['raanu.pass']`
+(app-private, so it needs a rooted device, and the server's deny-by-method rule
+means it still cannot move money). Fixing it means a Play release and a
+re-unlock every 12h on a monitor app, so it was left alone deliberately —
+not overlooked.
 
 ⚠️ **`POST /api/auto/stop` really does stop the live bot.** A verification call
 during this work disabled production and had to be re-enabled — test against
 localhost, or use a GET, unless you mean it.
 
+### Removed, and why
+
+- **`GET /api/test/twilio`** echoed `sid[:8]` and `token[:6]` of the live
+  Twilio credentials in its response body, and **sent a real message on a
+  GET** — so anything that prefetches a URL could fire it. Dead code besides.
+- **`POST /api/auth/pin`** answered "is this the right PIN?". Being a POST,
+  the gate already demanded the PIN to reach it, so it could only ever confirm
+  something the caller had just proved they knew. Zero callers.
+
 ---
 
-## 🔔 Notifications — notifier.py + push.py
+## 🔔 Notifications — raanu/notify/{telegram,push}.py
 
-Three channels, deliberately. `push._fanout()` sends every event to **both**
-push transports; Telegram is separate and carries more.
+**Two channels.** The Android apps — the React Native app, the TWA, and the
+whole FCM path — were removed on 31 Aug 2026. What is left is the web
+dashboard and the two ways it can reach you.
 
-| | Telegram | Web push (desktop) | Native app (phone) |
-|---|---|---|---|
-| BUY / EXIT / ERROR | ✅ | ✅ | ✅ |
-| Daily scan digest | ✅ | ✅ | ✅ |
-| Quiet days ("no signals") | ✅ | ❌ | ❌ |
+| | Telegram | Web push |
+|---|---|---|
+| BUY / EXIT / ERROR | ✅ | ✅ |
+| Daily scan digest | ✅ | ✅ |
+| Quiet days ("no signals") | ✅ | ❌ |
 
-**Web is for the desktop browser, the app is for the phone — one channel per
-device.** Subscribing both on the same handset means two notifications per
-event, and tapping either opens the TWA rather than the native app, because a
-web push belongs to the service worker that registered it. This was hit live;
-the comment on the bell handler in the dashboard says so.
+**Web push still works on a phone.** The dashboard remains a PWA: Add to Home
+Screen on Android Chrome or iOS Safari (16.4+) and notifications arrive with
+the tab closed. That was always the free path, and it is now the only one —
+which also retires the dual-subscription problem that used to send two
+notifications per trade, because a web push belongs to the service worker that
+registered it and there were two registrars.
 
 **Scan digests are ONE notification, never one per strategy, and empty scans
 send nothing.** A channel that fires on everything gets dismissed by reflex,
 and then the stop-out gets dismissed with it. `PUSH_SCANS=0` disables them.
 
-### FCM setup (native)
-- Firebase project **`raanubot`**, package **`app.raanu.mobile`**, sender
-  **141291543634**. `google-services.json` must match the package or token
-  retrieval fails.
-- **`FCM_SERVICE_ACCOUNT_JSON` should be base64, on one line.** The
-  service-account `private_key` is a multi-line PEM; pasting it raw into a
-  dashboard variable box mangles the newlines. This actually happened — the
-  variable held *only the PEM*, 1733 chars starting with `-`, so push was dead
-  for days while looking configured. `_fcm_info()` accepts both forms now.
-- Generate: `base64 -i ~/.secrets/raanubot-firebase-adminsdk-*.json | tr -d '\n'`
-
-### iPhone — the code is ready, Apple is the blocker
-The React Native app is cross-platform and the UI is iOS-clean (the one
-Android-only assumption, `fontFamily: 'monospace'`, now resolves to `Menlo`).
-No `ios/` project has ever been generated, and there is little point until this
-is settled:
-
-- **APNs auth keys are only issued to paid Apple Developer Program members**
-  ($99/**year**, recurring). FCM cannot deliver to an APNs token, so iOS push
-  is gated behind that fee no matter how the app is built.
-- `send_native()` now **skips** non-android tokens rather than firing them at
-  FCM. A 404 there reads as "unregistered" and prunes the token, so an iPhone
-  would silently unregister itself on its first send.
-- **The free path that works today is the PWA**: Safari → Add to Home Screen.
-  Full dashboard, app icon, no browser bar. Web push works from iOS 16.4+ once
-  installed to the Home Screen.
-
-Google's $25 was one-time and met the project's stated cost constraint. Apple's
-$99 is annual and does not.
-
 ### `GET /api/push/status` — use this first
-Reports web subs, native devices (token tails only) and whether FCM
-credentials actually **mint a token**, not merely whether the variable is set.
-A key from the wrong project, or with Cloud Messaging disabled, is
-present-but-useless and looks identical from outside.
+Reports whether VAPID is configured and how many browsers are subscribed.
 
-It exists because "push is broken" was ambiguous between *the phone never
-registered* and *the server cannot deliver* — opposite fixes. It was the
-second. Registration had worked since day one.
-
-⚠️ Tokens under 100 chars are rejected at registration. A 5-char `probe` from
-testing was stored permanently and failed on every send until pruned.
+It exists because "push is broken" was ambiguous between *the browser never
+registered* and *the server cannot deliver* — opposite fixes, and guessing
+between them cost more time than the endpoint took to write.
 
 ---
 
@@ -897,33 +930,30 @@ numpy
 pandas
 yfinance
 ta
-twilio
 python-multipart
 ```
 
 Install all:
 ```bash
-pip3 install fastapi uvicorn httpx python-dotenv pydantic numpy pandas yfinance ta twilio python-multipart
+pip3 install fastapi uvicorn httpx python-dotenv pydantic numpy pandas yfinance ta python-multipart
 ```
 
 ---
 
 ## 🚀 Deploying — see DEPLOY.md
 
-**Server, dashboard and API deploy themselves.** `git push` to `main` triggers
-Railway. If you changed only Python or the HTML, pushing *is* the deploy.
+⚠️ **`git push` deploys NOTHING.** `.github/workflows/deploy-aws.yml` is
+`workflow_dispatch`-only — deliberately, so a deploy is a decision rather than
+a side effect of a commit. The old Railway habit of "pushing *is* the deploy"
+does not carry over, and this doc said otherwise for a while.
 
-**The Android app is one command:** `./deploy-mobile.sh` — bumps the version
-code in *both* `app.json` and `build.gradle`, builds, asserts the bundle
-carries the release certificate (not the debug one), and uploads to the Play
-**internal** track with exactly one version code in the release.
+```bash
+gh workflow run "Deploy AWS skeleton" && gh run watch
+```
 
-Each of those checks exists because that exact thing went wrong by hand: a
-debug-signed release, a version code that reverted on `expo prebuild`, and
-three bundles stacked in one release that Play refused as "completely
-shadowed".
-
-Production release is deliberately unreachable from the script.
+One run ships everything — the `raanu/` package, both Lambda handlers, the CDK
+stack and the dashboard assets. There is nothing else to release: the PWA
+updates whenever the dashboard does, because it *is* the dashboard.
 
 ---
 
@@ -946,7 +976,7 @@ git push
 - [x] Batch yfinance download (42 US tickers in ~1–3 seconds)
 - [x] Auto-trader scan loop (disabled by default)
 - [x] 5-gate system before every order
-- [x] WhatsApp pre-trade + post-trade alerts via Twilio
+- [x] Pre-trade + post-trade alerts via Telegram
 - [x] Avoid re-buying already-held stocks **and stocks with a queued buy order**
 - [x] ATR-scaled stops + trailing stops, per strategy
 - [x] Kelly risk-based position sizing (Quarter Kelly)
@@ -959,8 +989,8 @@ git push
 - [x] Trade log persisted to `trades_log.json` — now records SELLs with realized P&L
 - [x] Walk-forward backtester with stop-rule sweeps and a both-halves stability check
 - [x] Token-gated API (read passphrase + separate trade PIN, deny-by-method)
-- [x] Mobile layout, PWA, TWA, and a native React Native app (`mobile/`)
-- [x] Push on three channels — Telegram, web (desktop), native app (phone)
+- [x] Mobile-responsive layout + PWA (Add to Home Screen)
+- [x] Push on two channels — Telegram and web push
 - [x] Pick outcome tracking with a SPY baseline (`picks_log.py`)
 - [x] Per-strategy cash shares, so execution order no longer decides allocation
 - [x] Strategy stamped into `client_order_id` — attribution survives a log wipe
@@ -974,27 +1004,28 @@ git push
 - [ ] `PER_TRADE_MAX_USD=2500` still binds on every candidate, so per-trade risk
       is compressed but not equalised — needs ~$10k for `MAX_POSITION_PCT` to
       become the real limit
-- [ ] Dashboard sell button for open positions (the native app has one —
-      long-press a position, PIN prompted per action and never stored)
+- [ ] Dashboard sell button for open positions. The deleted native app had
+      one (long-press, PIN prompted per action, never stored) — that
+      interaction is worth copying, the code is in git history.
 - [ ] News sentiment scoring (currently no real data source)
-- [x] **Play Store: internal testing only — decided 16 Aug 2026.** Not a
-      staging step toward production; this is the end state.
+- [x] **Android apps removed — 31 Aug 2026.** `mobile/` (React Native),
+      `twa/` (Play wrapper), `deploy-mobile.sh`, `tools/play_upload.py`,
+      `privacy.html`, the assetlinks route and the whole FCM push path are
+      gone. This supersedes the "Play Store: internal testing only" decision
+      of 16 Aug 2026.
 
-      The app is a monitor for one Alpaca account behind a passphrase, so a
-      public download is a lock screen nobody can pass. "Public" would need a
-      signals-only mode that does not exist. Internal testing gives the two
-      things actually wanted — the app on two phones, and Play auto-updates
-      instead of sideloading — and gives up only store search, which two
-      known users do not need.
+      The apps were a monitor for one Alpaca account behind a passphrase, and
+      the PWA already delivers that: Add to Home Screen gives the full
+      dashboard, an app icon, no browser bar, and web push. What the apps
+      added over it was Play auto-updates — for two known users — against the
+      cost of two keystores that can never be lost, a signing pipeline, a
+      second notification transport, and a second copy of the passphrase in
+      `AsyncStorage`. That last one is what settled it.
 
-      Reopening this means clearing three gates, in this order:
-      1. Build the signals-only public mode (does not exist).
-      2. Settle whether a public app recommending stocks is regulated as
-         investment advice — it is, in most jurisdictions including India.
-      3. Google's own gate: Personal accounts created after Nov 2023 need
-         12 testers × 14 continuous days of closed testing before production.
-
-      Gate 2 is the one to answer first; the other two are work, not risk.
+      To bring one back you would need the signals-only public mode that
+      still does not exist, and an answer to whether a public app
+      recommending stocks is regulated as investment advice (it is, in most
+      jurisdictions including India). Answer that one first.
 
 ---
 
@@ -1147,7 +1178,6 @@ is explicitly enabled.
 - `QIAGF`, `BMWYY`, `DPSGY` delisted — removed from universe
 - Alpaca IEX feed is US-only — alpaca_data.py returns None for any ticker with `.` in name
 - When no stocks score ≥ 60, picks = 0 and no trade fires (correct behavior — don't force bad trades)
-- Twilio WhatsApp sandbox requires user to opt-in first (send "join <sandbox-name>" to the number)
 - macOS uses `python3` not `python`
 
 ---

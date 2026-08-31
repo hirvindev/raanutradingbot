@@ -32,29 +32,17 @@ async def push_unsubscribe(request: Request):
     return push.unsubscribe((await request.json()).get("endpoint", ""))
 
 
-@router.post("/api/push/clear-web")
-async def push_clear_web():
-    """Drop every browser/TWA push subscription.
-
-    Two apps subscribing to the same events meant two notifications per trade,
-    and tapping either one opened the TWA — because a web push belongs to the
-    service worker that registered it, not to whichever app you prefer. With the
-    native app in place the web channel is redundant, and one owner is the only
-    stable arrangement.
-    """
-    from raanu.notify import push
-    n = len(push._load())
-    push._save([])
-    return {"ok": True, "cleared": n}
-
-
-@router.post("/api/push/native/register")
-async def push_native_register(request: Request):
-    """Register a native (FCM) device token. Read-token only, like web push —
-    registering a phone for notifications moves no money."""
-    from raanu.notify import push
-    b = await request.json()
-    return push.register_native(b.get("token", ""), b.get("platform", "android"))
+# POST /api/push/clear-web and POST /api/push/native/register were removed on
+# 31 Aug 2026 with the Android apps.
+#
+# clear-web existed only to resolve a conflict between two of them: the TWA and
+# the native app both subscribed to the same events, so every trade notified
+# twice and tapping either one opened the TWA — a web push belongs to the
+# service worker that registered it, not to whichever app you prefer. With one
+# client left there is nothing to disambiguate. Use unsubscribe.
+#
+# native/register took an FCM token from the React Native app, which no longer
+# exists.
 
 
 @router.get("/api/notifications")
@@ -95,12 +83,10 @@ async def push_test():
                           "3M momentum +28.4%"]}
     title, body = push.format_signal(sample, "s1")
     title += " (sample)"
-    # Through _fanout, not send()/send_native() directly: a self-test that
-    # skips half the delivery path proves less than it appears to. It was
-    # bypassing _record(), so tests never showed up in Alerts — exactly the
-    # thing the test is meant to demonstrate.
+    # Through _fanout, not send() directly: a self-test that skips part of the
+    # delivery path proves less than it appears to. It was bypassing _record(),
+    # so tests never showed up in Alerts — exactly the thing being tested.
     push._fanout(title, body, "test", sticky=True)
     st = push.status()
-    return {"sent": len(st["native"]["devices"]) + st["web"]["subs"],
-            "native_sent": len(st["native"]["devices"]),
-            "web_subs": st["web"]["subs"], "recorded": True}
+    return {"sent": st["web"]["subs"], "web_subs": st["web"]["subs"],
+            "recorded": True}
