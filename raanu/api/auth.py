@@ -25,11 +25,23 @@ script-readable storage on every machine the dashboard was ever opened on.
 Any XSS on the origin exfiltrates it permanently, and DevTools shows it in
 plain text.
 
-So the passphrase is now exchanged, once, for a session cookie:
+So the passphrase is now exchanged, once, for a JWT:
 
     POST /api/auth/session {"passphrase": ...}
-      -> Set-Cookie: raanu_session=v1.<expiry>.<hmac>
+      -> {"access_token": "eyJhbGci...", "token_type": "Bearer",
+          "expires_in": 43200}
+      -> Set-Cookie: raanu_session=eyJhbGci...
                      HttpOnly; Secure; SameSite=Strict
+
+**The same token, delivered two ways, and the client picks.** The browser
+uses the cookie and ignores the body; scripts read ``access_token`` and send
+``Authorization: Bearer``. That split is the point — a browser must not hold
+the token where script can reach it, and a script has no cookie jar worth
+relying on.
+
+Handing a script a JWT also fixes something the cookie alone did not: before
+this, curl authenticated with ``Bearer <the raw passphrase>``, so every
+script carried the permanent secret. Now it carries a 12-hour one.
 
 ``HttpOnly`` puts it out of reach of JavaScript entirely, so there is no
 longer anything for an injected script to read. The passphrase itself
@@ -60,12 +72,12 @@ would be trading one problem for another.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import os
 import secrets
 import time
 
+import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -100,6 +112,12 @@ SESSION_TTL_SEC = 12 * 3600
 _KDF_SALT = b"raanu-session-v1"
 _KDF_ROUNDS = 200_000
 
+# HS256, symmetric: there is one issuer and one verifier, both this process.
+# RS256 exists to let a third party verify without being able to mint, which
+# is not a distinction anything here needs.
+_JWT_ALG = "HS256"
+_JWT_ISSUER = "raanu"
+
 _derived_key: tuple[str, bytes] | None = None
 
 
@@ -121,31 +139,54 @@ def _session_key() -> bytes:
     return _derived_key[1]
 
 
-def _sign(payload: str) -> str:
-    return hmac.new(_session_key(), payload.encode(), hashlib.sha256).hexdigest()
+def mint_token(ttl_sec: int = SESSION_TTL_SEC) -> str:
+    """Issue a signed JWT for the owner.
+
+    HS256 with the derived key. The previous format was a hand-rolled
+    ``v1.<expiry>.<hmac>``, which did the same job — this is the standard
+    spelling of it, so the token is inspectable with ordinary tooling and
+    carries real claims instead of one bare number.
+    """
+    now = int(time.time())
+    return jwt.encode(
+        {"iss": _JWT_ISSUER, "sub": "owner", "iat": now, "exp": now + ttl_sec},
+        _session_key(),
+        algorithm=_JWT_ALG,
+    )
 
 
-def mint_session(ttl_sec: int = SESSION_TTL_SEC) -> str:
-    payload = f"v1.{int(time.time()) + ttl_sec}"
-    return f"{payload}.{_sign(payload)}"
+def verify_token(token: str) -> dict | None:
+    """Decoded claims if this is a live token we minted, else None.
 
+    ``algorithms=[HS256]`` is the load-bearing argument, not a formality: it
+    is what makes PyJWT reject ``alg: none`` and algorithm-confusion attacks,
+    where an attacker re-signs the payload under a scheme the verifier did
+    not intend. Never widen it, and never pass the token's own header
+    algorithm here.
 
-def valid_session(cookie: str) -> bool:
-    """True if this cookie was minted by us and has not expired."""
-    if not cookie or not config.api_read_token():
-        return False
-    version, _, rest = cookie.partition(".")
-    expiry, _, mac = rest.partition(".")
-    if version != "v1" or not expiry or not mac:
-        return False
-    # Signature first: an unsigned cookie's expiry is attacker-controlled and
-    # not worth parsing, let alone trusting.
-    if not hmac.compare_digest(_sign(f"{version}.{expiry}"), mac):
-        return False
+    Signature is checked before any claim is read — an unverified payload is
+    attacker-controlled and not worth parsing, let alone trusting. PyJWT does
+    that ordering for us, and validates ``exp`` itself.
+    """
+    if not token or not config.api_read_token():
+        return None
     try:
-        return time.time() < int(expiry)
-    except ValueError:
-        return False
+        return jwt.decode(
+            token,
+            _session_key(),
+            algorithms=[_JWT_ALG],
+            issuer=_JWT_ISSUER,
+            options={"require": ["exp", "iat", "iss"]},
+        )
+    except jwt.InvalidTokenError:
+        # One except for expired, tampered, malformed, wrong-issuer and
+        # missing-claim alike: the caller gets in or does not, and telling it
+        # apart out loud only helps whoever is probing.
+        return None
+
+
+def valid_session(token: str) -> bool:
+    return verify_token(token) is not None
 
 
 def reset_session_key() -> None:
@@ -211,13 +252,30 @@ def _presented_token(request: Request) -> str:
 
 
 def _authenticated(request: Request) -> bool:
-    """A valid bearer token OR a valid session cookie."""
+    """Three ways in, in the order a caller is likely to use them.
+
+    1. ``Authorization: Bearer <jwt>`` — what a script should use. Expires,
+       so a leaked one stops working, and it can be re-minted at will.
+    2. The session cookie, which holds the same JWT. What the browser uses;
+       HttpOnly, so page scripts cannot read it.
+    3. ``Authorization: Bearer <passphrase>`` — the root credential, still
+       accepted so there is a way in before any token has been minted (and
+       so existing scripts did not break the day JWTs landed).
+
+    (3) is the weakest of the three: it never expires and it is the same
+    secret SSM holds. Prefer (1) — POST the passphrase once to
+    /api/auth/session and carry the JWT.
+    """
     expected = config.api_read_token()
     if not expected:
         return True                      # gate disabled; everything is open
-    token = _presented_token(request)
-    if token and secrets.compare_digest(token, expected):
-        return True
+
+    presented = _presented_token(request)
+    if presented:
+        if verify_token(presented):
+            return True
+        if secrets.compare_digest(presented, expected):
+            return True
     return valid_session(request.cookies.get(SESSION_COOKIE, ""))
 
 
@@ -296,10 +354,26 @@ async def api_auth_gate(request: Request, call_next):
 
 @router.post("/api/auth/session")
 async def open_session(request: Request):
-    """Exchange the passphrase for an HttpOnly session cookie.
+    """Exchange the passphrase for a JWT. The one request that carries the
+    passphrase; everything after it carries the token.
 
-    The one request in the system that carries the passphrase. Everything
-    after it rides the cookie, so no page ever has to hold the secret.
+    The same token goes out **two ways**, and which one a client uses is the
+    whole design:
+
+      * ``Set-Cookie: raanu_session=<jwt>; HttpOnly`` — for the browser.
+        HttpOnly means page scripts cannot read it, so an XSS has nothing to
+        steal. The dashboard uses this and ignores the body.
+      * ``access_token`` in the JSON body — for curl, scripts and any future
+        non-browser client, which have no cookie jar worth relying on and
+        would otherwise have to carry the permanent passphrase instead.
+
+        curl -sX POST $URL/api/auth/session \\
+             -H 'Content-Type: application/json' \\
+             -d '{"passphrase":"..."}' | jq -r .access_token
+
+    A browser client should NOT read access_token out of this response and
+    store it — that puts the credential back in JavaScript's reach and undoes
+    the reason the cookie is HttpOnly.
     """
     expected = config.api_read_token()
     if not expected:
@@ -328,11 +402,20 @@ async def open_session(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     _AUTH_FAILS.pop(ip, None)
-    response = JSONResponse({"ok": True, "protected": True,
-                             "expires_in_sec": SESSION_TTL_SEC})
+    token = mint_token()
+    # access_token / token_type / expires_in are the OAuth2 bearer response
+    # field names (RFC 6749 §5.1) — worth matching exactly, because every HTTP
+    # client library already knows how to read them.
+    response = JSONResponse({
+        "ok": True,
+        "protected": True,
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_in": SESSION_TTL_SEC,
+    })
     response.set_cookie(
         SESSION_COOKIE,
-        mint_session(),
+        token,
         max_age=SESSION_TTL_SEC,
         httponly=True,                   # the whole point: JS cannot read it
         secure=_is_https(request),
@@ -353,15 +436,25 @@ async def close_session():
 
 @router.get("/api/auth/status")
 async def auth_status(request: Request):
-    """Booleans only — never any part of a secret.
+    """Booleans and one timestamp — never any part of a secret, and never the
+    token itself (that would hand a page script the thing HttpOnly exists to
+    keep away from it).
 
     Lets the dashboard decide between the unlock screen and loading data
     without firing a request it expects to 401, which would otherwise put a
     failed attempt on the lockout counter at every page load.
     """
-    return {
+    out = {
         "protected": bool(config.api_read_token()),
         "authenticated": _authenticated(request),
         "trade_pin_configured": bool(os.getenv("TRADE_PIN", "").strip()),
         "session_ttl_sec": SESSION_TTL_SEC,
     }
+    # Seconds left, so a client can renew before a request fails rather than
+    # after. Derived from the token's own exp claim, not from when the page
+    # happened to load.
+    claims = verify_token(_presented_token(request)
+                          or request.cookies.get(SESSION_COOKIE, ""))
+    if claims:
+        out["expires_in"] = max(0, int(claims["exp"] - time.time()))
+    return out

@@ -9,10 +9,13 @@ auth for the phone and curl) still holds.
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import time
 from pathlib import Path
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,40 +43,84 @@ def unlock(client, passphrase=READ):
     return client.post("/api/auth/session", json={"passphrase": passphrase})
 
 
-class TestCookieCrypto:
-    def test_a_minted_cookie_validates(self, secured):
-        assert auth.valid_session(auth.mint_session()) is True
+class TestJwt:
+    """The token itself. A JWT invites a specific family of attacks that an
+    opaque HMAC string does not, so those get tested by name."""
+
+    def test_a_minted_token_validates(self, secured):
+        assert auth.valid_session(auth.mint_token()) is True
+
+    def test_it_is_a_real_jwt_with_the_claims_we_expect(self, secured):
+        claims = auth.verify_token(auth.mint_token())
+        assert claims["iss"] == "raanu" and claims["sub"] == "owner"
+        assert claims["exp"] - claims["iat"] == auth.SESSION_TTL_SEC
+        assert jwt.get_unverified_header(auth.mint_token())["alg"] == "HS256"
 
     def test_garbage_is_rejected(self, secured):
-        for bad in ("", "nonsense", "v1.x.y", "v2.999999999.deadbeef", "v1..", "..."):
+        for bad in ("", "nonsense", "a.b.c", "...", "eyJhbGciOiJIUzI1NiJ9..",
+                    "v1.9999999999.deadbeef"):
             assert auth.valid_session(bad) is False, bad
 
-    def test_a_tampered_expiry_is_rejected(self, secured):
-        version, expiry, mac = auth.mint_session().split(".")
-        forged = f"{version}.{int(expiry) + 86400}.{mac}"
+    def test_alg_none_is_rejected(self, secured):
+        """The canonical JWT forgery: re-encode the claims with "alg":"none"
+        and no signature. A verifier that trusts the token's own header
+        accepts it. Ours pins algorithms=["HS256"], which is the only reason
+        this fails."""
+        claims = auth.verify_token(auth.mint_token())
+        forged = jwt.encode(claims, key="", algorithm="none")
         assert auth.valid_session(forged) is False
 
-    def test_an_expired_cookie_is_rejected(self, secured):
-        assert auth.valid_session(auth.mint_session(ttl_sec=-1)) is False
+    def test_a_token_signed_with_another_key_is_rejected(self, secured):
+        claims = auth.verify_token(auth.mint_token())
+        assert auth.valid_session(jwt.encode(claims, "not-our-key",
+                                             algorithm="HS256")) is False
 
-    def test_the_cookie_never_contains_the_passphrase(self, secured):
-        # An HMAC, not an encoding. If the secret were recoverable from the
-        # cookie, moving it out of localStorage would have achieved nothing.
-        assert READ not in auth.mint_session()
+    def test_a_tampered_payload_is_rejected(self, secured):
+        header, payload, sig = auth.mint_token().split(".")
+        claims = auth.verify_token(auth.mint_token())
+        longer = jwt.encode({**claims, "exp": claims["exp"] + 86400},
+                            "not-our-key", algorithm="HS256").split(".")[1]
+        assert auth.valid_session(f"{header}.{longer}.{sig}") is False
 
-    def test_rotating_the_passphrase_invalidates_live_sessions(self, secured, monkeypatch):
-        """The revocation story, and the reason the HMAC is keyed on the
-        passphrase itself: `./aws/seed-secrets.sh API_READ_TOKEN` is all it
-        takes to sign every device out."""
-        cookie = auth.mint_session()
-        assert auth.valid_session(cookie) is True
+    def test_an_expired_token_is_rejected(self, secured):
+        assert auth.valid_session(auth.mint_token(ttl_sec=-1)) is False
+
+    def test_a_foreign_issuer_is_rejected(self, secured):
+        now = int(time.time())
+        other = jwt.encode({"iss": "somebody-else", "sub": "owner", "iat": now,
+                            "exp": now + 3600},
+                           auth._session_key(), algorithm="HS256")
+        assert auth.valid_session(other) is False
+
+    def test_a_token_without_an_expiry_is_rejected(self, secured):
+        """require=["exp"] matters: PyJWT does not reject a token that simply
+        omits exp, it just has nothing to check — which would mint forever."""
+        forever = jwt.encode({"iss": "raanu", "sub": "owner"},
+                             auth._session_key(), algorithm="HS256")
+        assert auth.valid_session(forever) is False
+
+    def test_the_token_never_contains_the_passphrase(self, secured):
+        # A JWT payload is base64, NOT encryption — anyone can read the
+        # claims. Nothing secret may go in it.
+        token = auth.mint_token()
+        assert READ not in token
+        assert READ not in json.dumps(auth.verify_token(token))
+        assert READ.encode() not in base64.urlsafe_b64decode(
+            token.split(".")[1] + "==")
+
+    def test_rotating_the_passphrase_invalidates_live_tokens(self, secured, monkeypatch):
+        """The revocation story, and the reason the signing key is derived
+        from the passphrase: `./aws/seed-secrets.sh API_READ_TOKEN` is all it
+        takes to sign every client out."""
+        token = auth.mint_token()
+        assert auth.valid_session(token) is True
         monkeypatch.setenv("API_READ_TOKEN", "a-different-passphrase")
-        assert auth.valid_session(cookie) is False
+        assert auth.valid_session(token) is False
 
-    def test_no_passphrase_configured_means_no_valid_sessions(self, secured, monkeypatch):
-        cookie = auth.mint_session()
+    def test_no_passphrase_configured_means_no_valid_tokens(self, secured, monkeypatch):
+        token = auth.mint_token()
         monkeypatch.delenv("API_READ_TOKEN")
-        assert auth.valid_session(cookie) is False
+        assert auth.valid_session(token) is False
 
 
 class TestLogin:
@@ -146,11 +193,55 @@ class TestCookieAuthenticates:
         assert r.status_code != 403
 
 
-class TestBearerStillWorks:
-    """The React Native app, curl and the CLI have no cookie jar worth
-    relying on. Fixing the browser must not break them."""
+class TestBearerJwt:
+    """The reason for JWTs at all: a script should carry an expiring token,
+    not the permanent passphrase."""
 
-    def test_bearer_authenticates_without_any_cookie(self, secured):
+    def test_the_endpoint_hands_back_a_usable_token(self, secured):
+        body = unlock(secured).json()
+        assert body["token_type"] == "Bearer"
+        assert body["expires_in"] == auth.SESSION_TTL_SEC
+        # OAuth2 bearer field names (RFC 6749 §5.1), so ordinary HTTP client
+        # libraries can read the response without special-casing us.
+        token = body["access_token"]
+
+        fresh = TestClient(create_app(), raise_server_exceptions=False)
+        assert fresh.get("/api/health").status_code == 401
+        r = fresh.get("/api/health", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+
+    def test_the_body_token_and_the_cookie_are_the_same_token(self, secured):
+        r = unlock(secured)
+        assert r.json()["access_token"] == r.cookies[auth.SESSION_COOKIE]
+
+    def test_an_expired_bearer_jwt_is_refused(self, secured):
+        stale = auth.mint_token(ttl_sec=-1)
+        r = secured.get("/api/health", headers={"Authorization": f"Bearer {stale}"})
+        assert r.status_code == 401
+
+    def test_a_jwt_does_not_substitute_for_the_trade_pin(self, secured):
+        token = unlock(secured).json()["access_token"]
+        fresh = TestClient(create_app(), raise_server_exceptions=False)
+        r = fresh.post("/api/auto/start",
+                       headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 403
+
+    def test_status_reports_the_remaining_lifetime(self, secured):
+        unlock(secured)
+        left = secured.get("/api/auth/status").json()["expires_in"]
+        assert 0 < left <= auth.SESSION_TTL_SEC
+
+    def test_status_still_leaks_no_token(self, secured):
+        unlock(secured)
+        assert "access_token" not in secured.get("/api/auth/status").text
+
+
+class TestRawPassphraseBearerStillWorks:
+    """The root credential. Kept so there is a way in before any token has
+    been minted — but it never expires, so the JWT is what a script should
+    actually carry."""
+
+    def test_bearer_passphrase_authenticates_without_any_cookie(self, secured):
         r = secured.get("/api/health", headers={"Authorization": f"Bearer {READ}"})
         assert r.status_code == 200
 

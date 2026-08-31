@@ -818,29 +818,54 @@ The dashboard used to keep the raw `API_READ_TOKEN` in
 storage on every machine the dashboard had ever been opened on. Any XSS on the
 origin exfiltrates it, DevTools shows it in plain text, and it never expires.
 
-It is now exchanged, once, for a cookie:
+It is now exchanged, once, for a **JWT** (HS256, 12h):
 
     POST /api/auth/session {"passphrase": …}
-      → Set-Cookie: raanu_session=v1.<expiry>.<hmac>
+      → {"access_token": "eyJhbGci…", "token_type": "Bearer",
+         "expires_in": 43200}
+      → Set-Cookie: raanu_session=eyJhbGci…
                     HttpOnly; Secure; SameSite=Strict; Max-Age=43200
 
-`HttpOnly` is the point: JavaScript cannot read it, so there is nothing left
-for an injected script to steal. The passphrase crosses the wire exactly once,
-in a TLS body, and is never written down client-side.
+**The same token goes out two ways and the client picks.** The browser uses
+the cookie and ignores the body; curl and scripts read `access_token` and send
+`Authorization: Bearer`. That split is the design, not an accident:
 
-- **The cookie is stateless** — an HMAC over its own expiry, verified rather
-  than looked up. A session table would mean a DynamoDB read on the critical
-  path of every request, including the 1.5s scan poll.
+- A browser must not hold the token where script can reach it. `HttpOnly` is
+  the point — JavaScript cannot read it, so an injected script has nothing to
+  steal. **A client that reads `access_token` out of the login response and
+  stores it has undone the whole thing.** The dashboard deliberately does not.
+- A script has no cookie jar worth relying on, and before JWTs it
+  authenticated with `Bearer <the raw passphrase>` — so every script carried
+  the *permanent* secret. Now it carries a 12-hour one.
+
+The passphrase crosses the wire exactly once, in a TLS body, and is never
+written down client-side.
+
+⚠️ **`algorithms=["HS256"]` in `verify_token()` is load-bearing, not
+boilerplate.** It is what makes PyJWT reject `alg: none` and
+algorithm-confusion forgeries. Never widen it, and never pass the token's own
+header algorithm. There is a test named `test_alg_none_is_rejected` that fails
+the moment someone does.
+
+- **The token is stateless** — claims verified by signature rather than
+  looked up. A session table would mean a DynamoDB read on the critical path
+  of every request, including the 1.5s scan poll. The cost is that a token
+  cannot be revoked individually; rotating the passphrase revokes all of
+  them, which is the only revocation this one-owner system needs.
 - **The HMAC key is derived from `API_READ_TOKEN` itself.** No second secret
   to seed, and **rotating the passphrase signs every device out** — that is
   the revocation switch, with no infrastructure behind it. Re-run
   `./aws/seed-secrets.sh API_READ_TOKEN` if a laptop goes missing.
 - **PBKDF2, not a bare hash** (200k rounds, derived once per cold start and
-  cached). Otherwise a stolen cookie is an offline guessing target against a
-  deliberately *memorable* passphrase.
-- **Bearer auth still works, unchanged.** curl, the CLI and any future client
-  have no cookie jar worth relying on; breaking them to fix the browser would
-  trade one problem for another.
+  cached). The JWT signing key is the derived key, never the passphrase
+  itself — otherwise a stolen token is an offline guessing target against a
+  deliberately *memorable* secret.
+- **Nothing secret goes in the claims.** A JWT payload is base64, not
+  encryption; anyone holding the token can read it. Claims are
+  `iss/sub/iat/exp` and nothing else.
+- **Raw-passphrase bearer still works** as the root credential, so there is a
+  way in before any token has been minted. It never expires, so prefer the
+  JWT for anything scripted.
 - **CSRF**: `SameSite=Strict` covers reads, and writes are covered by
   construction — a cross-site request cannot set `X-Trade-Token`, so ambient
   cookie authority can never move money.

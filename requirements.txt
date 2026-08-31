@@ -9,5 +9,8 @@ numpy>=1.26
 tzdata>=2024.1
 python-multipart>=0.0.9
 pywebpush
+# HS256 session tokens. Small and pure-Python; the reason not to hand-roll
+# JWT is `alg: none` and algorithm-confusion, which PyJWT rejects for us.
+pyjwt>=2.9
 mangum
 boto3

@@ -774,12 +774,12 @@ const el     = id => document.getElementById(id);
    shows, and a trade PIN for anything that moves money.
 
    NEITHER IS STORED BY THIS PAGE. The passphrase is POSTed once to
-   /api/auth/session and comes back as an HttpOnly cookie, which the browser
-   attaches to every later request on its own — script here cannot read it,
-   so there is nothing for an injected script to steal. Before this the raw
-   passphrase lived in localStorage in plain text, on every machine the
-   dashboard had ever been opened on, and it was the server's own permanent
-   secret rather than something that expires.
+   /api/auth/session, which returns a 12-hour JWT in an HttpOnly cookie; the
+   browser attaches it to every later request on its own. Script here cannot
+   read it, so there is nothing for an injected script to steal. Before this
+   the raw passphrase lived in localStorage in plain text, on every machine
+   the dashboard had ever been opened on, and it was the server's own
+   permanent secret rather than something that expires.
 
    The trade PIN is asked for per action and never persisted, so a borrowed
    or stolen phone cannot place an order. */
@@ -788,6 +788,14 @@ const el     = id => document.getElementById(id);
    'include': the dashboard and the API are one origin behind CloudFront, and
    this way the credential can never ride along to anywhere else. */
 const withCreds = (opts = {}) => ({...opts, credentials: 'same-origin'});
+
+/* Whether this page has ever held a working session. It is the only way to
+   tell the two causes of a 401 apart — a rejected passphrase and an expired
+   token look identical on the wire. Declared here, above its first use in
+   openSession(), rather than beside sessionLost(): a `let` read from a
+   function defined earlier in the file is the shape that produced a
+   ReferenceError once already. */
+let hadSession = false;
 
 /* One-time cleanup of the old scheme. Without this the previous plaintext
    passphrase would simply sit in localStorage forever on every browser that
@@ -806,7 +814,20 @@ async function openSession(passphrase){
     return {ok:false, msg:`Too many failed attempts. Try again in ${Math.ceil((d.retry_after_sec||900)/60)} minutes.`};
   }
   if(r.status === 401) return {ok:false, msg:'That passphrase was not accepted. Try again.'};
-  return r.ok ? {ok:true} : {ok:false, msg:'Unlock failed ('+r.status+').'};
+  if(!r.ok) return {ok:false, msg:'Unlock failed ('+r.status+').'};
+  // The response body also carries `access_token` — the same JWT that is in
+  // the cookie. This page deliberately IGNORES it: reading it into a JS
+  // variable is exactly what HttpOnly exists to prevent. It is there for
+  // curl and scripts, which have no cookie jar. See raanu/api/auth.py.
+  hadSession = true;
+  return {ok:true};
+}
+
+function sessionLost(){
+  askForToken(hadSession
+    ? 'Session expired after 12 hours. Enter your passphrase to continue.'
+    : 'That passphrase was not accepted. Try again.');
+  hadSession = false;
 }
 
 function askForToken(msg){
@@ -858,7 +879,11 @@ const j = async p => {
       }
       return null;
     }
-    if(r.status === 401){ askForToken('That passphrase was not accepted. Try again.'); return null; }
+    // "Wrong passphrase" and "your 12h token just expired" are both 401, and
+    // conflating them tells someone their passphrase is wrong when it is
+    // simply old — which is now a thing that happens on a predictable
+    // schedule rather than never.
+    if(r.status === 401){ sessionLost(); return null; }
     return r.ok ? await r.json() : null;
   }catch(e){ logLine('fetch failed '+p,'err'); return null; }
 };
@@ -872,7 +897,7 @@ async function action(path, opts){
     'Content-Type':'application/json', 'X-Trade-Token': pin.trim(),
     ...((opts||{}).headers||{})}}));
   if(r.status === 403){ logLine('Trade PIN rejected','err'); alert('Trade PIN rejected.'); return {denied:true}; }
-  if(r.status === 401){ askForToken('Session expired. Enter your passphrase.'); return {denied:true}; }
+  if(r.status === 401){ sessionLost(); return {denied:true}; }
   return r;
 }
 
@@ -2015,6 +2040,13 @@ if(location.hash) go(location.hash.slice(1));
   // Unreachable is not the same as unauthorised — asking for the passphrase
   // when the server is simply down teaches the user to retype it at noise.
   if(s && s.protected && !s.authenticated){ askForToken(); return; }
+  // A cookie that survived a reload IS a live session, so a 401 later in this
+  // page's life means expiry, not a bad passphrase.
+  if(s && s.authenticated) hadSession = true;
+  // No 'warn' kind exists — logLine only styles 'ok' and 'err', and an
+  // expiry notice is neither.
+  if(s && s.expires_in != null && s.expires_in < 1800)
+    logLine(`Session expires in ${Math.round(s.expires_in / 60)} min`);
   loadUniverses();
   load().then(()=>logLine('Dashboard loaded','ok'));
 })();
