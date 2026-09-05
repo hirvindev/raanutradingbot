@@ -285,11 +285,76 @@ def _authenticated(request: Request) -> bool:
 # /api/auth/session does its own lockout accounting.
 _PUBLIC_API_PATHS = {"/api/auth/session", "/api/auth/logout", "/api/auth/status"}
 
-# Push registration and its self-test move no money and change no bot
-# behaviour; gating them behind the trade PIN made "is push working?"
-# unanswerable without placing a trade.
-_READ_TOKEN_POSTS = {"/api/push/subscribe", "/api/push/unsubscribe",
-                     "/api/push/test"}
+
+# ── what the trade PIN actually protects ─────────────────────────────────────
+#
+# This used to be "every non-GET needs the PIN", with a small exempt list. The
+# rule was chosen for one good reason — a new POST route is protected the day
+# it is written, not the day someone remembers to add it here — but it also
+# meant **running a scan demanded the credential that can place trades**.
+# Scanning is read-only research; requiring the money credential for it
+# defeats the whole point of having two secrets, which is that you can look
+# without being able to spend.
+#
+# So routes are now classified by what they can actually do. The safety
+# property is kept by making the DEFAULT "needs the PIN": a route in neither
+# set below is treated as money-moving and logged as unclassified. Adding a
+# route without classifying it therefore fails safe (an unexpected PIN
+# prompt), never open. `tests/test_auth_session.py` asserts the two sets
+# together cover every mounted non-GET route, so drift is a test failure
+# rather than a surprise.
+
+# Moves money, or changes what the bot will do with money on its own.
+MONEY_MOVING = {
+    "/api/auto/start",        # enables autonomous trading
+    "/api/auto/stop",         # and disables it — this really does stop the
+                              # live bot; it got switched off by accident once
+    "/api/auto/scan-now",     # ⚠️ NOT a scan. Calls run_one_cycle(), which
+                              # places orders. Its /s2 sibling does not — the
+                              # names are one character apart and the risk is
+                              # not. Read the handler before reclassifying.
+    "/api/exit-config",       # sets the stop and trail, i.e. decides when
+                              # every open position gets sold
+}
+
+# The whole /api/orders/ family: buy, sell, and DELETE /api/orders/{id} to
+# cancel. A prefix rather than three literals because the cancel route is
+# templated — the middleware sees "/api/orders/abc123", which would never
+# match the OpenAPI spelling "/api/orders/{order_id}".
+MONEY_MOVING_PREFIXES = ("/api/orders/",)
+
+# Changes nothing about money: research, notifications, device registration.
+# The passphrase alone is enough. Must be literal paths — a templated entry
+# would silently never match and the route would demand a PIN forever.
+SAFE_WRITES = {
+    "/api/scan/job",           # the Live Signals scan. The reason for all this
+    "/api/scan/alert-now",     # re-sends the morning alert; no trading
+    "/api/auto/scan-now/s2",   # scans and caches only — no run_one_cycle()
+    "/api/picks/backfill",     # fills forward returns on logged picks
+    "/api/push/subscribe",     # "is push working?" was unanswerable without
+    "/api/push/unsubscribe",   # placing a trade, which is absurd
+    "/api/push/test",
+    "/api/report/monthly/send",
+    "/api/telegram/test",
+}
+
+
+def needs_trade_pin(path: str) -> bool:
+    """Whether this non-GET path requires the second secret.
+
+    Note this only ever applies to non-GET. A money-moving GET would bypass
+    the PIN entirely — there are none today, and adding one would be a
+    mistake this function cannot catch.
+    """
+    if path in SAFE_WRITES:
+        return False
+    if path in MONEY_MOVING or path.startswith(MONEY_MOVING_PREFIXES):
+        return True
+    log.warning(
+        "Unclassified non-GET route %s — requiring the trade PIN. Add it to "
+        "MONEY_MOVING or SAFE_WRITES in raanu/api/auth.py", path,
+    )
+    return True
 
 
 # Registered by create_app() rather than decorated onto a module-level app,
@@ -325,25 +390,26 @@ async def api_auth_gate(request: Request, call_next):
         _record_fail(ip, _presented_token(request))
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    # Anything that is not a read needs the second secret. Deny-by-method rather
-    # than by a path list: a new POST route is then protected the day it is
-    # written, instead of the day someone remembers to add it here.
+    # The second secret, on the routes that can actually cost money — see
+    # needs_trade_pin() for the classification and why it is not simply
+    # "every non-GET" any more.
     #
-    # This is also what makes the session cookie safe against CSRF for
-    # everything that matters: a cross-site request cannot set X-Trade-Token,
-    # so no amount of ambient cookie authority moves money. SameSite=Strict
-    # covers the reads on top of that.
-    if method not in ("GET", "HEAD") and path not in _READ_TOKEN_POSTS:
+    # This is also what makes the session cookie safe against CSRF where it
+    # matters: a cross-site request cannot set X-Trade-Token, so no amount of
+    # ambient cookie authority moves money. SameSite=Strict covers the rest.
+    if method not in ("GET", "HEAD") and needs_trade_pin(path):
         expected = os.getenv("TRADE_PIN", "").strip()
         presented = (request.headers.get("x-trade-token") or "").strip()
         if not expected or not secrets.compare_digest(presented, expected):
             # Counted too: the trade PIN is the shorter of the two secrets and
             # the one worth guessing, so it needs the throttle more, not less.
             _record_fail(ip, presented)
-            return JSONResponse(
-                {"error": "forbidden", "detail": "this action needs the trade PIN"},
-                status_code=403,
-            )
+            detail = ("this action needs the trade PIN"
+                      if expected else
+                      "TRADE_PIN is not configured on the server, so no value "
+                      "can be accepted — seed it with ./aws/seed-secrets.sh")
+            return JSONResponse({"error": "forbidden", "detail": detail},
+                                status_code=403)
 
     # A good secret clears the slate, so a few fat-fingered attempts before a
     # correct one never accumulate into a lockout.

@@ -888,15 +888,44 @@ const j = async p => {
   }catch(e){ logLine('fetch failed '+p,'err'); return null; }
 };
 
-/* Actions carry the trade token as well; the server rejects them with 403 if it
-   is missing or wrong. Prompted per action, deliberately not remembered. */
+/* ── the two kinds of write ──────────────────────────────
+   post()   — changes nothing about money. The session cookie is enough.
+   action() — moves money, or changes what the bot does with money. Prompts
+              for the trade PIN, every time, and never remembers it.
+
+   The split mirrors SAFE_WRITES / MONEY_MOVING in raanu/api/auth.py. The
+   SERVER is the authority: calling post() on a money-moving route just earns
+   a 403, it does not get you past anything. Keeping the lists in step is
+   about not prompting for a PIN nobody needs — which is exactly what running
+   a scan used to do, because the gate asked by HTTP method rather than by
+   what the route could actually do. */
+async function post(path, opts){
+  const r = await fetch(API+path, withCreds({method:'POST', ...opts, headers:{
+    'Content-Type':'application/json', ...((opts||{}).headers||{})}}));
+  if(r.status === 401){ sessionLost(); return {denied:true}; }
+  if(r.status === 403){
+    // Only reachable if this list has drifted from the server's.
+    const d = await r.clone().json().catch(()=>({}));
+    logLine('Refused: '+(d.detail||'needs the trade PIN'),'err');
+    return {denied:true};
+  }
+  return r;
+}
+
 async function action(path, opts){
   const pin = prompt('Trade PIN — required to place or change orders');
   if(!pin) return {cancelled:true};
   const r = await fetch(API+path, withCreds({...opts, headers:{
     'Content-Type':'application/json', 'X-Trade-Token': pin.trim(),
     ...((opts||{}).headers||{})}}));
-  if(r.status === 403){ logLine('Trade PIN rejected','err'); alert('Trade PIN rejected.'); return {denied:true}; }
+  if(r.status === 403){
+    // Distinguish "wrong PIN" from "the server has no PIN configured, so
+    // nothing you type can work" — the second is not a typo you can fix.
+    const d = await r.clone().json().catch(()=>({}));
+    const msg = d.detail || 'Trade PIN rejected.';
+    logLine(msg,'err'); alert(msg);
+    return {denied:true};
+  }
   if(r.status === 401){ sessionLost(); return {denied:true}; }
   return r;
 }
@@ -1666,7 +1695,9 @@ el('scanBtn').onclick = async () => {
     body.innerHTML=`<tr><td class="empty down" colspan="9">Scan failed — ${detail}</td></tr>`;
   };
 
-  const started = await action(`/api/scan/job?universe=${encodeURIComponent(universe)}`, {method:'POST'});
+  // post(), not action(): a scan reads prices and scores them. It moves no
+  // money, so it must not demand the credential that can.
+  const started = await post(`/api/scan/job?universe=${encodeURIComponent(universe)}`);
   if(!started || started.cancelled || started.denied){ finish('Cancelled'); return; }
   const startedBody = await started.json().catch(()=>({}));
   if(!started.ok){ fail('Failed', startedBody.error || started.status); return; }

@@ -388,13 +388,18 @@ class TestRemovedEndpoints:
     def test_android_only_routes_are_gone(self, secured, path):
         assert path not in secured.app.openapi()["paths"]
 
-    def test_the_auth_exempt_list_has_no_stale_paths(self, secured):
-        """_READ_TOKEN_POSTS and _PUBLIC_API_PATHS name paths as literals, so
-        deleting a route leaves a dangling exemption behind — harmless today,
-        and a silent hole the day something else claims that path."""
+    def test_the_auth_path_lists_have_no_stale_entries(self, secured):
+        """SAFE_WRITES, MONEY_MOVING and _PUBLIC_API_PATHS name paths as
+        literals, so deleting a route leaves a dangling entry behind —
+        harmless today, and a silent hole the day something else claims that
+        path. SAFE_WRITES is the dangerous one: a stale entry there means a
+        future route at that path skips the trade PIN."""
         mounted = set(secured.app.openapi()["paths"])
-        assert auth._READ_TOKEN_POSTS <= mounted
-        assert auth._PUBLIC_API_PATHS <= mounted
+        for name, paths in (("SAFE_WRITES", auth.SAFE_WRITES),
+                            ("MONEY_MOVING", auth.MONEY_MOVING),
+                            ("_PUBLIC_API_PATHS", auth._PUBLIC_API_PATHS)):
+            stale = paths - mounted
+            assert not stale, f"{name} names routes that no longer exist: {sorted(stale)}"
 
     def test_web_push_survived(self, secured):
         """The PWA is the phone story now, so web push is load-bearing rather
@@ -457,3 +462,112 @@ class TestLocalDotenv:
 
         app_mod.create_app()
         assert config.alpaca_key() == ""
+
+
+class TestPinClassification:
+    """The trade PIN guards money, not HTTP verbs.
+
+    It used to be "every non-GET needs the PIN", which meant running a SCAN
+    required the credential that can place trades — defeating the point of
+    having two secrets. Routes are classified by capability now, and these
+    tests exist so the classification cannot silently rot."""
+
+    def _non_get(self, client):
+        spec = client.app.openapi()["paths"]
+        return {(m.upper(), p) for p, ops in spec.items()
+                for m in ops if m.upper() not in ("GET", "HEAD")}
+
+    def test_every_non_get_route_is_classified(self, secured):
+        """The one that matters. A new route added without a decision shows
+        up here rather than in production."""
+        unclassified = []
+        for _method, path in self._non_get(secured):
+            if path in auth._PUBLIC_API_PATHS or not path.startswith("/api/"):
+                continue
+            if (path in auth.SAFE_WRITES or path in auth.MONEY_MOVING
+                    or path.startswith(auth.MONEY_MOVING_PREFIXES)):
+                continue
+            unclassified.append(path)
+        assert not unclassified, (
+            "add to MONEY_MOVING or SAFE_WRITES in raanu/api/auth.py: "
+            + ", ".join(sorted(unclassified)))
+
+    def test_the_two_sets_do_not_overlap(self):
+        assert not (auth.SAFE_WRITES & auth.MONEY_MOVING)
+        for path in auth.SAFE_WRITES:
+            assert not path.startswith(auth.MONEY_MOVING_PREFIXES), path
+
+    def test_safe_writes_are_literal_paths(self):
+        """The middleware sees a concrete URL, so a templated entry here would
+        never match and the route would demand a PIN forever — safe, but
+        baffling to debug."""
+        for path in auth.SAFE_WRITES:
+            assert "{" not in path, path
+
+    def test_an_unclassified_route_defaults_to_requiring_the_pin(self):
+        """Fail closed. This is the property the old deny-by-method rule had,
+        and the one thing the refactor must not lose."""
+        assert auth.needs_trade_pin("/api/something/invented") is True
+
+    @pytest.mark.parametrize("path", [
+        "/api/orders/buy", "/api/orders/sell", "/api/orders/abc123",
+        "/api/auto/start", "/api/auto/stop", "/api/auto/scan-now",
+        "/api/exit-config",
+    ])
+    def test_money_moving_routes_need_the_pin(self, path):
+        assert auth.needs_trade_pin(path) is True
+
+    @pytest.mark.parametrize("path", [
+        "/api/scan/job", "/api/scan/alert-now", "/api/auto/scan-now/s2",
+        "/api/picks/backfill", "/api/push/subscribe", "/api/telegram/test",
+    ])
+    def test_research_and_notification_routes_do_not(self, path):
+        assert auth.needs_trade_pin(path) is False
+
+    def test_scan_now_and_its_s2_sibling_differ(self):
+        """One character apart, opposite risk: /api/auto/scan-now calls
+        run_one_cycle() and places orders; /s2 only scans and caches."""
+        assert auth.needs_trade_pin("/api/auto/scan-now") is True
+        assert auth.needs_trade_pin("/api/auto/scan-now/s2") is False
+
+    def test_scanning_works_with_only_the_passphrase(self, secured):
+        """End to end: the actual complaint that started this."""
+        unlock(secured)
+        assert secured.post("/api/scan/job").status_code != 403
+
+    def test_placing_an_order_still_does_not(self, secured):
+        unlock(secured)
+        assert secured.post("/api/orders/buy", json={}).status_code == 403
+
+    def test_a_missing_server_pin_says_so_instead_of_just_refusing(self, secured, monkeypatch):
+        """Without this the UI prompts for a PIN, you type one, and it is
+        rejected — with no way to tell that NO value could have worked."""
+        monkeypatch.delenv("TRADE_PIN")
+        unlock(secured)
+        body = secured.post("/api/auto/start").json()
+        assert "not configured" in body["detail"]
+
+
+class TestClientMatchesServer:
+    """The dashboard decides whether to prompt; the server decides whether to
+    allow. If they disagree the server wins and you get a 403 — so the lists
+    must not drift."""
+
+    def _calls(self, fn_name):
+        html = DASHBOARD.read_text()
+        out = set()
+        for m in re.finditer(rf"\b{fn_name}\(\s*[`'\"]([^`'\"]+)", html):
+            out.add(m.group(1).split("?")[0].split("${")[0])
+        return out
+
+    def test_every_action_call_targets_a_money_moving_route(self):
+        for path in self._calls("action"):
+            assert auth.needs_trade_pin(path), f"{path} prompts for a PIN it does not need"
+
+    def test_every_post_call_targets_a_safe_route(self):
+        for path in self._calls("post"):
+            assert not auth.needs_trade_pin(path), f"{path} will 403 — use action()"
+
+    def test_the_scan_button_does_not_prompt(self):
+        assert "/api/scan/job" in self._calls("post")
+        assert "/api/scan/job" not in self._calls("action")

@@ -809,8 +809,31 @@ the token it carries must not be able to move money.
 | `API_READ_TOKEN` | `Authorization: Bearer …` | every `/api/**` request |
 | `TRADE_PIN` | `X-Trade-Token: …` | **additionally** every non-GET `/api/**` |
 
-- Non-GET is denied **by method, not by a path list** — a new POST route is
-  protected the day it is written, not the day someone remembers to add it.
+- **The PIN guards money, not HTTP verbs.** It used to be "every non-GET
+  needs the PIN", chosen so a new POST route was protected the day it was
+  written. But it also meant **running a scan demanded the credential that
+  can place trades** — which defeats the point of having two secrets, namely
+  that you can look without being able to spend.
+
+  Routes are classified by capability in `raanu/api/auth.py`:
+
+  | | Needs the PIN | Passphrase is enough |
+  |---|---|---|
+  | | `MONEY_MOVING` + `/api/orders/*` | `SAFE_WRITES` |
+  | | buy, sell, cancel, auto start/stop, `exit-config` | scan, alerts, picks backfill, push, Telegram tests |
+
+  **The default is still deny.** `needs_trade_pin()` returns True for
+  anything in neither set and logs it as unclassified, so a new route fails
+  safe (an unexpected PIN prompt), never open. A test asserts the two sets
+  together cover every mounted non-GET route, so drift is a test failure.
+
+  ⚠️ **`/api/auto/scan-now` is money-moving despite the name** — it calls
+  `run_one_cycle()`, which places orders. `/api/auto/scan-now/s2` does not.
+  One character apart, opposite risk; read the handler before reclassifying
+  either.
+
+  ⚠️ Only non-GET is ever PIN-checked. A money-moving GET would bypass this
+  entirely. There are none; don't add one.
 - `GET /` (the HTML shell) stays public; it holds no data.
 - ⚠️ **`/webhook/whatsapp` is outside `/api/`, so the gate never sees it** — and
   its `BUY`/`SELL` commands place real orders. It **failed open** until
@@ -901,7 +924,10 @@ the moment someone does.
   Moving where the secret lives does nothing if the old plaintext copy stays
   behind in every browser.
 
-`action()` still prompts for the trade PIN per action and never stores it.
+The dashboard mirrors the split: `post()` for safe writes (no prompt),
+`action()` for money-moving ones (prompts every time, never stores). The
+server is the authority — calling `post()` on a money-moving route just earns
+a 403 — and a test checks the two lists agree.
 
 ⚠️ **The phone app still stores the passphrase** in `AsyncStorage['raanu.pass']`
 (app-private, so it needs a rooted device, and the server's deny-by-method rule

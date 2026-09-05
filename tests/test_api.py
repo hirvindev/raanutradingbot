@@ -101,12 +101,26 @@ class TestGateEnabled:
                          headers={**bearer(), "X-Trade-Token": "0000"})
         assert r.status_code == 403
 
-    @pytest.mark.parametrize("path", ["/api/orders/buy", "/api/scan/job",
-                                      "/api/auto/stop", "/api/exit-config"])
-    def test_every_write_route_is_gated_by_method_not_a_path_list(self, secured, path):
-        # Deny-by-method is the point: a new POST route is protected the day
-        # it is written, not the day someone remembers to add it to a list.
+    @pytest.mark.parametrize("path", ["/api/orders/buy", "/api/orders/sell",
+                                      "/api/auto/start", "/api/auto/stop",
+                                      "/api/auto/scan-now", "/api/exit-config"])
+    def test_money_moving_routes_need_the_trade_pin(self, secured, path):
         assert secured.post(path, headers=bearer(), json={}).status_code == 403
+
+    @pytest.mark.parametrize("path", ["/api/scan/job", "/api/auto/scan-now/s2",
+                                      "/api/picks/backfill"])
+    def test_research_routes_do_not(self, secured, path):
+        # This used to be the opposite. Gating by HTTP method meant running a
+        # SCAN demanded the credential that can place trades, which defeats
+        # the point of having a second secret at all.
+        assert secured.post(path, headers=bearer(), json={}).status_code != 403
+
+    def test_an_unclassified_write_route_still_fails_closed(self, secured):
+        # The property deny-by-method gave us, kept: a route nobody
+        # classified requires the PIN rather than skipping it. Full coverage
+        # of the real route table is in test_auth_session.py.
+        from raanu.api import auth
+        assert auth.needs_trade_pin("/api/newly/invented") is True
 
     def test_the_html_shell_stays_public(self, secured):
         # It holds no data, and gating it would show a login prompt instead
