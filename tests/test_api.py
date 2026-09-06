@@ -360,3 +360,63 @@ class TestNoRouteReturns500:
         covered = list(self._gettable(client.app))
         assert len(covered) >= 20
         assert "/api/notifications" in covered
+
+
+class TestOrderRoutes:
+    """POST /api/orders/buy and /sell returned 500 on EVERY request: the
+    handlers read order.notional / order.quantity / order.strategy, and
+    OrderRequest declares usd / qty / (nothing). Pydantic raises
+    AttributeError for a field that does not exist.
+
+    It survived because the only route sweep in this file walks GETs, so no
+    test ever POSTed to them. These do."""
+
+    @pytest.mark.parametrize("payload", [
+        {"ticker": "AAPL", "usd": 500},        # documented spelling
+        {"ticker": "AAPL", "notional": 500},   # Alpaca's spelling
+        {"ticker": "AAPL", "qty": 3},
+        {"ticker": "AAPL", "quantity": 3},     # what the dashboard posts
+    ])
+    @pytest.mark.parametrize("path", ["/api/orders/buy", "/api/orders/sell"])
+    def test_orders_do_not_500(self, secured, path, payload):
+        r = secured.post(path, headers={**bearer(), "X-Trade-Token": PIN}, json=payload)
+        # 400 is right here — no ALPACA_API_KEY in the test env. 500 means the
+        # handler raised before it ever got near the broker.
+        assert r.status_code != 500, r.text
+        assert r.status_code == 400
+
+    @pytest.mark.parametrize("path", ["/api/orders/buy", "/api/orders/sell"])
+    def test_neither_size_given_is_a_clean_400(self, secured, path):
+        # Used to fall through and post the literal string "None" as qty.
+        r = secured.post(path, headers={**bearer(), "X-Trade-Token": PIN},
+                         json={"ticker": "AAPL"})
+        assert r.status_code == 400
+        assert "usd" in r.json()["detail"]
+
+    def test_a_short_position_sells_a_positive_quantity(self):
+        # Alpaca carries direction in `side`; a negative qty is rejected.
+        from raanu.api.routes.orders import OrderRequest, _order_body
+        assert _order_body(OrderRequest(ticker="AAPL", quantity=-3), "sell")["qty"] == "3.0"
+
+    def test_the_model_declares_every_field_the_handlers_read(self):
+        """The actual defect, pinned directly: a handler referencing a field
+        the model lacks is an AttributeError at request time, not import
+        time, so nothing catches it until someone POSTs.
+
+        Parsed with ast rather than grepped — a regex over the source also
+        matches `order.notional` where this module's own docstrings discuss
+        the bug, which is how the first version of this test failed."""
+        import ast
+        import inspect
+
+        from raanu.api.routes import orders
+
+        tree = ast.parse(inspect.getsource(orders))
+        used = {
+            node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name) and node.value.id == "order"
+        }
+        declared = set(orders.OrderRequest.model_fields)
+        assert used, "found no order.* references — the check has stopped working"
+        assert used <= declared, f"handlers read undeclared fields: {used - declared}"
