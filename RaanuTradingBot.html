@@ -687,6 +687,14 @@ details .inner{padding:0 18px 16px}
       <select id="scanUniverse" class="sel" title="What to scan">
         <option value="curated">Curated list</option>
       </select>
+      <!-- Filters the rows already on screen; never re-runs the scan. -->
+      <select id="scanFilter" class="sel" title="Filter the results by strategy">
+        <option value="all">All strategies</option>
+        <option value="s1">S1 Pullback</option>
+        <option value="s2">S2 Breakout</option>
+        <option value="s3">S3 Leader Dip</option>
+        <option value="multi">Multiple</option>
+      </select>
       <span class="chip mut" id="scanStat">Idle</span>
     </div>
     <div class="mut" id="scanScope" style="font-size:12px;margin:-6px 0 10px"></div>
@@ -1638,6 +1646,97 @@ function renderScanRows(res){
     : '<tr><td class="empty" colspan="9">Nothing in a confirmed uptrend right now</td></tr>';
 }
 
+/* ── "Multiple": one row per ticker that qualified under >1 strategy ──────
+   The scan returns one row per (ticker, strategy) — NVDA passing S1 and S2
+   is two rows, because they are two setups. That stays exactly as it was for
+   All/S1/S2/S3. This view is the only place rows get folded together.
+
+   Measured on the real universe before building this: of the shared columns,
+   price / RSI / 3M / vs SPY / EMA20 are IDENTICAL across strategies for the
+   same ticker (same bars, same maths), so folding loses nothing. 1M and ATR
+   are simply absent from S2's result rather than different, so taking the
+   first non-null actually fills gaps an S2-only row shows as "—".
+
+   `reasons` is the one genuinely per-strategy field, so the cell shows the
+   top-scoring strategy's reason and the tooltip carries all of them.
+
+   Expect this to be sparse — often one or two names, sometimes none. S1∩S3
+   in particular is empty by construction: S1 buys a shallow dip to the rising
+   20-EMA (median %B 0.64) and S3 buys a deep dip to the lower Bollinger band
+   (%B <= 0.20). The depth of the dip is exactly what separates them. */
+function multiGroups(res){
+  const by = new Map();
+  for(const r of res||[]){
+    if(!r || !r.ticker) continue;
+    if(!by.has(r.ticker)) by.set(r.ticker, []);
+    by.get(r.ticker).push(r);
+  }
+  const groups = [];
+  for(const rows of by.values()){
+    if(rows.length < 2) continue;
+    // Strategy order, so "S1 / S2" reads the same way every time.
+    rows.sort((a,b)=> SORDER.indexOf(a.strategy) - SORDER.indexOf(b.strategy));
+    groups.push(rows);
+  }
+  // Ordered by the BEST of the two scores, not the average: an average lets a
+  // strong S1 mask a marginal S2. Either way it is a display order and not a
+  // conviction ranking — --sweep-rank found this project's score does not
+  // rank, with alpha falling as the bar rose from 60 to 80.
+  const best = g => Math.max(...g.map(r => r.score || 0));
+  groups.sort((a,b)=> best(b) - best(a));
+  return groups;
+}
+
+const firstOf = (rows, f) => { for(const r of rows){ if(r[f] != null) return r[f]; } return null; };
+// Reasons are server-generated, but they land in a title attribute, so quotes
+// have to go somewhere harmless rather than end the attribute early.
+const attr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+
+function renderMultiRows(groups){
+  if(!groups.length){
+    return '<tr><td class="empty" colspan="9">No ticker qualified under more than '
+         + 'one strategy in this scan — normal, and not an error</td></tr>';
+  }
+  return groups.map(rows=>{
+    const top = rows.reduce((a,b)=> (b.score||0) > (a.score||0) ? b : a);
+    const g   = f => firstOf(rows, f);
+    const why = rows.map(r=>`${(r.strategy||'').toUpperCase()}: ${(r.reasons||[])[0]||''}`);
+    const price = g('price'), rsi = g('rsi'), m1 = g('mom_1m'),
+          m3 = g('mom_3m'), rel = g('rel_strength');
+    return `<tr>
+      <td data-label="Instrument"><span class="sym">${top.ticker}</span>${top.name&&top.name!==top.ticker?`<div class="sub">${top.name}</div>`:''}</td>
+      <td data-label="Strategy">${rows.map(r=>stag(r.strategy)).join(' ')}</td>
+      <td data-label="Score" class="pri num" title="${attr(rows.map(r=>`${(r.strategy||'').toUpperCase()} ${r.score}`).join(' · '))}">${rows.map(r=>r.score).join(' / ')}</td>
+      <td data-label="Price" class="num">${money(price||0)}</td>
+      <td data-label="RSI" class="num">${rsi!=null?Number(rsi).toFixed(0):'—'}</td>
+      <td data-label="1M" class="num ${cls(m1||0)}">${m1!=null?pct(m1):'—'}</td>
+      <td data-label="3M" class="num ${cls(m3||0)}">${m3!=null?pct(m3):'—'}</td>
+      <td data-label="vs SPY" class="num ${cls(rel||0)}">${rel!=null?pct(rel):'—'}</td>
+      <td data-label="Signal" class="reason mut" title="${attr(why.join('\n'))}" style="text-align:left;white-space:normal;max-width:280px">${why[rows.indexOf(top)]||''}</td></tr>`;
+  }).join('');
+}
+
+/* Paints whatever the filter currently selects, from the last results we
+   were given. Kept separate from the poll so changing the filter after a
+   scan finishes repaints without re-scanning. */
+let scanResults = [];
+let scanPaintKey = null;
+
+function paintSignals(force){
+  const filter = (el('scanFilter') || {}).value || 'all';
+  // The dedupe key includes the FILTER, not just the row count — otherwise
+  // switching S1 -> S2 leaves the old rows on screen, since the underlying
+  // result count has not moved.
+  const key = `${filter}:${scanResults.length}`;
+  if(!force && key === scanPaintKey) return;
+  scanPaintKey = key;
+  el('sig').innerHTML = filter === 'multi'
+    ? renderMultiRows(multiGroups(scanResults))
+    : renderScanRows(filter === 'all'
+        ? scanResults
+        : scanResults.filter(r => (r.strategy||'').toLowerCase() === filter));
+}
+
 // Scans run as a job on the worker (POST /api/scan/job) and are polled
 // (GET /api/scan/job): a cold scan is ~87s, far longer than Lambda behind
 // CloudFront can hold a request open. With the daily bars cache warm it is
@@ -1680,14 +1779,19 @@ function describeUniverse(){
     ` Cold scan takes a while — roughly ${Math.max(1, Math.round(u.total/20/60))} min if today's cache is empty.`;
 }
 el('scanUniverse').onchange = describeUniverse;
+// Repaints from the results already in hand — never re-runs the scan.
+el('scanFilter').onchange = () => paintSignals();
 
 el('scanBtn').onclick = async () => {
   const btn=el('scanBtn'), body=el('sig'), prog=el('prog'), bar=prog.querySelector('i');
   const universe = el('scanUniverse').value || 'curated';
   btn.disabled=true; btn.textContent='Scanning…'; prog.style.display='block'; bar.style.width='0';
   el('scanStat').textContent='Starting'; body.innerHTML='<tr><td class="empty" colspan="9">Screening…</td></tr>';
+  // Clear the previous run's rows, and the paint key with them, or the first
+  // poll of the new scan can match the old key and skip its render.
+  scanResults = []; scanPaintKey = null;
 
-  let poll, shown = -1;
+  let poll;
   const finish = msg => { clearInterval(poll); btn.disabled=false; btn.textContent='Scan market';
                           prog.style.display='none'; el('scanStat').textContent=msg; };
   const fail = (label, detail) => {
@@ -1740,8 +1844,11 @@ el('scanBtn').onclick = async () => {
 
     // Re-render only when the count actually changed. Replacing innerHTML on
     // every 1.5s poll resets scroll position and any hover mid-scan.
+    // paintSignals() owns that check now, keyed on count AND filter so a
+    // filter switch repaints even though the count has not moved.
     const res = d.results || [];
-    if(res.length !== shown){ body.innerHTML = renderScanRows(res); shown = res.length; }
+    scanResults = res;
+    paintSignals();
 
     if(d.status !== 'done'){
       const shards = d.shards > 1 ? ` · ${d.shards_done||0}/${d.shards} shards` : '';
@@ -1751,7 +1858,7 @@ el('scanBtn').onclick = async () => {
       return;
     }
 
-    if(!res.length) body.innerHTML = renderScanRows(res);
+    if(!res.length) paintSignals(true);
     const partial = d.failed_shards ? ` (${d.failed_shards} shard(s) failed)` : '';
     // total_hits exceeds what is shown once a shard caps its list, so say
     // "top N of M" rather than presenting a truncated list as the whole answer.
