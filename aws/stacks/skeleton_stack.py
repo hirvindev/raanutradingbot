@@ -278,7 +278,7 @@ class SkeletonStack(Stack):
         # Replaces rate(5 minutes) around the clock: ~288 invocations/day
         # became ~102, and the ~65% that were removed were pure no-ops (the
         # exit engine self-gates on market-open).
-        events.Rule(
+        worker_schedule_rule = events.Rule(
             self,
             "WorkerSchedule",
             schedule=events.Schedule.cron(
@@ -286,6 +286,17 @@ class SkeletonStack(Stack):
             targets=[events_targets.LambdaFunction(worker_fn)],
             enabled=False,
         )
+
+        # Lets the dashboard's SCHEDULE ON/OFF pill flip this rule directly
+        # instead of requiring the AWS console — where a click could silently
+        # fail to register with nothing in the app to say so. Scoped to this
+        # one rule's ARN, not "*": the API Lambda has no business touching any
+        # other EventBridge rule in the account.
+        api_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["events:EnableRule", "events:DisableRule", "events:DescribeRule"],
+            resources=[worker_schedule_rule.rule_arn],
+        ))
+        api_fn.add_environment("WORKER_SCHEDULE_RULE_NAME", worker_schedule_rule.rule_name)
 
         s3deploy.BucketDeployment(
             self,

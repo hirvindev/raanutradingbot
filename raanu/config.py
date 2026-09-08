@@ -117,6 +117,14 @@ def worker_function_name() -> str:
     return env_str("WORKER_FUNCTION_NAME")
 
 
+def worker_schedule_rule_name() -> str:
+    """The EventBridge rule that fires the worker's ET time slots.
+
+    Set only on AWS. Empty locally, where there is no schedule to toggle —
+    the dev-server loops in raanu/api/app.py run instead."""
+    return env_str("WORKER_SCHEDULE_RULE_NAME")
+
+
 def data_dir_override() -> str:
     return env_str("DATA_DIR")
 

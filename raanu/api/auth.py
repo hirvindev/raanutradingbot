@@ -315,6 +315,10 @@ MONEY_MOVING = {
                               # not. Read the handler before reclassifying.
     "/api/exit-config",       # sets the stop and trail, i.e. decides when
                               # every open position gets sold
+    "/api/schedule/enable",   # arms the EventBridge rule — combined with
+                              # AUTO ON, this is what actually lets the bot
+                              # trade unattended
+    "/api/schedule/disable",
 }
 
 # The whole /api/orders/ family: buy, sell, and DELETE /api/orders/{id} to

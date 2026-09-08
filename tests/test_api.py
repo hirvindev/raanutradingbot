@@ -540,3 +540,58 @@ class TestAutoTraderSwitch:
         from raanu.trading import schedule
         src = inspect.getsource(schedule._execute_scheduled_trades)
         assert src.index("get_trader().enabled") < src.index("await market_is_open()")
+
+
+class TestScheduleRoutes:
+    """AUTO ON alone governs nothing — it's the EventBridge rule this drives
+    that decides whether a scheduled slot ever runs at all. See
+    raanu/trading/schedule_rule.py and tests/test_schedule_rule.py for the
+    EventBridge behaviour itself; these test the route wiring on top of it."""
+
+    def test_status_is_a_GET_and_needs_no_pin(self, secured):
+        r = secured.get("/api/schedule/status", headers=bearer())
+        assert r.status_code == 200
+        assert r.json() == {"configured": False, "enabled": False}
+
+    def test_enable_without_a_configured_rule_is_501_not_a_crash(self, secured):
+        r = secured.post("/api/schedule/enable", headers={**bearer(), "X-Trade-Token": PIN})
+        assert r.status_code == 501
+
+    def test_disable_without_a_configured_rule_is_501_not_a_crash(self, secured):
+        r = secured.post("/api/schedule/disable", headers={**bearer(), "X-Trade-Token": PIN})
+        assert r.status_code == 501
+
+    def test_enable_requires_the_trade_pin(self, secured):
+        # No X-Trade-Token at all — must be refused before ever reaching
+        # schedule_rule, regardless of whether a rule is configured.
+        r = secured.post("/api/schedule/enable", headers=bearer())
+        assert r.status_code == 403
+
+    def test_disable_requires_the_trade_pin(self, secured):
+        r = secured.post("/api/schedule/disable", headers=bearer())
+        assert r.status_code == 403
+
+    def test_enable_and_disable_reach_the_real_rule(self, secured, monkeypatch):
+        boto3 = pytest.importorskip("boto3")
+        moto = pytest.importorskip("moto")
+
+        with moto.mock_aws():
+            monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+            monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+            monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+            monkeypatch.setenv("WORKER_SCHEDULE_RULE_NAME", "test-rule")
+            client = boto3.client("events", region_name="eu-central-1")
+            client.put_rule(Name="test-rule", ScheduleExpression="rate(5 minutes)", State="DISABLED")
+
+            r = secured.get("/api/schedule/status", headers=bearer())
+            assert r.json() == {"configured": True, "enabled": False}
+
+            r = secured.post("/api/schedule/enable", headers={**bearer(), "X-Trade-Token": PIN})
+            assert r.status_code == 200
+            assert r.json()["enabled"] is True
+            assert client.describe_rule(Name="test-rule")["State"] == "ENABLED"
+
+            r = secured.post("/api/schedule/disable", headers={**bearer(), "X-Trade-Token": PIN})
+            assert r.status_code == 200
+            assert r.json()["enabled"] is False
+            assert client.describe_rule(Name="test-rule")["State"] == "DISABLED"

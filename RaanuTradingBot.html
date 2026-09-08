@@ -615,6 +615,7 @@ details .inner{padding:0 18px 16px}
     <button class="pill themebtn" id="themeBtn" title="Light / dark" aria-label="Toggle theme"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path id="themeIcon" d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
     <span class="pill" id="mode">—</span>
     <span class="pill" id="engine" style="cursor:pointer" title="Click to start or stop the auto-trader">—</span>
+    <span class="pill" id="schedule" style="cursor:pointer;display:none" title="Click to enable or disable the scheduled scan/trade times (03:30/09:35/11:00 ET)">—</span>
   </div>
 </header>
 
@@ -1042,18 +1043,29 @@ function renderAlerts(){
 
 /* ── data ──────────────────────────────────────────────── */
 async function load(){
-  const [acct, pos, health, cmp, orders, auto, exit, alerts] = await pool([
+  const [acct, pos, health, cmp, orders, auto, exit, alerts, sched] = await pool([
     () => j('/api/account/cash'), () => j('/api/portfolio'), () => j('/api/health'),
     () => j('/api/strategy/compare'), () => j('/api/history/orders?limit=500'),
-    () => j('/api/auto/status'), () => j('/api/exit-config'), () => j('/api/notifications')
+    () => j('/api/auto/status'), () => j('/api/exit-config'), () => j('/api/notifications'),
+    () => j('/api/schedule/status')
   ]);
   S.pos=pos||[]; S.cfg=(health&&health.config)||{}; S.cmp=cmp||{}; S.health=health||{};
   S.orders=Array.isArray(orders)?orders:[]; S.exit=exit||{}; S.auto=auto||{};
-  S.alerts=(alerts&&alerts.items)||[]; renderAlerts();
+  S.alerts=(alerts&&alerts.items)||[]; S.sched=sched||{}; renderAlerts();
 
   if(health) el('mode').innerHTML = `<span class="dot"></span>${(health.mode||'').toUpperCase()}`;
   if(auto) el('engine').innerHTML =
     `<span class="dot ${auto.enabled?'':'off'}"></span>${auto.enabled?'AUTO ON':'AUTO OFF'}`;
+  // Not configured (local dev, or a stack predating this feature) — no
+  // EventBridge rule exists to toggle, so hide the control rather than show
+  // a switch that always 501s.
+  const schedEl = el('schedule');
+  if(sched && sched.configured){
+    schedEl.style.display = '';
+    schedEl.innerHTML = `<span class="dot ${sched.enabled?'':'off'}"></span>${sched.enabled?'SCHEDULE ON':'SCHEDULE OFF'}`;
+  } else {
+    schedEl.style.display = 'none';
+  }
 
   const openPl   = S.pos.reduce((a,p)=>a+(p.ppl||0),0);
   const invested = S.pos.reduce((a,p)=>a+(p.currentPrice||p.averagePrice)*p.quantity,0);
@@ -1993,6 +2005,26 @@ el('engine').onclick = async () => {
     if(r.ok) logLine(`Auto-trader ${on?'stopped':'started'}`, 'ok');
     else     logLine(`Failed: ${d.detail||r.status}`, 'err');
   }catch(err){ logLine('Engine toggle failed: '+err.message,'err'); }
+  load();
+};
+
+// Separate from AUTO ON: this flips the AWS EventBridge rule that fires the
+// scheduled scan/trade times at all. AUTO ON alone does nothing if this is
+// off — the schedule never invokes the worker for it to check.
+el('schedule').onclick = async () => {
+  const on = !!(S.sched && S.sched.enabled);
+  const verb = on ? 'DISABLE' : 'ENABLE';
+  if(!confirm(`${verb} the scheduled scan/trade times (03:30/09:35/11:00 ET)?\n\n`+
+      (on ? 'The bot will not scan or trade again until this is re-enabled — even if AUTO ON is set.'
+          : 'Combined with AUTO ON, the bot will place real orders at its next scheduled slot.'))) return;
+  logLine(`${verb} schedule requested`);
+  try{
+    const r = await action(on?'/api/schedule/disable':'/api/schedule/enable', {method:'POST'});
+    if(!r || r.cancelled || r.denied){ load(); return; }
+    const d = await r.json().catch(()=>({}));
+    if(r.ok) logLine(`Schedule ${on?'disabled':'enabled'}`, 'ok');
+    else     logLine(`Failed: ${d.error||d.detail||r.status}`, 'err');
+  }catch(err){ logLine('Schedule toggle failed: '+err.message,'err'); }
   load();
 };
 

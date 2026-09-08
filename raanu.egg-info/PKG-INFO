@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: raanu
+Version: 2.0.0
+Summary: RaanuTradingBot — algorithmic trading bot on AWS Lambda
+Requires-Python: >=3.12

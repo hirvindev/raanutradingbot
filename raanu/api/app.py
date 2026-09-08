@@ -36,6 +36,7 @@ from raanu.api.routes import (
     push,
     reports,
     scan,
+    schedule,
     static,
     stocks,
     strategy,
@@ -50,7 +51,7 @@ log = logging.getLogger("raanu.api")
 _ROUTERS = (
     auth.router, health.router, account.router, orders.router, auto.router, scan.router,
     push.router, picks.router, strategy.router, reports.router, notify.router,
-    exits.router, webhooks.router, stocks.router, static.router,
+    exits.router, webhooks.router, stocks.router, schedule.router, static.router,
 )
 
 
