@@ -166,12 +166,27 @@ class SkeletonStack(Stack):
             "LLM_ADVISOR_ENABLED": "1",
             "LLM_ADVISOR_SHADOW": "0",
             "LLM_WEB_SEARCH": "1",
-            # The two highest-risk powers stay OFF. Enable one at a time, each
-            # with its own observation window — exits last, because the ladder
-            # evidence says a confident wrong answer costs most there, and at
-            # ~2-3 trades/week a meaningful exit sample takes about a quarter.
-            #   LLM_BUDGET_ENABLED  — let it redistribute the cash shares
-            #   LLM_EXITS_ENABLED   — let it set per-trade stop/trail/ladder
+            # Full autonomy, enabled deliberately rather than by drift.
+            #
+            # BUDGET: the advisor sets the per-strategy split of the deployable
+            # cash. It divides a pot already net of the 30% reserve and cannot
+            # enlarge it, and any single strategy is capped at
+            # LLM_MAX_BUDGET_SHARE (60%) because alpha improved at 4 -> 8 -> 15
+            # positions. A malformed split falls back to CASH_SHARE_S*.
+            #
+            # EXITS: per-trade stop / trail / ladder instead of per-strategy
+            # defaults, bounded by the ExitPlan schema and then clamped by
+            # STOP_MIN/MAX_PCT and the trail floors.
+            #
+            # ⚠️ The thing to watch is the ladder on S3. Measured here, it
+            # helped S2 (+13.26% -> +15.55%) and HURT S3 (+33.89% -> +22.34%),
+            # lifting win rate 59->69% while payoff collapsed 0.93 -> 0.58 —
+            # booking winners before they matured. The prompt says so, but a
+            # prompt is not a guarantee: if exit.fired traces start showing S3
+            # positions closing on "ladder", that is the signal to set
+            # LLM_EXITS_ENABLED back to 0.
+            "LLM_BUDGET_ENABLED": "1",
+            "LLM_EXITS_ENABLED": "1",
         }
 
         # Both Lambdas share one built image (same Dockerfile, same repo-root
