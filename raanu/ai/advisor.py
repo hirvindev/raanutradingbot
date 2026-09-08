@@ -30,11 +30,26 @@ log = logging.getLogger("raanu.ai.advisor")
 # Domains the model may search for macro context. Search results are
 # third-party text that the model then acts on, so the surface is narrowed to
 # outlets that report events rather than sell opinions. It is establishing
-# what happened, not sourcing stock tips.
-SEARCH_DOMAINS = [
-    "reuters.com", "apnews.com", "bloomberg.com", "wsj.com",
-    "ft.com", "cnbc.com", "marketwatch.com", "federalreserve.gov",
+# what happened, not sourcing stock tips — which is why Benzinga, MarketBeat
+# and TradingView are deliberately absent despite being reachable.
+#
+# ⚠️ EVERY ENTRY IS VERIFIED REACHABLE BY ANTHROPIC'S CRAWLER (2026-09-08).
+# The API rejects the WHOLE REQUEST with a 400 if any listed domain blocks the
+# crawler, and because this advisor fails closed that 400 becomes a silent
+# no-trade day. The first version of this list contained reuters.com,
+# apnews.com, wsj.com, ft.com and marketwatch.com — all five are blocked, so
+# it would have stopped trading entirely on its first live slot.
+#
+# Do NOT add a domain here without testing it. Overridable via
+# LLM_SEARCH_DOMAINS so a crawler-access change can be fixed without a deploy.
+DEFAULT_SEARCH_DOMAINS = [
+    "bloomberg.com", "cnbc.com", "federalreserve.gov", "finance.yahoo.com",
+    "axios.com", "npr.org", "cnn.com", "fortune.com",
 ]
+
+
+def search_domains() -> list[str]:
+    return config.env_list("LLM_SEARCH_DOMAINS") or DEFAULT_SEARCH_DOMAINS
 
 
 def _payload(candidates: dict[str, list[dict]], context: dict, label: str) -> str:
@@ -71,7 +86,7 @@ def _tools() -> list[dict]:
         "type": "web_search_20260209",
         "name": "web_search",
         "max_uses": 3,
-        "allowed_domains": SEARCH_DOMAINS,
+        "allowed_domains": search_domains(),
     }]
 
 

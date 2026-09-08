@@ -147,6 +147,31 @@ class SkeletonStack(Stack):
             # Small batches so progress is reported during a scan rather than
             # only after each download returns.
             "SCAN_BATCH_SIZE": "20",
+
+            # ── LLM advisory gate ────────────────────────────────────────
+            # Set here rather than in the console: this dict IS the Lambda
+            # environment, so a console edit is silently reverted by the next
+            # deploy.
+            #
+            # ENABLED + SHADOW=0 means the advisor actually gates live orders:
+            # it can veto a candidate, reorder them, or trim a position, and
+            # trade_today=false stands the whole slot down. It can never add a
+            # ticker the quant did not surface.
+            #
+            # It fails CLOSED — an unreachable model places no orders rather
+            # than falling back to pure quant. That is the safe direction (a
+            # missed day, not a bad trade), but it does mean a bad key or a
+            # rejected request looks like a quiet market. Watch /api/trace for
+            # llm.failed.
+            "LLM_ADVISOR_ENABLED": "1",
+            "LLM_ADVISOR_SHADOW": "0",
+            "LLM_WEB_SEARCH": "1",
+            # The two highest-risk powers stay OFF. Enable one at a time, each
+            # with its own observation window — exits last, because the ladder
+            # evidence says a confident wrong answer costs most there, and at
+            # ~2-3 trades/week a meaningful exit sample takes about a quarter.
+            #   LLM_BUDGET_ENABLED  — let it redistribute the cash shares
+            #   LLM_EXITS_ENABLED   — let it set per-trade stop/trail/ladder
         }
 
         # Both Lambdas share one built image (same Dockerfile, same repo-root
