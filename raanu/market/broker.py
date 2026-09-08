@@ -171,24 +171,44 @@ def get_market_movers(top: int = 10) -> dict:
 
 # ---------- LATEST SNAPSHOT ----------
 
+def get_snapshots(tickers: list[str]) -> dict:
+    """Snapshots for many symbols in ONE request.
+
+    The endpoint has always been plural — `get_snapshot()` below asked for one
+    symbol and threw the rest of the response away. Reading the whole broad
+    market (indices plus all eleven sector ETFs) is therefore a single HTTP
+    call, not fourteen.
+
+    Returns `{SYMBOL: snapshot}`; missing symbols are simply absent rather
+    than raising, so a delisted or unsupported ticker degrades the caller's
+    picture instead of failing it.
+    """
+    symbols = [t.upper() for t in tickers if t]
+    if not symbols or not is_configured():
+        return {}
+
+    try:
+        resp = httpx.get(
+            f"{DATA_URL}/stocks/snapshots",
+            params={"symbols": ",".join(symbols), "feed": "iex"},
+            headers=_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        # Alpaca has returned both a bare {symbol: snapshot} map and a
+        # {"snapshots": {...}} envelope depending on the endpoint version.
+        # Accept either rather than silently reading an empty picture.
+        return payload.get("snapshots", payload) or {}
+
+    except Exception as e:
+        log.warning(f"Alpaca snapshots error for {len(symbols)} symbols: {e}")
+        return {}
+
+
 def get_snapshot(ticker: str) -> dict | None:
     """
     Returns latest trade, quote, and bar for a symbol.
     Useful for fast price lookups without pulling full bars.
     """
-    if not is_configured():
-        return None
-
-    try:
-        resp = httpx.get(
-            f"{DATA_URL}/stocks/snapshots",
-            params={"symbols": ticker.upper(), "feed": "iex"},
-            headers=_headers(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return resp.json().get(ticker.upper())
-
-    except Exception as e:
-        log.warning(f"Alpaca snapshot error for {ticker}: {e}")
-        return None
+    return get_snapshots([ticker]).get(ticker.upper())

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from raanu import config, state
+from raanu import config, state, trace
 from raanu.state import keys
 
 log = logging.getLogger("raanu.profit")
@@ -294,6 +294,28 @@ def reset_attribution() -> None:
     _attribution = None
 
 
+def effective_stop_pct(strategy: str, atr_pct: float, plan: dict | None = None) -> float:
+    """Stop distance as a percentage of entry, for one position.
+
+    **ONE definition, called by both the exit monitor and the entry sizer.**
+    That is the whole point of the function. `sizing.shares_for()` computes
+    qty = risk_budget / (entry - stop), so the stop used at entry *is* the
+    risk model; if the monitor later enforced a different one, the realised
+    loss at the stop would silently stop matching the intended share of
+    equity. A per-trade plan asking 5.0x ATR against a 2.5x default would
+    double real risk while every log line still reported the configured
+    risk_pct. Two call sites computing this separately is exactly how that
+    drift happens, so they cannot.
+
+    The floors clamp whatever multiple is chosen, plan or default: a stop
+    inside the instrument's own daily range exits on noise rather than on the
+    thesis failing, regardless of who picked the number.
+    """
+    cfg = config.exit_config()
+    mult = (plan or {}).get("stop_atr_mult") or stop_atr_mult_for(strategy)
+    return min(max(mult * atr_pct, cfg.stop_min_pct), cfg.stop_max_pct)
+
+
 def stop_atr_mult_for(strategy: str) -> float:
     """Per-strategy ATR multiple, falling back to the shared default."""
     return config.exit_config().stop_atr_mult_for(strategy)
@@ -417,14 +439,27 @@ async def run_monitor_once():
         pnl = (current - entry) * qty
 
         strategy = strategy_for(symbol)
-        state = peaks.get(symbol) or {}
+        # NOT named `state`: that shadowed the module-level `raanu.state`
+        # import for the whole of this function, so any state.get/put added
+        # inside the loop would have failed on a dict.
+        pstate = peaks.get(symbol) or {}
         # Capture ATR once, the first time we see the position, and freeze
         # it — the stop distance must not drift with changing volatility.
-        atr = state.get("atr")
+        atr = pstate.get("atr")
         if atr is None and cfg.stop_mode == "atr":
             atr = await _get_atr(symbol)
-        peak = max(float(state.get("peak") or entry), current)
-        peaks[symbol] = {"peak": peak, "atr": atr}
+        peak = max(float(pstate.get("peak") or entry), current)
+        # MERGE, never replace. This record is rewritten on every pass, so a
+        # wholesale `{"peak": ..., "atr": ...}` would silently drop the exit
+        # plan seeded at buy time on the very first tick — and every trade
+        # would quietly revert to strategy defaults with nothing in the logs.
+        peaks[symbol] = {**pstate, "peak": peak, "atr": atr}
+
+        # Per-trade exit plan, written at BUY time. Absent for positions
+        # opened before this existed, or whenever the advisor chose nothing —
+        # in which case every lookup below falls through to the strategy
+        # default and behaviour is exactly what it was.
+        plan = pstate.get("plan") or {}
 
         peak_pct = (peak - entry) / entry * 100
         drop_from_peak = (peak - current) / peak * 100 if peak > 0 else 0.0
@@ -432,8 +467,9 @@ async def run_monitor_once():
 
         # ── stop distance ────────────────────────────────────────────────
         if cfg.stop_mode == "atr" and atr_pct:
-            mult = stop_atr_mult_for(strategy)
-            stop_pct = min(max(mult * atr_pct, cfg.stop_min_pct), cfg.stop_max_pct)
+            mult = plan.get("stop_atr_mult") or stop_atr_mult_for(strategy)
+            # Same helper the entry sizer used — see effective_stop_pct().
+            stop_pct = effective_stop_pct(strategy, atr_pct, plan)
             stop_desc = f"{mult}xATR ({stop_pct:.1f}%)"
         else:
             stop_pct = cfg.stop_loss_pct
@@ -450,9 +486,12 @@ async def run_monitor_once():
                 # Floors matter as much here as on the stop: without them a
                 # 0.10%-ATR instrument arms at +0.20% and exits on a 0.15%
                 # give-back, closing on noise for a rounding-error gain.
-                arm_pct  = max(cfg.trail_activate_atr * atr_pct, cfg.trail_activate_min_pct)
-                give_pct = max(cfg.trail_atr_mult * atr_pct, cfg.trail_min_pct)
-                trail_desc = f"{cfg.trail_atr_mult}xATR ({give_pct:.1f}%)"
+                # They clamp a plan-chosen multiple for the same reason.
+                arm_mult  = plan.get("trail_activate_atr") or cfg.trail_activate_atr
+                give_mult = plan.get("trail_atr_mult") or cfg.trail_atr_mult
+                arm_pct  = max(arm_mult * atr_pct, cfg.trail_activate_min_pct)
+                give_pct = max(give_mult * atr_pct, cfg.trail_min_pct)
+                trail_desc = f"{give_mult}xATR ({give_pct:.1f}%)"
             else:
                 arm_pct   = cfg.trail_activate_pct
                 give_pct  = cfg.trail_pct
@@ -464,8 +503,19 @@ async def run_monitor_once():
                 )
 
             # Profit ladder — books progressively more the higher it ran.
+            # Per-trade override: "off" disables it, "standard" forces the
+            # shared default on. NOT universally good — it helped S2
+            # (+13.26%->+15.55%) and hurt S3 (+33.89%->+22.34%) by booking
+            # winners before they matured.
             if not reason:
-                floor = locked_floor(peak_pct, ladder_for(strategy))
+                ladder_choice = plan.get("ladder")
+                if ladder_choice == "off":
+                    ladder = []
+                elif ladder_choice == "standard":
+                    ladder = parse_ladder(cfg.profit_ladder)
+                else:
+                    ladder = ladder_for(strategy)
+                floor = locked_floor(peak_pct, ladder)
                 if floor is not None and pct <= floor:
                     reason = (
                         f"Profit ladder — banking +{pct:.2f}% "
@@ -483,6 +533,18 @@ async def run_monitor_once():
                         f"threshold -{cfg.daily_crash_pct}%)"
                     )
 
+        # Trace the plan the FIRST time it is applied, not on every pass.
+        # This loop runs ~78 times a day per position; tracing each evaluation
+        # would bury the signal and cost real storage. "What changed", never
+        # "what was checked".
+        if plan and not pstate.get("plan_traced"):
+            peaks[symbol]["plan_traced"] = True
+            trace.emit("exit.plan_applied", strategy=strategy, ticker=symbol,
+                       plan=plan, effective_stop_pct=round(stop_pct, 2),
+                       atr_pct=round(atr_pct, 2) if atr_pct else None,
+                       floor_bound=bool(atr_pct and plan.get("stop_atr_mult")
+                                        and stop_pct in (cfg.stop_min_pct, cfg.stop_max_pct)))
+
         if not reason:
             continue
 
@@ -492,6 +554,10 @@ async def run_monitor_once():
             peaks.pop(symbol, None)
             open_symbols.discard(symbol)
             _record_exit(symbol, entry, current, qty, pnl, pct, reason)
+            trace.emit("exit.fired", strategy=strategy, ticker=symbol,
+                       reason=reason, pct=round(pct, 2), pnl=round(pnl, 2),
+                       peak_pct=round(peak_pct, 2), stop_pct=round(stop_pct, 2),
+                       plan=plan or None)
             send_whatsapp(
                 format_profit_alert(symbol, entry, current, pnl, pct, reason)
             )

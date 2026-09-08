@@ -240,8 +240,16 @@ def _price_frames(universe: list[str], years: int) -> dict[str, pd.DataFrame]:
 
 
 def simulate(sig: dict, prices: dict[str, pd.DataFrame],
-             exits: ExitConfig, pf: PortfolioConfig) -> dict:
-    """Replay cached signals through a portfolio under one exit configuration."""
+             exits: ExitConfig, pf: PortfolioConfig,
+             blocked_fills: set[str] | None = None) -> dict:
+    """Replay cached signals through a portfolio under one exit configuration.
+
+    ``blocked_fills`` are dates on which a market-regime filter stands the bot
+    down: signals are still generated but no entry is taken. Exits are
+    deliberately NOT gated — standing down means not opening new risk, never
+    holding a losing position through a stop.
+    """
+    blocked_fills = blocked_fills or set()
     dates = [pd.Timestamp(d) for d in sig["dates"]]
     signals = sig["signals"]
 
@@ -369,6 +377,10 @@ def simulate(sig: dict, prices: dict[str, pd.DataFrame],
             if len(future) == 0 or len(prior) == 0:
                 continue
             nxt = future[0]
+            # Regime stand-down. Checked against the FILL date, since that is
+            # the session whose conditions the decision is about.
+            if blocked_fills and nxt.strftime("%Y-%m-%d") in blocked_fills:
+                continue
             fill = float(df.loc[nxt, "Open"])
             atr = float(df.loc[prior[-1], "ATR"])
             if not (fill > 0) or not (atr > 0) or math.isnan(atr):
@@ -451,6 +463,77 @@ def filter_signals(sig: dict, min_score: int, top_n: int) -> dict:
         keep = [h for h in hits if h.get("score", 0) >= min_score][:top_n]
         out["signals"][d] = keep
     return out
+
+
+REGIME_MODES = ("off", "gap", "trend50", "trend200", "prior_day", "vix")
+
+
+def blocked_fill_dates(mode: str, threshold: float, years: int) -> set[str]:
+    """Fill dates on which a market-regime filter would have stood the bot down.
+
+    Tests the hypothesis that a dip-buying strategy should sit out broad
+    selloffs: in a market-wide move correlations go to 1, so a pullback entry
+    stops being a bet on the stock and becomes a bet on the index.
+
+    **No lookahead.** Signals fill at the NEXT session's open, so at fill time
+    the overnight gap (that open vs the prior close) is already known — which
+    is exactly the pre-market read a human would act on. The trend, prior-day
+    and VIX modes use only bars that closed before the fill.
+
+    Modes:
+      gap        SPY gapped down more than `threshold`% overnight
+      trend50    SPY closed below its 50-day EMA the day before
+      trend200   SPY closed below its 200-day EMA the day before
+      prior_day  SPY fell more than `threshold`% the day before
+      vix        VIX closed more than `threshold`% above its own 20-day mean
+
+    Returns the set of blocked fill dates; an unavailable input yields an
+    empty set, so a data failure never silently *enables* trading it should
+    have blocked — it disables the filter, which is the status quo.
+    """
+    if mode in ("off", ""):
+        return set()
+
+    spy = _benchmark_frame(years)
+    if spy is None or spy.empty:
+        print("  (regime filter unavailable: no SPY data)")
+        return set()
+
+    close = spy["Close"].astype(float)
+    open_ = spy["Open"].astype(float)
+    blocked: set[str] = set()
+
+    if mode == "gap":
+        gap = (open_ / close.shift(1) - 1) * 100
+        hits = gap.index[gap <= -abs(threshold)]
+    elif mode in ("trend50", "trend200"):
+        span = 50 if mode == "trend50" else 200
+        ema = close.ewm(span=span, adjust=False).mean()
+        # Shifted: the comparison must use yesterday's close, which is all a
+        # trader standing at tomorrow's open actually knows.
+        below = (close < ema).shift(1).fillna(False)
+        hits = below.index[below.astype(bool)]
+    elif mode == "prior_day":
+        ret = close.pct_change() * 100
+        prior = ret.shift(1)
+        hits = prior.index[prior <= -abs(threshold)]
+    elif mode == "vix":
+        try:
+            from raanu.market.prices import fetch_ohlc
+            vix = fetch_ohlc("^VIX", period=f"{years + 1}y")
+            vclose = vix["Close"].astype(float)
+            ratio = (vclose / vclose.rolling(20).mean() - 1) * 100
+            elevated = (ratio >= abs(threshold)).shift(1).fillna(False)
+            hits = elevated.index[elevated.astype(bool)]
+        except Exception as e:
+            print(f"  (VIX regime unavailable: {e})")
+            return set()
+    else:
+        raise ValueError(f"unknown regime mode: {mode}")
+
+    for ts in hits:
+        blocked.add(pd.Timestamp(ts).strftime("%Y-%m-%d"))
+    return blocked
 
 
 def _benchmark_frame(years: int):
@@ -734,6 +817,16 @@ def main() -> None:
                     help="compare profit-ladder variants")
     ap.add_argument("--robustness", action="store_true",
                     help="split each config into first/second half to test stability")
+    ap.add_argument("--regime-filter", default="off", choices=REGIME_MODES,
+                    help="stand down entirely on days the broad market looks "
+                         "bad. 'gap' tests the pre-market rule directly.")
+    ap.add_argument("--regime-threshold", type=float, default=1.0,
+                    help="%% threshold for gap / prior_day / vix modes")
+    ap.add_argument("--sweep-regime", action="store_true",
+                    help="does standing down on bad days help? sweeps every "
+                         "regime filter. S1 and S3 BUY weakness, so this can "
+                         "easily remove their best entries — judge on Sharpe "
+                         "and the first/second-half split, never total return")
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--risk-free", type=float, default=4.0,
                     help="annual risk-free %% for Sharpe/alpha (default 4, ~T-bills "
@@ -762,7 +855,55 @@ def main() -> None:
 
     prices = _price_frames(universe, args.years)
 
-    if args.sweep_atr:
+    blocked = blocked_fill_dates(args.regime_filter, args.regime_threshold, args.years)
+    if blocked:
+        print(f"regime filter '{args.regime_filter}' "
+              f"(threshold {args.regime_threshold}) blocks {len(blocked)} fill day(s)\n")
+
+    if args.sweep_regime:
+        # Does standing down on bad days actually help?
+        #
+        # S1 buys pullbacks to a rising 20-EMA and S3 buys %B <= 0.20 — both
+        # BUY weakness, so a filter tuned to direction rather than dislocation
+        # can strip out exactly their best entries. Judge on Sharpe and the
+        # both-halves split; total return alone has misled this project before.
+        ex = ExitConfig(stop_mode="atr",
+                        stop_atr_mult=args.stop_atr or (3.0 if args.strategy in ("s2", "s3") else 2.5),
+                        trail_mode="atr", trail_activate_atr=2.0, trail_atr_mult=1.5)
+        spy = _benchmark_frame(args.years)
+        bh = benchmark_buy_hold(args.years)
+        if bh:
+            print(f"CONTROL — SPY buy & hold: ret {bh['total_return_pct']:+.2f}%  "
+                  f"CAGR {bh['cagr_pct']:+.2f}%  maxDD {bh['max_drawdown_pct']:.2f}%\n")
+
+        variants = [("no filter (baseline)", "off", 0.0)]
+        for t in (0.5, 1.0, 1.5):
+            variants.append((f"SPY gaps down > {t}%", "gap", t))
+        variants += [
+            ("SPY below 50-day EMA", "trend50", 0.0),
+            ("SPY below 200-day EMA", "trend200", 0.0),
+            ("prior day SPY < -1%", "prior_day", 1.0),
+            ("VIX > 20% above 20d mean", "vix", 20.0),
+        ]
+
+        print("regime-filter sweep — Sharpe and BOTH halves decide, not return:\n")
+        for label, mode, threshold in variants:
+            blk = blocked_fill_dates(mode, threshold, args.years)
+            res = simulate(sig, prices, ex, pf, blocked_fills=blk)
+            s = stats(res, pf)
+            r = risk_stats(res["equity_curve"], spy, res["trades"], args.risk_free) if spy is not None else {}
+            h1, h2 = split_stats(res, pf)
+            print(f"  {label:<28} blocked {len(blk):>4}d  trades {s['trades']:>4}  "
+                  f"ret {s['total_return_pct']:>+7.2f}%  "
+                  f"Sharpe {r.get('sharpe', float('nan')):>5.2f}  "
+                  f"alpha {r.get('alpha_pct', float('nan')):>+6.2f}%  "
+                  f"maxDD {s['max_drawdown_pct']:>5.2f}%")
+            print(f"  {'':<28} 1st half ret {h1.get('total_return_pct', 0):>+7.2f}%   "
+                  f"2nd half ret {h2.get('total_return_pct', 0):>+7.2f}%")
+        print("\n  A filter only counts if it improves Sharpe AND survives both halves.")
+        print("  Remember S1/S3 are dip-buyers: removing red days removes their setups.\n")
+
+    elif args.sweep_atr:
         configs = [
             ("LIVE today: fixed 3% stop", ExitConfig(stop_mode="pct", stop_pct=3.0,
                                                      trail_mode="pct", trail_activate_pct=5.0, trail_pct=2.5)),
@@ -781,7 +922,7 @@ def main() -> None:
                   f"CAGR {bh['cagr_pct']:+.2f}%  maxDD {bh['max_drawdown_pct']:.2f}%\n")
         print(f"stop-rule sweep (sizing={pf.sizing_mode}, risk={pf.risk_pct}%):")
         for label, ex in configs:
-            print_stats(label, stats(simulate(sig, prices, ex, pf), pf))
+            print_stats(label, stats(simulate(sig, prices, ex, pf, blocked_fills=blocked), pf))
 
     elif args.sweep_ladder:
         bh = benchmark_buy_hold(args.years)
@@ -801,7 +942,7 @@ def main() -> None:
         ]
         print("profit-ladder comparison:")
         for lbl, ex in variants:
-            res = simulate(sig, prices, ex, pf)
+            res = simulate(sig, prices, ex, pf, blocked_fills=blocked)
             s = stats(res, pf)
             print_stats(lbl, s)
             print(f"      exits: {s.get('exit_reasons')}")
@@ -826,7 +967,7 @@ def main() -> None:
         print("stability check — does the config work in BOTH halves?")
         print(f"  max_positions={pf.max_positions}   (rf {args.risk_free}%)\n")
         for label, ex in candidates:
-            res = simulate(sig, prices, ex, pf)
+            res = simulate(sig, prices, ex, pf, blocked_fills=blocked)
             full = stats(res, pf)
             h1, h2 = split_stats(res, pf)
             print(f"  {label}")
@@ -904,10 +1045,10 @@ def main() -> None:
                                    "per_trade_pct": val if mode == "equity_pct" else pf.per_trade_pct,
                                    "risk_pct": val if mode == "risk_pct" else pf.risk_pct})
             lbl = f"{mode} {val}%"
-            print_stats(lbl, stats(simulate(sig, prices, ex, p), p))
+            print_stats(lbl, stats(simulate(sig, prices, ex, p, blocked_fills=blocked), p))
     else:
         ex = ExitConfig(**({"stop_atr_mult": args.stop_atr} if args.stop_atr else {}))
-        res = simulate(sig, prices, ex, pf)
+        res = simulate(sig, prices, ex, pf, blocked_fills=blocked)
         s = stats(res, pf)
         print(f"exit rule: {ex.label()}")
         print_stats(args.strategy.upper(), s)

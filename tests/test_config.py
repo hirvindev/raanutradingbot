@@ -101,3 +101,53 @@ class TestExitConfigOverrides:
         cfg = config.exit_config()
         assert cfg.ladder_for("s3") == ""
         assert cfg.ladder_for("s2") == "5:2,10:6,15:11,20:15,30:24"
+
+
+class TestLLMAdvisorDefaults:
+    """Every advisory power ships off. The bot must never gain a new way to
+    spend money as a side effect of a deploy."""
+
+    def test_all_advisory_switches_default_off(self):
+        assert config.llm_advisor_enabled() is False
+        assert config.llm_shadow_mode() is False
+        assert config.llm_exits_enabled() is False
+        assert config.llm_budget_enabled() is False
+        assert config.llm_retro_enabled() is False
+
+    def test_tracing_defaults_ON(self):
+        # The exception, deliberately: tracing is safe, and turning it off is
+        # what makes everything else undebuggable.
+        assert config.trace_enabled() is True
+
+    def test_switches_are_read_per_call(self, monkeypatch):
+        monkeypatch.setenv("LLM_ADVISOR_ENABLED", "1")
+        assert config.llm_advisor_enabled() is True
+        monkeypatch.setenv("LLM_ADVISOR_ENABLED", "0")
+        assert config.llm_advisor_enabled() is False
+
+    def test_model_default_is_pinned(self):
+        # A silent model change would alter every trading decision the advisor
+        # makes, so this is config, never an implicit default.
+        assert config.llm_model() == "claude-opus-5"
+
+    def test_timeout_is_generous_enough_for_web_search(self, monkeypatch):
+        # A premature timeout reads as fail-closed, i.e. a day with no trades.
+        assert config.llm_timeout_sec() >= 30
+        monkeypatch.setenv("LLM_TIMEOUT_SEC", "90")
+        assert config.llm_timeout_sec() == 90.0
+
+    def test_budget_share_cap_bounds_concentration(self, monkeypatch):
+        assert config.llm_max_budget_share() == 60.0
+        monkeypatch.setenv("LLM_MAX_BUDGET_SHARE", "40")
+        assert config.llm_max_budget_share() == 40.0
+
+    def test_trace_retention_is_configurable(self, monkeypatch):
+        assert config.trace_retain_days() == 90
+        monkeypatch.setenv("TRACE_RETAIN_DAYS", "30")
+        assert config.trace_retain_days() == 30
+
+    def test_malformed_llm_values_fall_back(self, monkeypatch):
+        monkeypatch.setenv("LLM_TIMEOUT_SEC", "soon")
+        monkeypatch.setenv("TRACE_RETAIN_DAYS", "forever")
+        assert config.llm_timeout_sec() == 60.0
+        assert config.trace_retain_days() == 90

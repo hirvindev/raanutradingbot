@@ -15,9 +15,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime
 
-from raanu import config, state
+from raanu import config, state, trace
 from raanu.clock import BERLIN
 from raanu.market.rest import alpaca_get
 from raanu.scanning.engine import top_picks
@@ -205,11 +206,102 @@ async def _run_scan_and_cache_s3(alert: bool = True) -> list:
     return picks
 
 
-async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "s1"):
+# The structural flag each strategy must set for a pick to be tradable. The
+# score alone is not enough: a high score on a stock that is not in the
+# strategy's own setup is a scoring artefact, not a signal.
+_GATE_KEYS = {"s1": "uptrend", "s2": "stage2", "s3": "leader_dip"}
+
+
+def _pick_saver(strategy: str):
+    return {"s2": _save_picks_s2, "s3": _save_picks_s3}.get(strategy, _save_picks)
+
+
+def _scan_and_cache_for(strategy: str):
+    return {"s2": _run_scan_and_cache_s2,
+            "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)
+
+
+def _scan_actionable(strategy: str, n_orders: int, label: str = "") -> list[dict]:
+    """Scan one strategy and return the picks that clear the trading gate.
+
+    Extracted so the slot orchestrator can gather every strategy's candidates
+    *before* any of them executes — the advisor has to see the whole day at
+    once to rank across strategies. ``_execute_scheduled_trades`` still calls
+    it itself when no picks are handed in, so there is exactly one definition
+    of "actionable".
+
+    Traces what it dropped and why: "why did NVDA not trade today" is
+    otherwise a question only a log dig can answer.
+    """
+    started = time.monotonic()
+    picks = top_picks(strategy, limit=n_orders + 3)
+    _pick_saver(strategy)(picks)
+
+    gate_key = _GATE_KEYS.get(strategy, "uptrend")
+    bar = config.min_signal_score()
+
+    actionable, dropped = [], []
+    for p in picks:
+        ticker = p.get("ticker")
+        if not ticker:
+            continue
+        if p.get("score", 0) < bar:
+            dropped.append({"ticker": ticker, "score": p.get("score"),
+                            "why": f"score below {bar}"})
+        elif not p.get(gate_key):
+            dropped.append({"ticker": ticker, "score": p.get("score"),
+                            "why": f"{gate_key} not set"})
+        else:
+            actionable.append(p)
+
+    trace.emit("scan.done", slot=label, strategy=strategy,
+               scanned=len(picks), actionable=len(actionable),
+               elapsed_sec=round(time.monotonic() - started, 1),
+               top_scores=[p.get("score") for p in picks[:5]])
+    if dropped:
+        trace.emit("filter.actionable", slot=label, strategy=strategy,
+                   threshold=bar, gate=gate_key,
+                   kept=len(actionable), dropped=dropped)
+    return actionable
+
+
+def _seed_position_plan(ticker: str, entry_px: float, atr: float | None,
+                        exit_plan: dict) -> None:
+    """Write the position's exit record at BUY time.
+
+    The exit monitor creates this record lazily on its first pass, recomputing
+    ATR from whatever the market has done since. Seeding it here pins the
+    entry ATR and the chosen plan to the moment the order was actually sized,
+    which is what keeps sizing and exiting describing the same trade.
+
+    Best-effort by design: a failure here must never turn a filled order into
+    an exception. The position simply falls back to the strategy defaults,
+    which is the behaviour that existed before exit plans did.
+    """
+    try:
+        record = {"peak": float(entry_px)}
+        if atr:
+            record["atr"] = float(atr)
+        if exit_plan:
+            record["plan"] = exit_plan
+        state.put(keys.PEAK, keys.peak_sk(ticker), record)
+    except Exception as e:
+        log.warning(f"[exits] could not seed plan for {ticker}: {e}")
+
+
+async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "s1",
+                                    picks: list[dict] | None = None,
+                                    verdict=None):
     """
     Scan and place up to n_orders market buys for a scheduled slot.
     Respects score threshold, position sizing, and already-held check.
     Sends Telegram alerts before and after each order, tagged by strategy.
+
+    ``picks`` supplies a pre-scanned, already-approved candidate list (from
+    ``run_slot``); when it is None this function scans for itself and behaves
+    exactly as it did before the advisor existed. ``verdict`` carries the
+    advisor's budget split. Both default to None so every existing caller —
+    and the tests guarding the auto-trader switch — are unaffected.
     """
     from raanu.trading.trader import (
         alpaca_buy_notional,
@@ -266,32 +358,21 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
         return
 
-    if strategy == "s3":
-        picks = top_picks('s3', limit=n_orders + 3)
-        _save_picks_s3(picks)
-        gate_key = "leader_dip"
-    elif strategy == "s2":
-        picks = top_picks('s2', limit=n_orders + 3)
-        _save_picks_s2(picks)
-        gate_key = "stage2"
-    else:
-        picks = top_picks('s1', limit=n_orders + 3)
-        _save_picks(picks)
-        gate_key = "uptrend"
-
-    actionable = [
-        p for p in picks
-        if p.get("score", 0) >= config.min_signal_score() and p.get(gate_key) and p.get("ticker")
-    ]
+    # `picks` supplied ⇒ run_slot already scanned, filtered and had the
+    # advisor approve these. Scanning again here would both waste a 472-ticker
+    # pass and discard the approval.
+    scanned_here = picks is None
+    actionable = _scan_actionable(strategy, n_orders, label) if scanned_here else list(picks)
 
     if not actionable:
-        msg = (
-            f"📊 *RaanuBot — {label}*\n"
-            f"{stag}\n"
-            f"No stocks above score {config.min_signal_score()} today.\n"
-            f"_No trades placed._"
-        )
-        send_whatsapp(msg, strategy=strategy)
+        if scanned_here:
+            msg = (
+                f"📊 *RaanuBot — {label}*\n"
+                f"{stag}\n"
+                f"No stocks above score {config.min_signal_score()} today.\n"
+                f"_No trades placed._"
+            )
+            send_whatsapp(msg, strategy=strategy)
         log.info(f"[{label}][{strategy.upper()}] 0 actionable picks — skipping")
         return
 
@@ -324,7 +405,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     # name would risk many times what a quiet one does. Instead, size so the
     # loss AT THE STOP is a fixed share of equity, with that share set by
     # Quarter Kelly on this strategy's own realized history.
-    from raanu.trading.exits import _get_atr, stop_atr_mult_for
+    from raanu.trading.exits import _get_atr, effective_stop_pct
     from raanu.trading.sizing import from_trade_log, shares_for
 
     k = from_trade_log(strategy=strategy)
@@ -369,7 +450,17 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     #
     # Each strategy now gets a slice of the deployable budget. Weights follow
     # conviction, which is what CLAUDE.md always said capital should do.
+    #
+    # The advisor may redistribute these weights (LLM_BUDGET_ENABLED), but only
+    # ever *within* `deployable` — which was already computed net of the cash
+    # reserve above. It divides the pot; it cannot enlarge it. Its share is
+    # additionally capped by LLM_MAX_BUDGET_SHARE, because alpha improved at
+    # 4 -> 8 -> 15 positions and concentration works against the one
+    # diversification result this project has actually measured.
     share = config.cash_share(strategy) or 33.0
+    if verdict is not None and config.llm_budget_enabled():
+        share = verdict.budget_share(
+            strategy, fallback=share, max_share=config.llm_max_budget_share())
     deployable = deployable * share / 100.0
     log.info(f"[{label}][{strategy.upper()}] share {share:.0f}% of deployable")
     log.info(f"[{label}][{strategy.upper()}] cash {free_cash:,.0f} | "
@@ -399,14 +490,29 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             log.info(f"[{label}][{strategy.upper()}] {ticker} has no price — skipping")
             continue
 
+        # ── The stop that SIZES the trade must be the stop that EXITS it ─────
+        # shares_for() computes qty = risk_budget / (entry - stop), so this
+        # stop IS the risk model. If the advisor's plan widened the stop but
+        # sizing still used the strategy default, the loss at the stop would
+        # silently exceed the intended share of equity — a 5.0x ATR plan
+        # against a 2.5x default doubles real risk while every log line still
+        # reports the configured risk_pct. So the plan's multiple is resolved
+        # HERE, once, and the same number is stored with the position below.
+        exit_plan = dict(pick.get("_llm_exit_plan") or {}) if config.llm_exits_enabled() else {}
+
         if atr and atr > 0:
-            mult = stop_atr_mult_for(strategy)
-            stop_pct = min(max(mult * atr / entry_px * 100, config.exit_config().stop_min_pct), config.exit_config().stop_max_pct)
+            # effective_stop_pct() is the SAME function the exit monitor calls,
+            # so the stop that sizes this order cannot drift from the stop that
+            # will close it. See its docstring for why that matters.
+            stop_pct = effective_stop_pct(strategy, atr / entry_px * 100, exit_plan)
         else:
             # No ATR available — fall back to the fixed stop so sizing stays
             # consistent with whatever the exit engine will actually use.
             stop_pct = float(os.getenv("STOP_LOSS_PCT", "3.0"))
             log.warning(f"[{label}][{strategy.upper()}] {ticker}: no ATR, sizing off {stop_pct}% stop")
+            # An ATR-based plan cannot be honoured without an ATR; drop it
+            # rather than let the exit engine apply a stop sizing never saw.
+            exit_plan.pop("stop_atr_mult", None)
 
         try:
             max_pos_pct = float(os.getenv("MAX_POSITION_PCT", "10.0"))
@@ -416,7 +522,8 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                          entry_px * (1 - stop_pct / 100),
                          max_position_pct=max_pos_pct)
         risk_sized = qty * entry_px
-        notional = round(min(risk_sized, per_trade_cap, deployable), 2)
+        size_mult = float(pick.get("_llm_size_mult", 1.0) or 1.0)
+        notional = round(min(risk_sized, per_trade_cap, deployable) * size_mult, 2)
         if notional < 1.0:
             log.info(
                 f"[{label}][{strategy.upper()}] {ticker} sized to ${notional} "
@@ -438,11 +545,22 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             f"risk {k.risk_pct}% -> ${notional}"
         )
 
+        # Every input to the notional, so "why was this $412?" is answerable
+        # from the trace alone rather than by re-deriving it from logs.
+        trace.emit("order.sized", slot=label, strategy=strategy, ticker=ticker,
+                   entry_px=entry_px, atr_pct=round(atr / entry_px * 100, 2) if atr else None,
+                   stop_pct=round(stop_pct, 2), risk_pct=k.risk_pct,
+                   risk_sized=round(risk_sized, 2), per_trade_cap=per_trade_cap,
+                   deployable=round(deployable, 2), size_mult=size_mult,
+                   notional=notional, exit_plan=exit_plan or None,
+                   llm_rationale=pick.get("_llm_rationale") or None)
+
         try:
             send_whatsapp(format_pre_trade_alert(
                 ticker, pick.get("ticker", ticker), notional,
                 pick["score"], free_cash, pick.get("reasons", []),
                 strategy=strategy,
+                llm_rationale=pick.get("_llm_rationale", ""),
             ), strategy=strategy)
             await asyncio.sleep(2)
 
@@ -459,8 +577,22 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 "stop_pct":     round(stop_pct, 2),
                 "risk_pct":     k.risk_pct,
                 "atr_pct":      round(atr / entry_px * 100, 2) if atr else None,
+                "exit_plan":    exit_plan or None,
                 "alpaca_response": result,
             })
+
+            # Seed the exit engine's per-position record now, while the entry
+            # ATR and the chosen plan are both known. The monitor's first pass
+            # then finds them already there instead of recomputing an ATR that
+            # has since moved — and the stop it enforces is the same one that
+            # sized this order.
+            _seed_position_plan(ticker, entry_px, atr, exit_plan)
+
+            trace.emit("order.placed", slot=label, strategy=strategy, ticker=ticker,
+                       notional=notional, score=pick.get("score"),
+                       status=result.get("status") if isinstance(result, dict) else None,
+                       client_order_id=(result or {}).get("client_order_id")
+                       if isinstance(result, dict) else None)
             get_trader().event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
             # Push is best-effort and must never break an order that already filled.
             try:
@@ -477,6 +609,8 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             placed += 1
         except Exception as e:
             log.error(f"[{label}][{strategy.upper()}] Order failed for {ticker}: {e}")
+            trace.emit("order.failed", slot=label, strategy=strategy, ticker=ticker,
+                       notional=notional, error_type=type(e).__name__, error=str(e))
             get_trader().event("error", f"[{label}][{strategy.upper()}] {ticker} failed: {e}")
 
     if placed == 0:
@@ -487,6 +621,142 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             strategy=strategy,
         )
     log.info(f"[{label}][{strategy.upper()}] Done — placed {placed}/{n_orders} order(s)")
+
+
+# ── The execution slot ───────────────────────────────────────────────────────
+# S3 first: the only strategy profitable in both halves of the backtest, so any
+# rounding edge falls its way rather than against it.
+_SLOT_ORDER = ("s3", "s1", "s2")
+
+
+def _verdict_cache_key(label: str) -> str:
+    day = datetime.now(BERLIN).date().isoformat()
+    return f"llm_verdict#{day}#{label}"
+
+
+async def run_slot(n_orders: int, label: str) -> None:
+    """Run one execution slot across every strategy.
+
+    Replaces the old ``for strat in (...): _execute_scheduled_trades(...)``
+    loop in both callers. The loop had to move here because the advisor needs
+    to see the whole day's candidates at once — it ranks across strategies and
+    decides whether the day is worth trading at all, and neither question can
+    be answered one strategy at a time.
+
+    Structure is two phases around a single LLM call:
+
+      1. scan every strategy, collecting actionable candidates
+      2. one advisory review
+      3. execute per strategy, with the approved and ranked picks
+
+    With the advisor disabled this is behaviourally identical to the old loop —
+    each strategy scans and executes exactly as before.
+    """
+    # No candidates anywhere, the trader switched off, or the advisor disabled
+    # all short-circuit BEFORE the paid call. Most days cost nothing.
+    if not config.llm_advisor_enabled():
+        for strategy in _SLOT_ORDER:
+            try:
+                await _execute_scheduled_trades(n_orders, label, strategy=strategy)
+            except Exception as e:
+                log.exception(f"[{label}][{strategy.upper()}] slot failed: {e}")
+        return
+
+    if not get_trader().enabled:
+        log.info(f"[{label}] auto-trader is OFF — scanning only, no advisor call")
+        trace.emit("gate.blocked", slot=label, gate="auto_trader_enabled",
+                   reason="auto-trader is off")
+        for strategy in _SLOT_ORDER:
+            try:
+                await _scan_and_cache_for(strategy)()
+            except Exception as e:
+                log.exception(f"[{label}][{strategy.upper()}] scan failed: {e}")
+        return
+
+    # ── Phase 1: gather every strategy's candidates ──────────────────────────
+    candidates: dict[str, list[dict]] = {}
+    for strategy in _SLOT_ORDER:
+        try:
+            candidates[strategy] = _scan_actionable(strategy, n_orders, label)
+        except Exception as e:
+            log.exception(f"[{label}][{strategy.upper()}] scan failed: {e}")
+            candidates[strategy] = []
+
+    total = sum(len(v) for v in candidates.values())
+    if not total:
+        from raanu.notify.telegram import send_whatsapp
+        log.info(f"[{label}] no actionable candidates in any strategy — no advisor call")
+        trace.emit("gate.blocked", slot=label, gate="no_candidates",
+                   reason=f"nothing cleared score {config.min_signal_score()}")
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n"
+                      f"No stocks above score {config.min_signal_score()} today.\n"
+                      f"_No trades placed._")
+        return
+
+    # ── Phase 2: one advisory review for the whole slot ──────────────────────
+    from raanu.ai import market_context
+    from raanu.ai.advisor import review_slot
+    from raanu.notify.telegram import send_whatsapp
+
+    context = market_context.snapshot()
+    log.info(f"[{label}] market: {market_context.headline(context)}")
+    trace.emit("context.snapshot", slot=label, **context)
+
+    verdict = await review_slot(candidates, context, label)
+
+    if verdict is None:
+        # Fail closed. An advisor that cannot be consulted must not be assumed
+        # to approve — the same reasoning that makes an unreadable auto-trader
+        # flag read as OFF. Entries stop; open positions are untouched, because
+        # the exit monitor never consults this path.
+        log.warning(f"[{label}] advisor unavailable — no orders this slot")
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n"
+                      f"Advisor unavailable — no trades placed.\n"
+                      f"_{total} quant candidate(s) still logged._")
+        return
+
+    try:
+        from raanu.trading import picks_log
+        picks_log.attach_llm_verdict(verdict, candidates)
+    except Exception as e:
+        log.warning(f"[picks] llm verdict attach skipped: {e}")
+
+    shadow = config.llm_shadow_mode()
+    summary = f"{verdict.regime.replace('_', ' ')} — {verdict.market_summary}"
+
+    if not verdict.trade_today and not shadow:
+        log.info(f"[{label}] advisor stood the slot down: {verdict.market_summary}")
+        trace.emit("gate.blocked", slot=label, gate="llm_trade_today",
+                   reason=verdict.market_summary, regime=verdict.regime)
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n🛑 Standing down today.\n{summary}")
+        return
+
+    if shadow:
+        # The verdict is recorded and reported but not acted on. This is how
+        # "did its vetoes actually correlate with worse outcomes" gets answered
+        # before any capital depends on the answer.
+        log.info(f"[{label}] SHADOW — advisor said trade_today={verdict.trade_today}, "
+                 f"regime={verdict.regime}; executing the quant's picks unchanged")
+
+    # ── Phase 3: execute ─────────────────────────────────────────────────────
+    for strategy in _SLOT_ORDER:
+        picks = candidates.get(strategy) or []
+        if not picks:
+            continue
+        if not shadow:
+            picks = verdict.approved_for(
+                strategy, picks, apply_exits=config.llm_exits_enabled())
+            if not picks:
+                log.info(f"[{label}][{strategy.upper()}] all candidates vetoed")
+                trace.emit("gate.blocked", slot=label, strategy=strategy,
+                           gate="llm_veto", reason="every candidate vetoed")
+                continue
+        try:
+            await _execute_scheduled_trades(
+                n_orders, label, strategy=strategy, picks=picks,
+                verdict=None if shadow else verdict)
+        except Exception as e:
+            log.exception(f"[{label}][{strategy.upper()}] slot failed: {e}")
 
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────

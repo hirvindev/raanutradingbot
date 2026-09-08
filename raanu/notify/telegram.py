@@ -111,15 +111,19 @@ def _strat_tag(strategy: str) -> str:
 
 def format_pre_trade_alert(ticker: str, _unused: str, usd: float, score: int,
                            free_cash: float, reasons: list[str],
-                           strategy: str = "") -> str:
+                           strategy: str = "", llm_rationale: str = "") -> str:
     reasons_str = " | ".join(reasons[:2]) if reasons else "momentum signal"
     tag = f"\n   Strategy: *{_strat_tag(strategy)}*" if strategy else ""
+    # Optional and trailing, so every existing call site is unaffected. Shown
+    # only when the advisor actually said something — an empty line here would
+    # just train the reader to skip the alert.
+    advisor = f"\n   Advisor: _{llm_rationale}_" if llm_rationale else ""
     return (
         f"⚡ *RaanuBot — About to BUY*\n"
         f"   Stock: *{ticker}*{tag}\n"
         f"   Amount: *${usd:.2f}*\n"
         f"   Score: {score}/100\n"
-        f"   Signal: {reasons_str}\n"
+        f"   Signal: {reasons_str}{advisor}\n"
         f"   Free cash: ${free_cash:,.2f}\n"
         f"   _Order submitting now — check dashboard to cancel_"
     )

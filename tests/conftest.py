@@ -21,6 +21,10 @@ _APP_ENV_PREFIXES = (
     "PUSH_", "NOTIF_", "TWA_", "AUTO_TRADE_", "API_READ_TOKEN", "TRADE_PIN",
     "ALLOWED_ORIGINS", "DATA_DIR", "WORKER_FUNCTION_NAME", "WORKER_SCHEDULE_RULE_NAME",
     "MIN_SIGNAL_SCORE",
+    # LLM_ especially: LLM_API_KEY is a real, billable credential, so a
+    # developer with it exported would otherwise have the suite calling the
+    # live API — the exact leak this tuple exists to prevent.
+    "LLM_", "TRACE_",
     "MAX_POSITION_PCT", "WATCHLIST", "HARD_TAKE_PROFIT_PCT", "DAILY_CRASH_PCT",
     "TAKE_PROFIT_PCT", "TRADELOG_SEED",
 )

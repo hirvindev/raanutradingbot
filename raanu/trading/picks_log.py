@@ -100,6 +100,59 @@ def record(strategy: str, picks: list) -> int:
         return 0
 
 
+def attach_llm_verdict(verdict, candidates: dict) -> int:
+    """Merge the advisor's verdict onto today's already-recorded pick rows.
+
+    Rows are keyed ``(date, strategy, ticker)``, so this is an idempotent
+    merge — re-running a slot overwrites in place rather than duplicating.
+
+    This is the point of recording it at all. ``fill_forward_returns()`` will
+    later attach what each pick actually did over 1/5/20 days against SPY, so
+    the advisor becomes answerable to the same question the scores are:
+    **did the picks it vetoed underperform the ones it approved, and were the
+    days it stood down actually bad days?** Without this merge there is no way
+    to find out, and an unfalsifiable gate is exactly what this log exists to
+    prevent.
+
+    Best-effort like everything else here: research bookkeeping must never
+    break a trading slot.
+    """
+    try:
+        day = datetime.now(UTC).date().isoformat()
+        shared = {
+            "llm_trade_today": bool(verdict.trade_today),
+            "llm_regime": verdict.regime,
+            "llm_market_summary": verdict.market_summary,
+        }
+        n = 0
+        for strategy, picks in (candidates or {}).items():
+            for pick in picks:
+                ticker = pick.get("ticker")
+                if not ticker:
+                    continue
+                row = state.get(keys.PICK, keys.pick_sk(day, strategy, ticker))
+                if not row:
+                    continue          # never recorded (below MAX_PER_SCAN)
+                row.update(shared)
+                decision = verdict.decision_for(strategy, ticker)
+                if decision is not None:
+                    row.update({
+                        "llm_approve": decision.approve,
+                        "llm_rank": decision.rank,
+                        "llm_confidence": decision.confidence,
+                        "llm_size_mult": decision.size_mult,
+                        "llm_rationale": decision.rationale,
+                        "llm_exit_plan": decision.exit_plan.as_stored() or None,
+                    })
+                _put(row)
+                n += 1
+        log.info(f"[picks] attached advisor verdict to {n} rows for {day}")
+        return n
+    except Exception as e:
+        log.error(f"[picks] attach_llm_verdict failed: {e}")
+        return 0
+
+
 def fill_forward_returns() -> dict:
     """Backfill forward returns for anything old enough. Never revises a value."""
     from raanu.market.prices import batch_download

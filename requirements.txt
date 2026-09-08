@@ -14,3 +14,10 @@ pywebpush
 pyjwt>=2.9
 mangum
 boto3
+
+# LLM advisory layer. Imported lazily inside raanu.ai.advisor, so a missing
+# install degrades to "advisor unavailable -> no orders this slot" rather than
+# breaking a scan. Worth noting the cost: this dependency set is already 266MB
+# unzipped (hence the container image), and ECR keeps every tagged build under
+# a hand-applied 15-image cap.
+anthropic>=0.70

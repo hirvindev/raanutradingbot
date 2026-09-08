@@ -41,6 +41,7 @@ from raanu.api.routes import (
     static,
     stocks,
     strategy,
+    trace,
     webhooks,
 )
 from raanu.paths import DOTENV
@@ -52,7 +53,8 @@ log = logging.getLogger("raanu.api")
 _ROUTERS = (
     auth.router, health.router, analysis.router, account.router, orders.router, auto.router, scan.router,
     push.router, picks.router, strategy.router, reports.router, notify.router,
-    exits.router, webhooks.router, stocks.router, schedule.router, static.router,
+    exits.router, webhooks.router, stocks.router, schedule.router,
+    trace.router, static.router,
 )
 
 
@@ -134,7 +136,7 @@ async def _scheduled_trade_loop():
     from datetime import datetime, timedelta
 
     from raanu.clock import US_EAST
-    from raanu.trading.schedule import _ET_SLOTS, _execute_scheduled_trades
+    from raanu.trading.schedule import _ET_SLOTS, run_slot
 
     while True:
         now = datetime.now(US_EAST)
@@ -150,10 +152,12 @@ async def _scheduled_trade_loop():
         slot, orders_allowed, label = targets[0]
         await asyncio.sleep((slot - now).total_seconds())
         try:
-            # S3 first: it is the only strategy profitable in both halves of
-            # the backtest, so any rounding edge falls its way.
-            for strat in ("s3", "s1", "s2"):
-                await _execute_scheduled_trades(orders_allowed, label, strategy=strat)
+            # run_slot owns the per-strategy loop (S3 first, unchanged) so the
+            # advisory review sees the whole slot at once. This path is easy to
+            # forget — it is the local dev twin of handlers/worker.py, and
+            # leaving it on the old loop would mean local and Lambda quietly
+            # traded differently.
+            await run_slot(orders_allowed, label)
         except Exception as e:
             log.exception(f"Scheduled slot error [{label}]: {e}")
 

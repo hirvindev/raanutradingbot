@@ -245,6 +245,94 @@ def watchlist() -> list[str]:
     return [t.upper() for t in env_list("WATCHLIST", "AAPL,MSFT,NVDA,GOOGL,AMZN")]
 
 
+# ── llm advisor ──────────────────────────────────────────────────────────────
+# The LLM reviews the quant's candidates once per execution slot: whether the
+# day is worth trading, which picks to take, how to split the budget, and how
+# to exit each one. It can never invent a candidate the quant did not surface.
+#
+# Every switch here defaults OFF except tracing. The powers are separate flags
+# on purpose — the two highest-risk ones (budget, exits) can be enabled later
+# and independently of the gate itself, each with its own observation window.
+
+
+def llm_advisor_enabled() -> bool:
+    return env_bool("LLM_ADVISOR_ENABLED", False)
+
+
+def llm_shadow_mode() -> bool:
+    """Run the advisor and record its verdict, but do not act on it.
+
+    The whole rollout hinges on this: it is how "did the LLM's vetoes actually
+    correlate with worse outcomes" gets answered before any capital rides on
+    the answer. Every conclusion in this project that skipped its equivalent
+    turned out to be a first-half artefact."""
+    return env_bool("LLM_ADVISOR_SHADOW", False)
+
+
+def llm_exits_enabled() -> bool:
+    """Let the advisor set per-trade stop / trail / ladder overrides."""
+    return env_bool("LLM_EXITS_ENABLED", False)
+
+
+def llm_budget_enabled() -> bool:
+    """Let the advisor redistribute the per-strategy cash shares."""
+    return env_bool("LLM_BUDGET_ENABLED", False)
+
+
+def llm_provider() -> str:
+    return env_str("LLM_PROVIDER", "anthropic").lower()
+
+
+def llm_model() -> str:
+    return env_str("LLM_MODEL", "claude-opus-5")
+
+
+def llm_api_key() -> str:
+    return env_str("LLM_API_KEY")
+
+
+def llm_timeout_sec() -> float:
+    """60s, not the usual 20: web search plus thinking is a slower call than a
+    bare completion, and a premature timeout reads as a fail-closed no-trade."""
+    return env_float("LLM_TIMEOUT_SEC", 60.0)
+
+
+def llm_web_search() -> bool:
+    """Macro context the numbers cannot show — a war, a Fed decision, crude.
+    No model knows this morning's news from training data."""
+    return env_bool("LLM_WEB_SEARCH", True)
+
+
+def llm_retro_enabled() -> bool:
+    return env_bool("LLM_RETRO_ENABLED", False)
+
+
+def llm_max_budget_share() -> float:
+    """Ceiling on any single strategy's slice of the deployable budget.
+
+    Alpha improved at 4 -> 8 -> 15 positions at every score threshold, so
+    letting the advisor pour everything into one strategy pushes the book
+    against the one diversification result this project has actually
+    measured. It may tilt with conviction; it may not concentrate."""
+    return env_float("LLM_MAX_BUDGET_SHARE", 60.0)
+
+
+# ── tracing ──────────────────────────────────────────────────────────────────
+
+
+def trace_enabled() -> bool:
+    """Defaults True, unlike every LLM flag above.
+
+    Tracing is the one part that is safe on by default, and it has standalone
+    value with the advisor entirely off: `gate.blocked` and `order.sized`
+    answer "why did nothing trade on Tuesday" without a log dig."""
+    return env_bool("TRACE_ENABLED", True)
+
+
+def trace_retain_days() -> int:
+    return env_int("TRACE_RETAIN_DAYS", 90)
+
+
 # ── position sizing (kelly) ──────────────────────────────────────────────────
 
 

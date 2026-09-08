@@ -759,6 +759,119 @@ one order and one count; neither bounds what a strategy can take from the whole.
 
 ---
 
+## 🧠 LLM Advisory Gate — raanu/ai/
+
+**One call per execution slot**, between the quant's candidates and the order
+path. `schedule.run_slot()` scans all three strategies, gathers a market
+picture, asks the model once, then executes. Both callers
+(`handlers/worker.py`, `raanu/api/app.py`) go through it — the local dev loop
+is easy to forget and would otherwise trade differently from Lambda.
+
+It decides five things: **trade today at all**, **which picks** (approve/veto,
+ranked across strategies), **the per-strategy budget split**, **a per-position
+size trim**, and **per-trade exit rules**. It can never invent a candidate the
+quant did not surface — `SlotVerdict.approved_for()` drops any ticker not in
+the input list, so that is a property of the code, not of the prompt.
+
+**Fails closed.** Any error, timeout, refusal or schema violation returns
+`None` and the slot places no orders — one `except Exception` in
+`advisor.review_slot()` is the entire contract. ⚠️ **Exits deliberately stay
+outside the gate**: `run_monitor_once()` never consults the LLM, so an API
+outage stops new entries but can never strand an open position. Do not gate
+exits.
+
+### 🔴 The stop that sizes a trade must be the stop that exits it
+
+`sizing.shares_for()` computes `qty = risk_budget / (entry − stop)`, so **the
+stop used at entry IS the risk model**. A per-trade plan asking 5.0×ATR
+against a 2.5× default would double real risk while every log line still
+reported the configured `risk_pct` — Quarter Kelly silently stops being
+Quarter Kelly. `exits.effective_stop_pct()` is therefore **one function called
+by both the entry sizer and the exit monitor**. Do not re-derive the stop at
+either call site.
+
+Two more traps in `exits.py`, both live before this work:
+- The position record is rewritten every pass, so line ~427 must **merge**
+  (`{**pstate, ...}`) or the exit plan seeded at buy time is dropped on the
+  first monitor tick and every trade quietly reverts to defaults.
+- `state = peaks.get(symbol)` shadowed the `raanu.state` module import for the
+  whole function. Renamed to `pstate`.
+
+### What stays hard
+
+`CASH_RESERVE_PCT` is applied **before** the LLM's weights, so it divides the
+pot and cannot enlarge it — the answer to the 13 Aug 2026 incident.
+`MAX_POSITION_PCT`, the per-trade caps, the weekly limits, and the stop/trail
+floors all still bind. `size_mult` is capped at 1.0 (trim only) and any single
+`budget_pct` at `LLM_MAX_BUDGET_SHARE` (60%), because alpha improved at
+4 → 8 → 15 positions and concentration works against that.
+
+⚠️ **The model is told the backtest evidence** (`ai/prompts.py`,
+`BACKTEST_EVIDENCE`, versioned) because several results are counter-intuitive
+and a model reasoning from priors gets them backwards — the score does not
+rank, win rate is a misleading target, the ladder helps S2 and hurts S3.
+`EVIDENCE_VERSION` is stamped into every trace so a later review can tell what
+the model had been told.
+
+⚠️ **"Don't trade on a red morning" is not obviously right.** S3 buys `%B ≤
+0.20` and S1 buys pullbacks to a rising 20-EMA — **both are dip-buyers**, so a
+filter tuned to direction rather than dislocation strips entries from the only
+strategy profitable in both halves. Run `--sweep-regime` first (below); the
+prompt says explicitly that ordinary weakness is an entry condition.
+
+```
+LLM_ADVISOR_ENABLED=0    # the gate itself
+LLM_ADVISOR_SHADOW=0     # run + record the verdict, but do not act on it
+LLM_BUDGET_ENABLED=0     # let it redistribute the cash shares
+LLM_EXITS_ENABLED=0      # let it set per-trade stop/trail/ladder
+LLM_RETRO_ENABLED=0      # weekly look-back report
+LLM_MODEL=claude-opus-5
+LLM_API_KEY=<SSM / .env, never committed>
+```
+
+Separate flags on purpose: enable the gate, then budget, then exits, each with
+its own observation window. Exits last — the ladder evidence says that is
+where a confident wrong answer costs the most, and at ~2–3 trades/week
+`KELLY_MIN_SAMPLE=30` is about **a quarter**, not "a few weeks".
+
+## 🔬 Regime filter — measure before enabling (`--sweep-regime`)
+
+```bash
+python3 -m tools.backtest --strategy s3 --years 3 --sweep-regime
+```
+
+Signals fill at the **next session's open**, so the overnight gap is already
+known at fill time — the pre-market rule is backtestable with **no lookahead**.
+Sweeps SPY gap thresholds, SPY vs its 50/200-day EMA, prior-day return, and
+VIX vs its 20-day mean. Judge on **Sharpe and the both-halves split**, never
+total return.
+
+If a filter survives, make it a **deterministic gate in code** and leave the
+LLM only the macro/news cases a numeric rule cannot see. If none survives, the
+LLM must not get a blanket stand-down.
+
+## 🧾 Tracing — raanu/trace.py
+
+Every level emits one row per **state change**: `scan.done`,
+`filter.actionable` (with *which* tickers were dropped and why),
+`context.snapshot`, `llm.request/response/failed`, `gate.blocked`,
+`order.sized` (every input to the notional), `order.placed/failed`,
+`exit.plan_applied`, `exit.fired`. Sort key is `{day}#{ts}#{event}`, so a week
+is one bounded range query. `GET /api/trace?days=7`.
+
+`TRACE_ENABLED` defaults **true** — the only flag here that does. It has
+standalone value with the advisor off: `gate.blocked` answers "why did nothing
+trade on Tuesday" without a log dig.
+
+⚠️ Exit events fire **only on state change**. The monitor runs ~78×/day per
+position; tracing every evaluation would bury the signal. Rows expire at
+`TRACE_RETAIN_DAYS` (90) — nothing else prunes them.
+
+`picks_log.attach_llm_verdict()` merges the verdict onto each pick row, which
+already gets 1/5/20-day forward returns vs SPY. That pairing is the point:
+**did the vetoed picks actually underperform the approved ones, and were the
+stand-down days actually bad days?** Without it the gate is unfalsifiable.
+
 ## 📈 Pick Outcome Tracking — picks_log.py
 
 Records every pick the scheduled scans produce and fills in what each name did

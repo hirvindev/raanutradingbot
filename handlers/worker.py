@@ -86,13 +86,14 @@ async def _run_due_jobs() -> None:
                 and marks.get(key) != today):
             continue
         log.info(f"[worker] trade slot {label}")
-        # S3 first: the only strategy profitable in both halves of the
-        # backtest, so any rounding edge falls its way.
-        for strat in ("s3", "s1", "s2"):
-            try:
-                await schedule._execute_scheduled_trades(orders_allowed, label, strategy=strat)
-            except Exception as e:
-                log.exception(f"[worker] slot {label}/{strat} failed: {e}")
+        # One call for the whole slot. run_slot owns the per-strategy loop now
+        # (S3 first, unchanged) because the advisory review has to see every
+        # strategy's candidates together to rank across them and to decide
+        # whether the day is worth trading at all.
+        try:
+            await schedule.run_slot(orders_allowed, label)
+        except Exception as e:
+            log.exception(f"[worker] slot {label} failed: {e}")
         marks[key] = today
         changed = True
 

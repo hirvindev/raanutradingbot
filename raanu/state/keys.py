@@ -34,8 +34,9 @@ CACHE = "CACHE"       # overwrite-in-place caches — was last_picks*.json
 FLAG = "FLAG"         # small switches — was auto_trader.json / scheduler_marks.json
 SCAN = "SCAN"         # scan manifest + shards, TTL'd
 BARS = "BARS"         # daily bars cache, TTL'd
+TRACE = "TRACE"       # decision journal — one item per event, TTL'd
 
-ALL_ENTITIES = (TRADE, PICK, NOTIF, PEAK, PUSHSUB, CACHE, FLAG, SCAN, BARS)
+ALL_ENTITIES = (TRADE, PICK, NOTIF, PEAK, PUSHSUB, CACHE, FLAG, SCAN, BARS, TRACE)
 
 # Entities holding one item per record, i.e. the ones that used to be a single
 # growing blob. Analysis tooling iterates these; the rest are point lookups.
@@ -107,3 +108,19 @@ def scan_run_prefix(run_id: str) -> str:
 
 def bars_sk(day: str, ticker: str) -> str:
     return f"{day}#{ticker.upper()}"
+
+
+def trace_sk(day: str, ts: str | None = None, event: str = "",
+             uid: str | None = None) -> str:
+    """``{day}#{ts}#{event}#{uid}`` — day-prefixed so a week of traces is one
+    bounded range query (``sk_gte``/``sk_lte``) rather than a table scan.
+
+    The ``day`` prefix is redundant with ``ts`` and deliberately so: querying a
+    date range on a bare ISO timestamp works, but reading a raw sort key while
+    debugging is far easier when the day is the first thing on the line.
+    """
+    return f"{day}#{ts or now_stamp()}#{event}#{uid or _uid()}"
+
+
+def trace_day_prefix(day: str) -> str:
+    return f"{day}#"
