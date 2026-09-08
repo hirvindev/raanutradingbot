@@ -1,88 +1,96 @@
-# RaanuTradingBot — Setup Guide
+# RaanuTradingBot — Local Setup
+
+For architecture, environment variables, and design rationale, see
+[CLAUDE.md](CLAUDE.md). This is just the "get it running on your machine"
+guide.
 
 ## What you have
 
-- `RaanuTradingBot.html` — the dashboard
-- `server.py` — local Python backend that talks to Trade 212
-- `start.bat` — one-click launcher (Windows)
-- `.env` — your API key goes here (never share this file)
+- `raanu/` — the application package (FastAPI backend)
+- `handlers/` — Lambda entrypoints (not needed for local dev)
+- `RaanuTradingBot.html` — the dashboard, served at `/`
+- `.env` — your secrets go here (gitignored, never share this file)
 - `requirements.txt` — Python dependencies
 
 ## One-time setup
 
-### 1. Install Python (if you don't have it)
+### 1. Install Python 3.12+
 
-Download from https://python.org/downloads (3.10 or newer).
-
-**Important:** During install, tick the box that says *"Add Python to PATH"*.
-
-To check it worked, open Command Prompt and run:
-```
-python --version
+```bash
+python3 --version
 ```
 
-### 2. Get a Trade 212 API key
+macOS: `brew install python3` if it's missing or too old.
 
-Trade 212 doesn't enable API access by default. You have to ask for it.
+### 2. Get an Alpaca paper trading API key
 
-1. Open the Trade 212 mobile app or web app
-2. Go to **Settings → API (Beta)**
-3. If you see a "Generate API Key" button, click it. Choose **Practice** account first.
-4. If the API option is missing, email **info@trading212.com** asking for API access on your Practice account. They typically approve within a day.
-5. Copy the key (long string starting with random characters).
+1. Sign up at https://alpaca.markets (free)
+2. Dashboard → **Paper Trading** → API Keys → generate a key
+3. Copy the Key ID and Secret — the secret is shown once
 
-### 3. Add the key to `.env`
+Paper trading is a real Alpaca account with fake money. There is no "demo
+mode" toggle to get wrong — the base URL (`paper-api.alpaca.markets`) is what
+makes it paper.
 
-Open the `.env` file in Notepad. Replace the empty value:
+### 3. Configure `.env`
+
+```bash
+cp .env.example .env
+```
+
+Fill in at minimum:
 
 ```
-T212_API_KEY=paste-your-key-here
-T212_MODE=demo
+ALPACA_API_KEY=your-key-id
+ALPACA_SECRET_KEY=your-secret
+ALPACA_MODE=paper
 ```
 
-Save and close. Keep `T212_MODE=demo` until you have tested everything.
+Everything else in `.env.example` is optional — Telegram, web push, and the
+API auth tokens each independently no-op when unset. See CLAUDE.md's
+Environment Variables section for the full list and what each one gates.
 
-## Running it
+### 4. Install dependencies and run
 
-Double-click `start.bat`.
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m raanu.api
+```
 
-The first time it runs, it will install Python packages (takes a minute). After that, every launch is instant. Your default browser will open to `http://localhost:8000` automatically.
+Open **http://localhost:8000**. The server runs a silent startup scan and
+starts the background schedule loop; `GET /api/health` confirms it's up and
+shows whether state is persistent.
 
-You should see in the top-right corner: **T212 DEMO LIVE** with a green dot.
+### 5. Run the tests
 
-If you see anything else, check the Command Prompt window that opened — error messages there explain what's wrong.
+```bash
+pytest                                       # 191 tests — no network, no AWS
+ruff check raanu/ handlers/ tests/ tools/    # lint
+```
 
 ## What works right now
 
-- ✓ Real Trade 212 connection (Practice account)
-- ✓ Live account balance and free funds
-- ✓ Live open positions with real P&L
-- ✓ Real BUY orders via the dashboard buttons (with confirmation prompt)
-- ✓ Real SELL/Close position orders
-- ✓ Position list refreshes every 30 seconds
-
-## What's still mock data (next steps)
-
-- The equity curve chart (still shows simulated history)
-- Trade history table (mock — needs to read from `/api/history/orders`)
-- News sentiment and AI reasoning (no news API connected yet)
-- Live signals / RSI / MACD scores (no market data feed connected yet)
-- The "auto-trading" engine (it logs fake events — no real strategy is running)
-
-## Going from manual to automated
-
-Right now, BUY/SELL only fire when you click the button. To run autonomously, the next pieces needed are:
-
-1. A market data source (Alpha Vantage / Polygon.io free tier) to get real OHLC candles
-2. Indicator calculations on real data (Python `pandas-ta` library)
-3. A strategy loop that checks signals every N minutes
-4. Stop-loss watcher that auto-closes positions at -5%
-
-I can build any of these next. Tell me which to tackle first.
+- Real Alpaca paper account connection — live cash, positions, orders
+- Three independent scoring strategies (S1 pullback, S2 breakout, S3 leader
+  dip) over a curated ~470-ticker universe
+- Auto-trader with a 5-gate system before any order, weekly per-strategy
+  trade limits, and Kelly-based position sizing — **starts disabled**
+- ATR-scaled stop-loss and trailing-stop exit engine
+- Telegram + web push alerts (each optional, independently configured)
+- Walk-forward backtester (`tools/backtest.py`) with stop-rule sweeps and a
+  both-halves stability check
+- Token-gated API: a read passphrase for `GET`s, a separate trade PIN for
+  anything that moves money
 
 ## Important warnings
 
-- **The dashboard targets +4-5% per month.** Be aware that compounded, that's 60-80% per year. Renaissance Medallion, the most successful quant fund ever, averages ~66% gross. Most retail algo traders lose money. The number is aspirational, not a guarantee.
-- **Always trade in DEMO first.** Run for at least a month and verify it makes money on paper before switching `T212_MODE=live`.
-- **Never share your `.env` file.** It contains your API key. Anyone with that key can place orders on your account.
-- **T212 ticker format.** Tickers in T212 use codes like `AAPL_US_EQ`, not just `AAPL`. The dashboard's mock watchlist uses short tickers — when you place a real order, you may need the full T212 ticker. Use `/api/instruments` (visit `http://localhost:8000/api/instruments` after start) to find the exact ticker for the stock you want.
+- **No strategy has beaten SPY buy-and-hold in any backtest.** S3 is the only
+  one that stays profitable across both halves of the 3-year test. Read the
+  Backtester section of CLAUDE.md before treating any score as a sure thing.
+- **Stay on paper.** `ALPACA_MODE=paper` is the default and nothing in this
+  repo flips it to live automatically.
+- **Never share your `.env` file or anything under `~/.secrets/`.** They hold
+  the keys that can place real orders on your Alpaca account.
+- **The auto-trader starts disabled** even after you configure everything —
+  you have to explicitly `POST /api/auto/start` or use the dashboard toggle.
