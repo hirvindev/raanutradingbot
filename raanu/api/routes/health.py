@@ -74,7 +74,11 @@ def health():
         # that path is never touched — health displayed "/tmp" and
         # "persistent: false", which reads as "your trade log is being
         # thrown away" when it is not.
-        "state": _state_health(),
+        # trade_count was computed here and then never returned — dead since
+        # the route split. It is worth surfacing: a silent zero is exactly the
+        # state that re-arms the weekly trade limit, and it is the check that
+        # confirms a state migration actually copied the log.
+        "state": {**_state_health(), "trade_count": _trade_count},
         # Read through the config accessors, NOT re-derived from raw env
         # with defaults repeated here. Repeating them is exactly how this
         # endpoint came to report min_signal_score 60 while the auto-trader
