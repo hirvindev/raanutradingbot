@@ -939,6 +939,23 @@ not overlooked.
 during this work disabled production and had to be re-enabled — test against
 localhost, or use a GET, unless you mean it.
 
+**The switch is shared state, not process memory** (`auto_trader.json`), and
+that is load-bearing on AWS. It used to be a plain attribute on the
+per-process `AutoTrader`, which worked on Railway where one long-lived
+process owned both the API and the scheduler. On Lambda it was quietly
+meaningless: `POST /api/auto/start` set it on ONE API container, and the
+**worker** — the function that actually runs the 09:35 and 11:00 slots — is a
+different function that never saw it. `_execute_scheduled_trades()` also
+never checked it at all, so until 8 Sep 2026 the dashboard toggle governed
+`/api/auto/scan-now` and nothing else; the only thing preventing autonomous
+trading was the EventBridge rule shipping disabled.
+
+Both halves are fixed: the flag persists to the store both Lambdas share, and
+the scheduled slot checks it **first**, before the market-hours gate. It
+**fails closed** — an unreadable store reads as OFF, because a state blip must
+never authorise trading. `AUTO_TRADE_ENABLED` only seeds the answer before
+anyone has set it; an explicit choice survives cold starts.
+
 ### Removed, and why
 
 - **`GET /api/test/twilio`** echoed `sid[:8]` and `token[:6]` of the live

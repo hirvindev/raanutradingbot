@@ -420,3 +420,123 @@ class TestOrderRoutes:
         declared = set(orders.OrderRequest.model_fields)
         assert used, "found no order.* references — the check has stopped working"
         assert used <= declared, f"handlers read undeclared fields: {used - declared}"
+
+
+class TestAutoTraderSwitch:
+    """The ENABLE/DISABLE toggle, and the gap it used to have.
+
+    `enabled` was a plain attribute on a per-process AutoTrader instance.
+    That worked on Railway, where one long-lived process owned both the API
+    and the scheduler. On AWS it was quietly meaningless: POST /api/auto/start
+    set it on ONE API Lambda container, and the worker — which actually runs
+    the 09:35 and 11:00 slots — is a different function that never saw it.
+    """
+
+    def test_the_flag_survives_a_new_instance(self, secured, monkeypatch):
+        """Stands in for the worker: a separate process reading what the API
+        wrote. An in-memory attribute fails this."""
+        from raanu.trading.trader import AutoTrader
+        AutoTrader().enabled = True
+        assert AutoTrader().enabled is True
+        AutoTrader().enabled = False
+        assert AutoTrader().enabled is False
+
+    def test_it_defaults_off_when_never_set(self, secured):
+        from raanu.trading.trader import AutoTrader
+        assert AutoTrader().enabled is False
+
+    def test_the_env_var_seeds_the_initial_answer(self, secured, monkeypatch):
+        from raanu.trading.trader import AutoTrader
+        monkeypatch.setenv("AUTO_TRADE_ENABLED", "true")
+        assert AutoTrader().enabled is True
+
+    def test_an_explicit_choice_beats_the_env_default(self, secured, monkeypatch):
+        # Otherwise a cold start would silently re-enable a bot the owner
+        # had just switched off.
+        from raanu.trading.trader import AutoTrader
+        monkeypatch.setenv("AUTO_TRADE_ENABLED", "true")
+        AutoTrader().enabled = False
+        assert AutoTrader().enabled is False
+
+    def test_constructing_a_trader_does_not_overwrite_the_choice(self, secured, monkeypatch):
+        """__init__ used to assign self.enabled from the env. As a property
+        that would write the default over the owner's choice on every cold
+        start — which on Lambda is often."""
+        from raanu.trading.trader import AutoTrader
+        AutoTrader().enabled = True
+        for _ in range(3):
+            AutoTrader()
+        assert AutoTrader().enabled is True
+
+    def test_an_unreadable_flag_reads_as_OFF(self, secured, monkeypatch):
+        """Fail closed. A state-store blip must never authorise trading.
+
+        The trader is built BEFORE the store is broken: constructing one also
+        loads the trade log, so patching first would fail in __init__ and
+        prove nothing about the property.
+        """
+        from raanu import state
+        from raanu.trading.trader import AutoTrader
+
+        trader = AutoTrader()
+        trader.enabled = True
+        assert trader.enabled is True
+
+        def boom(*a, **k):
+            raise RuntimeError("state store unreachable")
+
+        monkeypatch.setattr(state, "load", boom)
+        assert trader.enabled is False
+
+    def test_the_scheduled_path_checks_it(self):
+        """The actual fix. _execute_scheduled_trades runs the 09:35 and 11:00
+        slots on AWS and never consulted the switch."""
+        import inspect
+
+        from raanu.trading import schedule
+        src = inspect.getsource(schedule._execute_scheduled_trades)
+        assert "get_trader().enabled" in src, (
+            "the scheduled slot no longer checks the auto-trader switch — "
+            "the dashboard toggle would govern nothing that trades")
+
+    def test_the_slot_places_no_orders_when_switched_off(self, secured, monkeypatch):
+        """Behavioural, not source-inspection: run the real slot with the
+        switch off and assert it never reaches the broker.
+
+        market_is_open() is the very next gate, so if it is called at all the
+        switch did not stop anything. asyncio.run rather than a plugin — the
+        suite has no async test support and this is the only case needing it.
+        """
+        import asyncio
+
+        from raanu.trading import schedule, trader
+
+        trader.AutoTrader().enabled = False
+
+        reached_broker = []
+        scanned = []
+
+        async def must_not_run(*a, **k):
+            reached_broker.append(True)
+            return (False, "should never be asked")
+
+        async def fake_scan(*a, **k):
+            scanned.append(True)
+            return []
+
+        monkeypatch.setattr(trader, "market_is_open", must_not_run)
+        monkeypatch.setattr(schedule, "_run_scan_and_cache", fake_scan)
+
+        asyncio.run(schedule._execute_scheduled_trades(5, "test-slot", strategy="s1"))
+
+        assert not reached_broker, "the slot got past the switch and asked the broker"
+        assert scanned, "picks should still refresh so the dashboard is not stale"
+
+    def test_the_switch_gate_precedes_the_market_hours_gate(self):
+        # It is the one a human sets; nothing below it should run when the
+        # answer is "off".
+        import inspect
+
+        from raanu.trading import schedule
+        src = inspect.getsource(schedule._execute_scheduled_trades)
+        assert src.index("get_trader().enabled") < src.index("await market_is_open()")

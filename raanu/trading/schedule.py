@@ -229,6 +229,21 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     stag = _strat_tag(strategy)
     log.info(f"[{label}][{strategy.upper()}] Scheduled run — targeting {n_orders} order(s)")
 
+    # ── Gate: the auto-trader is switched on ──────────────────────────────
+    # First gate, deliberately: it is the one a human sets, so nothing below
+    # it should run when the answer is "off".
+    #
+    # This check did not exist until 8 Sep 2026. run_one_cycle() honoured the
+    # flag, but the scheduled slots — the path that actually trades on AWS —
+    # never consulted it, so the dashboard's ENABLE/DISABLE toggle governed
+    # /api/auto/scan-now and nothing else. The only thing preventing
+    # autonomous trading was the EventBridge rule shipping disabled. Turning
+    # the bot "off" in the UI would not have stopped 09:35 and 11:00.
+    if not get_trader().enabled:
+        log.info(f"[{label}][{strategy.upper()}] auto-trader is OFF — scanning only, no orders")
+        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
+        return
+
     # ── Gate: market hours ────────────────────────────────────────────────
     # Market orders submitted while closed sit in `accepted` until the next
     # session and fill at an unknown price — never place them blind.

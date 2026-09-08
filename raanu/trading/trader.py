@@ -276,20 +276,64 @@ async def alpaca_buy_notional(symbol: str, notional: float,
 
 
 # ---------- AUTO TRADER ----------
+# The auto-trader's on/off switch, in the store both Lambdas share. See the
+# `enabled` property below for why it cannot live in process memory.
+_AUTO_STATE_KEY = "auto_trader.json"
+
+
 class AutoTrader:
     def __init__(self):
-        # Off unless explicitly enabled. This used to be a hardcoded True, so
-        # every `python3 server.py` silently became a live trading bot on the
-        # shared Alpaca account — contradicting the documented "starts
-        # DISABLED". Running a local server alongside the deployed one gave two
-        # traders on one account, each with its own weekly counter (so double
-        # the intended trades) and each seeing the other's fills as untagged.
-        # Set AUTO_TRADE_ENABLED=true on exactly ONE deployment.
-        self.enabled = config.auto_trade_enabled()
+        # NOTE: `enabled` is deliberately NOT set here — it is a property
+        # backed by the shared state store. Assigning it in __init__ would
+        # write the env default over whatever the owner last chose, on every
+        # cold start.
         self.tradelog = TradeLog()
         self.last_scan: dict | None = None
         self.last_decision: dict | None = None
         self.events: list[dict] = []
+
+    # ── the on/off switch ────────────────────────────────────────────────
+    #
+    # Shared state, not process memory. It used to be a plain attribute, which
+    # worked on Railway — one long-lived process owned both the API and the
+    # scheduler, so `get_trader().enabled = True` was visible to the loop that
+    # traded.
+    #
+    # On AWS that is no longer true and the attribute was quietly meaningless:
+    #
+    #   * POST /api/auto/start set it on ONE API Lambda container. The next
+    #     request could land on another container, or a cold one, and see the
+    #     old value.
+    #   * The worker — which actually runs the 09:35 and 11:00 slots — is a
+    #     different function entirely and never saw it at all.
+    #
+    # Putting it in the state store both Lambdas already share makes the
+    # switch mean the same thing everywhere. Off unless explicitly turned on:
+    # a hardcoded True once made every local `python -m raanu.api` a live
+    # trading bot on the shared Alpaca account.
+
+    @property
+    def enabled(self) -> bool:
+        try:
+            saved = state.load(_AUTO_STATE_KEY, default=None)
+        except Exception as e:
+            # Fail closed. An unreadable switch must never authorise trading,
+            # and the dashboard showing "off" during a blip is the harmless
+            # direction to be wrong in.
+            log.warning(f"[auto] could not read the enable flag ({e}) — treating as OFF")
+            return False
+        if not isinstance(saved, dict) or "enabled" not in saved:
+            # Never set. AUTO_TRADE_ENABLED seeds the initial answer so a
+            # deployment can ship enabled if it means to.
+            return config.auto_trade_enabled()
+        return bool(saved["enabled"])
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        state.save(_AUTO_STATE_KEY, {
+            "enabled": bool(value),
+            "changed_at": datetime.now(UTC).isoformat(),
+        })
 
     def event(self, kind: str, msg: str, extra: dict | None = None):
         ev = {"ts": datetime.now(UTC).isoformat(), "kind": kind, "msg": msg}
