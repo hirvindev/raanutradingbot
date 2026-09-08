@@ -141,11 +141,13 @@ def from_trade_log(strategy: str | None = None,
     """
     from raanu.trading.trader import get_trader
 
+    filters = {"action": "SELL"}
+    if strategy is not None:
+        filters["strategy"] = strategy
     pnls = [
         float(t["realized_pnl"])
-        for t in get_trader().tradelog.data.get("trades", [])
-        if t.get("action") == "SELL" and t.get("realized_pnl") is not None
-        and (strategy is None or t.get("strategy") == strategy)
+        for t in get_trader().tradelog.all_trades(filters=filters)
+        if t.get("realized_pnl") is not None
     ]
     return from_pnls(pnls, fraction)
 

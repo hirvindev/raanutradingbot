@@ -31,25 +31,31 @@ run on live data.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from raanu import state
+from raanu.state import keys
 
 log = logging.getLogger("raanu.picks")
-
-STATE_KEY = "picks_log.json"
 
 FORWARD_DAYS = (1, 5, 20)
 MAX_PER_SCAN = 5          # the top few are what a person would actually act on
 BANDS = ((90, 200, "90+"), (80, 90, "80-89"), (70, 80, "70-79"), (0, 70, "60-69"))
 
+# A pick stops being backfilled once every forward window has had a chance to
+# close. Without this, a row whose price history no longer covers its pick date
+# stays "pending" forever and its ticker is re-downloaded on every daily
+# backfill — the pending set only ever grew.
+MATURE_AFTER_DAYS = 40
 
-def _load() -> dict:
-    return state.load(STATE_KEY, default={"picks": []})
+
+def _load_rows() -> list:
+    """Every pick, oldest first."""
+    return [r.data for r in state.query(keys.PICK)]
 
 
-def _save(data: dict):
-    state.save(STATE_KEY, data)
+def _put(row: dict) -> None:
+    state.put(keys.PICK, keys.pick_sk(row["date"], row["strategy"], row["ticker"]), row)
 
 
 def record(strategy: str, picks: list) -> int:
@@ -62,16 +68,18 @@ def record(strategy: str, picks: list) -> int:
     if not picks:
         return 0
     try:
-        data = _load()
         day = datetime.now(UTC).date().isoformat()
-        have = {(p["date"], p["strategy"]) for p in data["picks"]}
-        if (day, strategy) in have:
+        # Idempotence is now a property of the key, not of a scan: the sort key
+        # is (date, strategy, ticker), so re-recording the same day overwrites
+        # in place instead of appending a duplicate. Still short-circuit, to
+        # keep the "already recorded" case free of writes.
+        if state.query(keys.PICK, sk_prefix=f"{day}#{strategy}#", limit=1):
             return 0
         n = 0
         for p in picks[:MAX_PER_SCAN]:
             if not p.get("ticker") or not p.get("score"):
                 continue
-            data["picks"].append({
+            _put({
                 "date": day,
                 "ts": datetime.now(UTC).isoformat(),
                 "strategy": strategy,
@@ -81,9 +89,10 @@ def record(strategy: str, picks: list) -> int:
                 "price_at_pick": p.get("price"),
                 "reasons": p.get("reasons", [])[:6],
                 "fwd": {},
+                "spy": {},
+                "matured": False,
             })
             n += 1
-        _save(data)
         log.info(f"[picks] recorded {n} {strategy.upper()} picks for {day}")
         return n
     except Exception as e:
@@ -95,8 +104,9 @@ def fill_forward_returns() -> dict:
     """Backfill forward returns for anything old enough. Never revises a value."""
     from raanu.market.prices import batch_download
 
-    data = _load()
-    rows = data.get("picks", [])
+    # Only unmatured rows are candidates — a bounded query rather than a scan
+    # of every pick ever recorded.
+    rows = [r.data for r in state.query(keys.PICK, filters={"matured": False})]
     pending = [r for r in rows if any(f"d{d}" not in (r.get("fwd") or {}) for d in FORWARD_DAYS)]
     if not pending:
         return {"filled": 0, "pending": 0}
@@ -107,6 +117,7 @@ def fill_forward_returns() -> dict:
               for t, df in frames.items() if df is not None and not df.empty}
 
     filled = 0
+    today = datetime.now(UTC).date()
     for r in rows:
         s = closes.get(r["ticker"])
         spy = closes.get("SPY")
@@ -136,8 +147,16 @@ def fill_forward_returns() -> dict:
                         if j0 + d < len(spy) and float(spy.iloc[j0]) > 0:
                             bwd[k] = round((float(spy.iloc[j0 + d]) / float(spy.iloc[j0]) - 1) * 100, 2)
 
-    _save(data)
-    still = sum(1 for r in rows if any(f"d{d}" not in (r.get("fwd") or {}) for d in FORWARD_DAYS))
+        # Retire the row once every window has had time to close, whether or
+        # not the data ever arrived. Otherwise a pick whose history no longer
+        # reaches its own date is re-downloaded daily, forever.
+        age = (today - date.fromisoformat(r["date"])).days
+        complete = all(f"d{d}" in (r.get("fwd") or {}) for d in FORWARD_DAYS)
+        if complete or age > MATURE_AFTER_DAYS:
+            r["matured"] = True
+        _put(r)
+
+    still = sum(1 for r in rows if not r.get("matured"))
     log.info(f"[picks] filled {filled} forward returns, {still} still maturing")
     return {"filled": filled, "pending": still}
 
@@ -157,8 +176,7 @@ def _agg(rows: list, day: str) -> dict | None:
 
 
 def summary() -> dict:
-    data = _load()
-    rows = data.get("picks", [])
+    rows = _load_rows()
 
     by_strategy, by_band = {}, {}
     for s in ("s1", "s2", "s3"):
@@ -190,4 +208,6 @@ def summary() -> dict:
 
 
 def recent(limit: int = 40) -> list:
-    return _load().get("picks", [])[-limit:][::-1]
+    """Newest first. A bounded query — this used to load every pick ever
+    recorded in order to return the last forty."""
+    return [r.data for r in state.query(keys.PICK, descending=True, limit=limit)]

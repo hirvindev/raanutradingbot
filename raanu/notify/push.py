@@ -40,18 +40,26 @@ import logging
 from datetime import UTC, datetime
 
 from raanu import config, state
+from raanu.state import keys
 
 log = logging.getLogger("raanu.notify.push")
 
-SUBS_KEY = "push_subs.json"
-
-
 def _load() -> list:
-    return state.load(SUBS_KEY, default={}).get("subs", [])
+    """Every registered browser. One item per device, keyed by endpoint hash."""
+    return [r.data for r in state.query(keys.PUSHSUB)]
 
 
 def _save(subs: list):
-    state.save(SUBS_KEY, {"subs": subs})
+    """Replace the registered set. Writes each device and removes the rest —
+    callers pass the full list they want to end up with (subscribe appends,
+    the 404/410 prune filters)."""
+    live = {keys.pushsub_sk(s["endpoint"]) for s in subs if s.get("endpoint")}
+    for record in state.query(keys.PUSHSUB):
+        if record.sk not in live:
+            state.delete(keys.PUSHSUB, record.sk)
+    for sub in subs:
+        if sub.get("endpoint"):
+            state.put(keys.PUSHSUB, keys.pushsub_sk(sub["endpoint"]), sub)
 
 
 def public_key() -> str:
@@ -140,7 +148,6 @@ def status() -> dict:
 
 
 # ---------- event helpers (call these, not send()) ----------
-NOTIF_KEY = "notifications.json"
 # Read per call via config.notif_retain_hours() — this used to be a
 # module-level constant frozen at import, before SSM secrets had loaded.
 
@@ -157,14 +164,13 @@ def _record(title: str, body: str, tag: str):
     grows is one more thing to prune later.
     """
     try:
-        now = datetime.now(UTC)
-        items = state.load(NOTIF_KEY, default={}).get("items", [])
-        items.insert(0, {"ts": now.isoformat(), "title": title,
-                         "body": body, "tag": tag})
-        cutoff = now.timestamp() - config.notif_retain_hours() * 3600
-        items = [i for i in items
-                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff][:200]
-        state.save(NOTIF_KEY, {"items": items})
+        # One item per alert with a real TTL, so retention is the store's job
+        # rather than a [:200] slice re-applied on every write. That slice was
+        # the only thing keeping this key under the item-size limit.
+        stamp = keys.now_stamp()
+        state.put(keys.NOTIF, keys.notif_sk(stamp),
+                  {"ts": stamp, "title": title, "body": body, "tag": tag},
+                  ttl_seconds=int(config.notif_retain_hours() * 3600))
     except Exception as e:
         log.warning(f"[push] could not record notification: {e}")
 
@@ -172,9 +178,11 @@ def _record(title: str, body: str, tag: str):
 def history() -> list:
     """Alerts from the retention window, newest first."""
     try:
+        # TTL reclaims lazily, so still apply the cutoff on read — an expired
+        # item can linger for up to 48h after its deadline.
         cutoff = datetime.now(UTC).timestamp() - config.notif_retain_hours() * 3600
-        items = state.load(NOTIF_KEY, default={}).get("items", [])
-        return [i for i in items
+        rows = [r.data for r in state.query(keys.NOTIF, descending=True, limit=200)]
+        return [i for i in rows
                 if datetime.fromisoformat(i["ts"]).timestamp() >= cutoff]
     except Exception:
         return []

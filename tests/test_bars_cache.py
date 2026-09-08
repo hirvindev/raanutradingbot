@@ -89,7 +89,8 @@ class TestStoreAndLoad:
 
     def test_corrupt_entry_is_skipped_not_fatal(self):
         from raanu import state
-        state.save(cache._key("AAA", cache.session_date()), {"bars": "not-gzip"})
+        from raanu.state import keys
+        state.put(keys.BARS, cache._key("AAA", cache.session_date()), {"bars": "not-gzip"})
         assert cache.load(["AAA"]) == {}
 
     def test_disabled_cache_stores_and_loads_nothing(self, monkeypatch):

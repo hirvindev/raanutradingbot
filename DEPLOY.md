@@ -59,6 +59,26 @@ The native React Native app, the TWA wrapper, `deploy-mobile.sh` and
 section of `CLAUDE.md` for why, and what you would have to settle before
 bringing one back.
 
+## State migrations
+
+The state table is `pk` + `sk`, one item per record. If a migration is ever
+needed again, the ordering is the safety property — run it while the old code
+is still live and **before** deploying code that reads the new shape:
+
+```bash
+gh workflow run "Deploy AWS skeleton"          # 1. ship the table, unused
+python -m tools.migrate_state --to-table <new> # 2. dry run (the default)
+python -m tools.migrate_state --to-table <new> --apply
+python -m tools.migrate_state --to-table <new> --verify
+gh workflow run "Deploy AWS skeleton"          # 3. ship the code that uses it
+curl -s .../api/health | jq .state             # 4. trade_count must match
+```
+
+⚠️ **An empty trade log reads as "no trades this week" and re-arms the weekly
+trade limit.** A migration that silently copies nothing is the failure worth
+checking for, which is what `--verify` and step 4 are for. Do the whole thing
+with the EventBridge rule DISABLED so nothing writes underneath you.
+
 ## What is deliberately NOT automated
 
 **The EventBridge worker schedule ships DISABLED.** Nothing scans or trades

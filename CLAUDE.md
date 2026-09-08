@@ -1121,10 +1121,9 @@ git push
 
 ---
 
-## 💾 Persistent State — datadir.py
+## 💾 Persistent State — raanu/state/
 
-`trades_log.json`, `position_peaks.json` and the picks caches must survive a
-restart. Three things break silently if they don't:
+State must survive a restart. Three things break silently if it doesn't:
 
 - **strategy attribution** — round-trips are tagged from the ticker's BUY entry,
   so an empty log reports every closed trade as `s1`
@@ -1132,13 +1131,97 @@ restart. Three things break silently if they don't:
 - **`kelly.py` `MIN_SAMPLE`** — the 30-trade gate never graduates off the
   fallback risk if the sample keeps resetting
 
-Resolution order: `$DATA_DIR` → project dir (local dev, detected by `.env`) →
-`/tmp` with a warning. **On Railway a 5GB volume is mounted at `/data` with
-`DATA_DIR=/data`.** Before this, all three modules independently fell back to
-`/tmp`, which Railway wipes on every redeploy.
+Resolution order for the file backend: `$DATA_DIR` → project dir (local dev,
+detected by `.env`) → `/tmp` with a warning. Check it with `GET /api/health` →
+`state.data_dir` / `state.persistent`. If `data_dir` reads `/tmp`, the write
+test failed and state is ephemeral.
 
-Check it with `GET /api/health` → `state.data_dir` / `state.persistent`.
-If `data_dir` reads `/tmp`, the write test failed and state is ephemeral.
+### The data model — one item per record (Sep 2026)
+
+Every item is `pk` (entity) + `sk` (record) + `data` (+ optional `ttl`).
+
+| pk | sk | contents |
+|----|----|----------|
+| `TRADE` | `{iso_ts}#{uid}` | one item per trade |
+| `PICK` | `{date}#{strategy}#{ticker}` | one item per pick |
+| `NOTIF` | `{iso_ts}#{uid}` | one per alert, TTL 48h |
+| `PEAK` | `{symbol}` | one per open position |
+| `PUSHSUB` | `{sha256(endpoint)[:16]}` | one per browser |
+| `CACHE` | `last_picks#{s1\|s2\|s3}` | latest scan per strategy |
+| `FLAG` | `auto_trader.json` \| `scheduler_marks` | small switches |
+| `SCAN` | `current` \| `{run_id}#shard#{i}` | TTL 24h |
+| `BARS` | `{day}#{ticker}` | TTL 4 days |
+
+**Each collection used to be ONE item holding a growing list.** Measured on
+the live table before the change: `trades_log.json` at 1,439 B/trade would hit
+DynamoDB's 400 KB item ceiling at **~285 trades** (about six months at the
+weekly-limit pace); `picks_log.json` at 414 B/pick at **~989 picks** (about
+three months). Three separate problems, all properties of the item shape:
+
+1. **The ceiling, and its silence.** An oversized `put_item` raised inside a
+   bare `except` that only logged — the trade log would simply stop recording.
+   There is now a **size guard** (`MAX_ITEM_BYTES = 300_000`) that raises
+   `StateItemTooLarge` instead. ⚠️ Do not "fix" a guard trip by raising the
+   limit; it means an entity needs splitting.
+2. **Lost updates.** `TradeLog.data` was a snapshot cached for the life of a
+   Lambda container and rewritten whole on every append, so a BUY from the
+   worker and a SELL from the API discarded each other. **There is deliberately
+   no cached copy now** — every read is a query, every write is one item.
+3. **Full-log walks on hot paths.** `trades_in_last_7_days` ran four times per
+   `/api/auto/status`, which the dashboard polls. It is a key-range read now.
+
+Sort keys are lexicographically chronological, which several consumers depend
+on. Timestamps use `isoformat(timespec="microseconds")` — **fixed width is
+load-bearing**: the default `isoformat()` drops microseconds when they are
+zero, changing the string width and breaking the ordering. The `#{uid}` suffix
+makes a same-microsecond collision impossible.
+
+### Why `data` is a native map, and what that cost
+
+`data` used to be an **escaped JSON string**, copied from the file backend it
+replaced ("one file → one item"). No commit recorded a reason, but it was
+load-bearing: **DynamoDB rejects Python floats** (`TypeError: Float types are
+not supported`) and this codebase is float-saturated with no `Decimal`
+anywhere.
+
+`raanu/state/coerce.py` converts float↔Decimal **at the state boundary**, so
+`data` is a real map while callers still hand in and receive plain floats.
+Nothing outside `raanu/state/` sees a `Decimal`. ⚠️ That placement is the
+point — `exits.py` computes `atr / entry` on a value read straight from state,
+in the live stop-loss path, inside a `try` that would swallow a Decimal
+`TypeError` and **skip the exit check**.
+
+Measured on the live picks log: a map is **24% smaller** than the escaped
+string (4,984 → 3,798 bytes), because nothing is escaped and em-dashes stop
+expanding to `—`.
+
+Two conversions are deliberately lossy, both pinned by tests:
+
+- **`NaN`/`Infinity` → `None`.** DynamoDB rejects both. The string encoding let
+  them through only by accident — `json.dumps` emits a bare `NaN`, invalid JSON
+  that `json.loads` happens to accept. pandas produces NaN readily.
+- **Integral floats come back as int** (`5000.0` → `5000`). DynamoDB's number
+  type cannot distinguish them. Verified safe: there is no `isinstance(x, float)`
+  or `isinstance(x, int)` anywhere in `raanu/` or `handlers/`.
+
+### Querying it
+
+`state.query(pk, sk_gte=..., sk_prefix=..., filters=..., project=..., limit=...)`.
+`filters` are equality tests on dotted paths inside `data` and narrow what is
+*returned*; `sk_gte`/`sk_prefix` narrow what is *read*. ⚠️ DynamoDB applies
+`Limit` **before** `FilterExpression`, so the backend pages until it has enough
+post-filter rows — do not "simplify" that into passing `Limit` through.
+
+For analysis: `python -m tools.query_state {entities,trades,picks,pnl,scores,sizes}`
+and the read-only `GET /api/analysis/{entities,trades,pnl,scores}`.
+
+### Migration
+
+`tools/migrate_state.py` moved the nine real items. The other ~6,800 rows were
+TTL'd caches (`bars/*`, `scan/*`) that rebuild themselves, so they were skipped
+rather than copied — which is why the migration was nine items and not 6,810.
+`scan_job.json` (31.8 KB) was dropped: an orphan from the pre-sharding era that
+no code referenced. The old table is `RETAIN` and survives as a rollback.
 
 ---
 

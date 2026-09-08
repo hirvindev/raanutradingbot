@@ -13,6 +13,15 @@ pre-market scan, the 09:35/11:00 ET execution slots, the exit monitor, and
 individual scan shards. All persistent state lives in one DynamoDB table
 (`raanu/state`); secrets come from SSM Parameter Store at cold start.
 
+**The state table is `pk` + `sk`, one item per record.** It replaced a
+single-`state_key` table in Sep 2026, because one item per *collection* put
+DynamoDB's 400 KB item ceiling directly in the path of the trade log (~285
+trades) and the picks log (~989 picks) — and made every append a whole-object
+rewrite that the two Lambdas silently lost to each other. DynamoDB cannot add
+a sort key to an existing table, so this is a new table; the old one is
+`RETAIN` and still there as a rollback. See CLAUDE.md's Persistent State
+section for the entity layout and `tools/migrate_state.py` for the cutover.
+
 Deploys run from GitHub Actions via OIDC — no AWS credentials are stored
 anywhere in this repo.
 
@@ -45,9 +54,9 @@ aws/
 ├── requirements.txt        Python deps for the CDK app itself (not the bot)
 ├── package.json            pins the CDK CLI version (npx cdk ...)
 ├── stacks/
-│   └── skeleton_stack.py   the whole stack: S3, CloudFront, DynamoDB (with
-│                           TTL), both Lambdas, the market-hours EventBridge
-│                           rule, IAM grants
+│   └── skeleton_stack.py   the whole stack: S3, CloudFront, DynamoDB (pk+sk,
+│                           with TTL), both Lambdas, the market-hours
+│                           EventBridge rule, IAM grants
 ├── site/                   GENERATED at synth time from RaanuTradingBot.html
 │                           /sw.js/manifest.webmanifest/icons — gitignored,
 │                           never hand-edit; see skeleton_stack.py's

@@ -75,16 +75,37 @@ class SkeletonStack(Stack):
         # cache — see raanu/state. RETAIN, not the site bucket's
         # DESTROY/auto-delete: this table will hold real trade history, and
         # a `cdk destroy` must not be able to erase it.
+        #
+        # Composite pk+sk, so a collection is one item PER RECORD rather than
+        # one item holding a growing list. The previous single-`state_key`
+        # table put DynamoDB's 400KB item ceiling directly in the path of the
+        # trade log (~285 trades) and the picks log (~989 picks), and made
+        # every append a whole-object read-modify-write that the API and
+        # worker Lambdas used to silently lose to each other.
+        #
+        # This is a NEW table rather than an alteration: DynamoDB cannot add a
+        # sort key to an existing one. The old StateTable is RETAIN, so it
+        # survives as a rollback until the cutover is confirmed.
         state_table = dynamodb.Table(
             self,
-            "StateTable",
-            partition_key=dynamodb.Attribute(name="state_key", type=dynamodb.AttributeType.STRING),
+            "StateTableV2",
+            partition_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
-            # Scan-run shards and cached daily bars write a `ttl` and expire
-            # themselves. Without this they would accumulate forever, since
-            # nothing else ever deletes them.
+            # Scan-run shards, cached daily bars and notifications write a
+            # `ttl` and expire themselves. Without this they would accumulate
+            # forever, since nothing else ever deletes them.
             time_to_live_attribute="ttl",
+        )
+
+        # The pre-migration table. Kept in the stack so `tools/migrate_state.py`
+        # can read it and so a rollback has somewhere to go; remove this block
+        # once the new table is confirmed good, at which point RETAIN means
+        # CloudFormation orphans it rather than deleting it.
+        legacy_table = dynamodb.Table.from_table_name(
+            self, "StateTableLegacy",
+            "RaanuAwsSkeleton-StateTable9728C7E5-OOZ1KI3HJWKE",
         )
 
         distribution = cloudfront.Distribution(
@@ -178,6 +199,11 @@ class SkeletonStack(Stack):
 
         state_table.grant_read_write_data(api_fn)
         state_table.grant_read_write_data(worker_fn)
+        # Read-only on the legacy table: the migration reads it, nothing writes
+        # it again. Read-only is what makes "the old table is the rollback"
+        # true rather than aspirational.
+        legacy_table.grant_read_data(api_fn)
+        legacy_table.grant_read_data(worker_fn)
 
         # SSM parameters under /raanutradingbot/* are seeded by hand (see
         # aws/README.md) — CDK never creates or touches the values
@@ -328,3 +354,4 @@ class SkeletonStack(Stack):
         CfnOutput(self, "SiteBucketName", value=site_bucket.bucket_name)
         CfnOutput(self, "DistributionId", value=distribution.distribution_id)
         CfnOutput(self, "StateTableName", value=state_table.table_name)
+        CfnOutput(self, "LegacyStateTableName", value=legacy_table.table_name)

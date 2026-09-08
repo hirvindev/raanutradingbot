@@ -122,7 +122,8 @@ def _strategy_resolver():
     latest BUY", which is correct for the lot currently held.
     """
     buys: dict[str, list[tuple[datetime | None, str]]] = {}
-    for t in get_trader().tradelog.data.get("trades", []):
+    for t in get_trader().tradelog.all_trades(
+            project=["ticker", "strategy", "action", "timestamp"]):
         if t.get("action") == "BUY" and t.get("ticker"):
             buys.setdefault(t["ticker"].upper(), []).append(
                 (_parse_ts(t.get("timestamp")), t.get("strategy", "s1"))

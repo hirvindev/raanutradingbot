@@ -27,6 +27,7 @@ from raanu import config
 from raanu.api import auth
 from raanu.api.routes import (
     account,
+    analysis,
     auto,
     exits,
     health,
@@ -49,7 +50,7 @@ log = logging.getLogger("raanu.api")
 # static must be last: it owns "/" and the PWA asset routes, and registering
 # it before the /api routers would let its catch-alls shadow them.
 _ROUTERS = (
-    auth.router, health.router, account.router, orders.router, auto.router, scan.router,
+    auth.router, health.router, analysis.router, account.router, orders.router, auto.router, scan.router,
     push.router, picks.router, strategy.router, reports.router, notify.router,
     exits.router, webhooks.router, stocks.router, schedule.router, static.router,
 )

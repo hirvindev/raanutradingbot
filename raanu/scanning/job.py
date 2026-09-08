@@ -18,14 +18,18 @@ Two modes, because the two callers want opposite things:
 
 Both run the identical engine. Only the execution shape differs.
 
-Storage uses the existing single-partition-key table, no schema change:
+Storage, under the SCAN entity:
 
-    scan/current              -> the manifest (run id, shard count, mode)
-    scan/{run_id}/shard/{i}   -> one shard's progress and hits
+    SCAN / current                 -> the manifest (run id, shard count, mode)
+    SCAN / {run_id}#shard#{i}      -> one shard's progress and hits
 
 Per-shard items also fix a latent problem in the previous design, which
 rewrote the entire growing result list to ONE item every 25 tickers — ~19
 writes of a payload climbing toward DynamoDB's 400KB item ceiling.
+
+Aggregation is a key-range query over the run's shard prefix, so it no longer
+has to be told how many shards to expect — a manifest that disagrees with
+reality (a resized run, a partial dispatch) used to silently drop shards.
 """
 
 from __future__ import annotations
@@ -38,10 +42,10 @@ from concurrent.futures import ThreadPoolExecutor
 from raanu import config, state
 from raanu.market import exchanges
 from raanu.scanning.engine import enrich_market_caps, scan_universe
+from raanu.state import keys
 
 log = logging.getLogger("raanu.scanning.job")
 
-MANIFEST_KEY = "scan/current"
 
 # Scan state is transient by nature — the next run supersedes it. A day is
 # long enough to inspect a finished run and short enough that per-run shard
@@ -70,10 +74,6 @@ _MAX_HITS_PER_SHARD = 25
 # as stalled. A shard that dies (OOM, timeout, a Lambda-level error) would
 # otherwise leave the UI polling a run that can never finish.
 _STALL_AFTER_SECONDS = 15 * 60
-
-
-def _shard_key(run_id: str, index: int) -> str:
-    return f"scan/{run_id}/shard/{index}"
 
 
 def shard_count_for(ticker_count: int) -> int:
@@ -119,13 +119,13 @@ def start_run(mode: str = "fast", tickers: list[str] | None = None,
         "total": len(universe),
         "started_at": time.time(),
     }
-    state.save(MANIFEST_KEY, manifest, ttl_seconds=_RUN_TTL_SECONDS)
+    state.put(keys.SCAN, keys.scan_manifest_sk(), manifest, ttl_seconds=_RUN_TTL_SECONDS)
     # Seed every shard as pending, so a poll arriving before the workers have
     # cold-started reports "0 of N done" rather than an empty, ambiguous run.
     for index, shard in enumerate(shards):
-        state.save(_shard_key(manifest["run_id"], index),
-                   {"status": "pending", "scanned": 0, "total": len(shard), "hits": []},
-                   ttl_seconds=_RUN_TTL_SECONDS)
+        state.put(keys.SCAN, keys.scan_shard_sk(manifest["run_id"], index),
+                  {"status": "pending", "scanned": 0, "total": len(shard), "hits": []},
+                  ttl_seconds=_RUN_TTL_SECONDS)
     return {**manifest, "_shards": shards}
 
 
@@ -135,7 +135,7 @@ def run_shard(run_id: str, index: int, tickers: list[str]) -> None:
     A shard that dies must not take the run down with it — the aggregate
     reports what the surviving shards found and flags the failure.
     """
-    key = _shard_key(run_id, index)
+    key = keys.scan_shard_sk(run_id, index)
     total = len(tickers)
 
     def publish(status: str, scanned: int, hits: list[dict], error: str | None = None) -> None:
@@ -156,7 +156,7 @@ def run_shard(run_id: str, index: int, tickers: list[str]) -> None:
             payload["finished_at"] = time.time()
         if error:
             payload["error"] = error
-        state.save(key, payload, ttl_seconds=_RUN_TTL_SECONDS)
+        state.put(keys.SCAN, key, payload, ttl_seconds=_RUN_TTL_SECONDS)
 
     publish("running", 0, [])
     try:
@@ -219,27 +219,28 @@ def run_inline(manifest: dict) -> None:
 def status() -> dict:
     """Merged view of the current run, for the dashboard to poll.
 
-    One BatchGetItem for all shards rather than N reads, so polling every
-    1.5s stays cheap.
+    One key-range query returns every shard of the run, so polling every 1.5s
+    stays cheap — and, unlike the BatchGet it replaces, it does not need to be
+    told how many shards to expect.
     """
-    manifest = state.load(MANIFEST_KEY)
+    manifest = state.get(keys.SCAN, keys.scan_manifest_sk())
     if not manifest:
         return {"status": "idle"}
 
     run_id = manifest["run_id"]
     shard_count = manifest.get("shards", 1)
-    shards = state.load_many([_shard_key(run_id, i) for i in range(shard_count)])
+    shards = [r.data for r in state.query(keys.SCAN, sk_prefix=keys.scan_run_prefix(run_id))]
 
-    scanned = sum(s.get("scanned", 0) for s in shards.values())
+    scanned = sum(s.get("scanned", 0) for s in shards)
     hits: list[dict] = []
     found = 0
-    for shard in shards.values():
+    for shard in shards:
         hits.extend(shard.get("hits") or [])
         found += shard.get("total_hits", len(shard.get("hits") or []))
     hits.sort(key=lambda h: h.get("score", 0), reverse=True)
 
-    done = sum(1 for s in shards.values() if s.get("status") == "done")
-    failed = [s for s in shards.values() if s.get("status") == "error"]
+    done = sum(1 for s in shards if s.get("status") == "done")
+    failed = [s for s in shards if s.get("status") == "error"]
     finished = (done + len(failed)) >= shard_count and shard_count > 0
 
     if finished:
@@ -253,7 +254,7 @@ def status() -> dict:
 
     started_at = manifest.get("started_at", 0)
     if finished:
-        stamps = [s["finished_at"] for s in shards.values() if s.get("finished_at")]
+        stamps = [s["finished_at"] for s in shards if s.get("finished_at")]
         elapsed = round(max(stamps) - started_at, 1) if stamps else None
     else:
         elapsed = round(time.time() - started_at, 1)

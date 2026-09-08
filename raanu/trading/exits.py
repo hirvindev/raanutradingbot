@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from raanu import config, state
+from raanu.state import keys
 
 log = logging.getLogger("raanu.profit")
 
@@ -68,28 +69,38 @@ def update_exit_config(updates: dict) -> dict:
     return updated
 
 
-_PEAKS_KEY = "position_peaks.json"
-
-
 def _load_peaks() -> dict:
     """
     Per-position state: {symbol: {"peak": float, "atr": float}}.
 
-    Older files stored a bare float per symbol — upgrade those in place so the
-    trailing stop keeps its high-water mark across the format change.
+    One item per symbol now, rather than one item holding every symbol. The
+    in-memory shape callers see is unchanged.
+
+    Older records stored a bare float per symbol — upgrade those in place so
+    the trailing stop keeps its high-water mark across the format change.
     """
-    raw = state.load(_PEAKS_KEY, default={})
     out = {}
-    for sym, val in raw.items():
-        if isinstance(val, dict):
-            out[sym] = val
-        else:
-            out[sym] = {"peak": float(val), "atr": None}
+    for record in state.query(keys.PEAK):
+        val = record.data
+        if isinstance(val, dict) and "peak" in val:
+            out[record.sk] = val
+        elif isinstance(val, (int, float)):
+            out[record.sk] = {"peak": float(val), "atr": None}
     return out
 
 
 def _save_peaks(peaks: dict) -> None:
-    state.save(_PEAKS_KEY, peaks)
+    """Write each symbol's peak, and delete the ones that are gone.
+
+    The caller prunes closed positions out of the dict, so anything present in
+    the store but absent here is a position that has been exited.
+    """
+    live = {sym.upper() for sym in peaks}
+    for record in state.query(keys.PEAK):
+        if record.sk not in live:
+            state.delete(keys.PEAK, record.sk)
+    for sym, val in peaks.items():
+        state.put(keys.PEAK, keys.peak_sk(sym), val)
 
 
 async def _get_atr(symbol: str, period: int = 14) -> float | None:
@@ -245,13 +256,42 @@ def strategy_for(symbol: str) -> str:
     defaults, which are identical to the S1 values. Same exits, honest label.
     """
     try:
-        from raanu.trading.trader import get_trader
-        for t in reversed(get_trader().tradelog.data.get("trades", [])):
-            if t.get("action") == "BUY" and (t.get("ticker") or "").upper() == symbol.upper():
-                return t.get("strategy") or "unknown"
+        return _buy_attribution().get(symbol.upper(), "unknown")
     except Exception:
-        pass
-    return "unknown"
+        return "unknown"
+
+
+# Ticker -> strategy of its most recent BUY, built once per monitor pass.
+#
+# Both strategy_for() and _record_exit() need this, and both used to answer it
+# by walking the whole in-memory trade log backwards — once per open position,
+# per pass, every five minutes. One projected query per pass replaces N walks,
+# and reads four fields per trade instead of the whole record.
+_attribution: dict[str, str] | None = None
+
+
+def _buy_attribution() -> dict[str, str]:
+    global _attribution
+    if _attribution is None:
+        from raanu.trading.trader import get_trader
+        index: dict[str, str] = {}
+        for trade in get_trader().tradelog.all_trades(
+                project=["ticker", "strategy", "action"]):
+            if (trade.get("action") or "BUY").upper() != "BUY":
+                continue
+            ticker = (trade.get("ticker") or "").upper()
+            if ticker:
+                # Ascending order, so the last write wins = the most recent BUY.
+                index[ticker] = trade.get("strategy") or "unknown"
+        _attribution = index
+    return _attribution
+
+
+def reset_attribution() -> None:
+    """Drop the per-pass index. Called at the start of every monitor pass so a
+    BUY placed since the last pass is visible."""
+    global _attribution
+    _attribution = None
 
 
 def stop_atr_mult_for(strategy: str) -> float:
@@ -282,11 +322,7 @@ def _record_exit(symbol: str, entry: float, exit_price: float,
         # "unknown", never "s1" — see strategy_for(). Mislabelling an
         # unattributable exit pollutes the win rate and payoff ratio that
         # position sizing is computed from.
-        strategy = "unknown"
-        for t in reversed(get_trader().tradelog.data.get("trades", [])):
-            if t.get("action") == "BUY" and (t.get("ticker") or "").upper() == symbol.upper():
-                strategy = t.get("strategy") or "unknown"
-                break
+        strategy = strategy_for(symbol)
 
         # Exits are the events most worth interrupting someone for — a stop or
         # trail firing is news. Wrapped: the position is already closed.
@@ -340,6 +376,11 @@ async def run_monitor_once():
     development, where there is a persistent process to sleep inside."""
     cfg = config.exit_config()
     from raanu.notify.telegram import format_profit_alert, send_whatsapp
+
+    # Rebuild the attribution index for this pass, so a BUY placed since the
+    # last one is visible. Stale attribution would tag an exit "unknown" and
+    # its P&L would miss the strategy that actually earned it.
+    reset_attribution()
 
     if not await _market_is_open():
         log.debug("Profit monitor: market closed — skipping exit checks")

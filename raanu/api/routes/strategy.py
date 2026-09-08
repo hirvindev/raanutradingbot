@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/api/strategy/compare")
 async def strategy_compare():
     """Return trade performance split by strategy for the dashboard Strategy tab."""
-    all_trades = get_trader().tradelog.data.get("trades", [])
+    all_trades = get_trader().tradelog.all_trades()
 
     # Real P&L comes from Alpaca fills, not from our own buy log.
     try:

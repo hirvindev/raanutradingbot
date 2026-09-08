@@ -49,8 +49,11 @@ def health():
     # Surfaced because a non-persistent state dir silently breaks strategy
     # attribution, the weekly trade limit and Kelly's sample.
 
+    # Also the cutover check: after migrating to the composite-key table this
+    # must match the pre-migration count, and a silent zero here is exactly the
+    # state that re-arms the weekly trade limit.
     try:
-        _trade_count = len(get_trader().tradelog.data.get("trades", []))
+        _trade_count = len(get_trader().tradelog.all_trades(project=["action"]))
     except Exception:
         _trade_count = None
 

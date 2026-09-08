@@ -21,6 +21,7 @@ from raanu import config, state
 from raanu.clock import BERLIN
 from raanu.market.rest import alpaca_get
 from raanu.scanning.engine import top_picks
+from raanu.state import keys
 from raanu.trading.trader import get_trader
 
 log = logging.getLogger("raanu.trading.schedule")
@@ -43,13 +44,13 @@ def _strategy_resolver():
     return resolver
 
 
-PICKS_KEY = "last_picks.json"
+PICKS_KEY = "last_picks"
 
 
-PICKS_KEY_S2 = "last_picks_s2.json"
+PICKS_KEY_S2 = "last_picks_s2"
 
 
-PICKS_KEY_S3 = "last_picks_s3.json"
+PICKS_KEY_S3 = "last_picks_s3"
 
 
 def _save_picks(picks: list):
@@ -57,7 +58,7 @@ def _save_picks(picks: list):
         "picks":      picks,
         "scanned_at": datetime.now(BERLIN).isoformat(),
     }
-    state.save(PICKS_KEY, data)
+    state.put(keys.CACHE, keys.cache_sk(PICKS_KEY), data)
     # Outcome tracking. Idempotent per day+strategy, and deliberately
     # inside try/except: a research logger must never break a scan.
     try:
@@ -68,12 +69,12 @@ def _save_picks(picks: list):
 
 
 def _load_picks() -> dict | None:
-    return state.load(PICKS_KEY)
+    return state.get(keys.CACHE, keys.cache_sk(PICKS_KEY))
 
 
 def _save_picks_s2(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
-    state.save(PICKS_KEY_S2, data)
+    state.put(keys.CACHE, keys.cache_sk(PICKS_KEY_S2), data)
     # Outcome tracking. Idempotent per day+strategy, and deliberately
     # inside try/except: a research logger must never break a scan.
     try:
@@ -84,12 +85,12 @@ def _save_picks_s2(picks: list):
 
 
 def _load_picks_s2() -> dict | None:
-    return state.load(PICKS_KEY_S2)
+    return state.get(keys.CACHE, keys.cache_sk(PICKS_KEY_S2))
 
 
 def _save_picks_s3(picks: list):
     data = {"picks": picks, "scanned_at": datetime.now(BERLIN).isoformat()}
-    state.save(PICKS_KEY_S3, data)
+    state.put(keys.CACHE, keys.cache_sk(PICKS_KEY_S3), data)
     # Outcome tracking. Idempotent per day+strategy, and deliberately
     # inside try/except: a research logger must never break a scan.
     try:
@@ -100,7 +101,7 @@ def _save_picks_s3(picks: list):
 
 
 def _load_picks_s3() -> dict | None:
-    return state.load(PICKS_KEY_S3)
+    return state.get(keys.CACHE, keys.cache_sk(PICKS_KEY_S3))
 
 
 async def _run_scan_and_cache(alert: bool = True) -> list:

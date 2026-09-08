@@ -11,6 +11,7 @@ import pytest
 
 from raanu import state, strategies
 from raanu.scanning import engine, job
+from raanu.state import keys
 
 
 @pytest.fixture
@@ -217,9 +218,9 @@ class TestRunLifecycle:
         # Guards the UI against polling forever when a shard dies at the
         # Lambda level (OOM/timeout) and never writes a terminal state.
         job.start_run(mode="cheap", tickers=fake_market)
-        stale = dict(state.load(job.MANIFEST_KEY))
+        stale = dict(state.get(keys.SCAN, keys.scan_manifest_sk()))
         stale["started_at"] -= job._STALL_AFTER_SECONDS + 1
-        state.save(job.MANIFEST_KEY, stale)
+        state.put(keys.SCAN, keys.scan_manifest_sk(), stale)
         assert job.status()["status"] == "stalled"
 
 

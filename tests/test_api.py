@@ -469,12 +469,7 @@ class TestAutoTraderSwitch:
         assert AutoTrader().enabled is True
 
     def test_an_unreadable_flag_reads_as_OFF(self, secured, monkeypatch):
-        """Fail closed. A state-store blip must never authorise trading.
-
-        The trader is built BEFORE the store is broken: constructing one also
-        loads the trade log, so patching first would fail in __init__ and
-        prove nothing about the property.
-        """
+        """Fail closed. A state-store blip must never authorise trading."""
         from raanu import state
         from raanu.trading.trader import AutoTrader
 
@@ -485,7 +480,7 @@ class TestAutoTraderSwitch:
         def boom(*a, **k):
             raise RuntimeError("state store unreachable")
 
-        monkeypatch.setattr(state, "load", boom)
+        monkeypatch.setattr(state, "get", boom)
         assert trader.enabled is False
 
     def test_the_scheduled_path_checks_it(self):

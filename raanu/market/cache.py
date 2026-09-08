@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from raanu import config, state
+from raanu.state import keys
 
 log = logging.getLogger("raanu.market.cache")
 
@@ -58,7 +59,7 @@ def session_date() -> str:
 
 
 def _key(ticker: str, day: str) -> str:
-    return f"bars/{day}/{ticker}"
+    return keys.bars_sk(day, ticker)
 
 
 def enabled() -> bool:
@@ -110,12 +111,12 @@ def load(tickers: list[str], day: str | None = None) -> dict[str, pd.DataFrame]:
     day = day or session_date()
     out: dict[str, pd.DataFrame] = {}
     try:
-        raw = state.load_many([_key(t, day) for t in tickers])
+        raw = state.get_many([(keys.BARS, _key(t, day)) for t in tickers])
     except Exception as e:
         log.warning(f"Bars cache read failed: {e}")
         return {}
     for ticker in tickers:
-        entry = raw.get(_key(ticker, day))
+        entry = raw.get((keys.BARS, _key(ticker, day)))
         if not entry:
             continue
         try:
@@ -136,7 +137,7 @@ def store(frames: dict[str, pd.DataFrame], day: str | None = None) -> int:
         if df is None or getattr(df, "empty", True):
             continue
         try:
-            state.save(_key(ticker, day), {"bars": _encode(df)}, ttl_seconds=_TTL_SECONDS)
+            state.put(keys.BARS, _key(ticker, day), {"bars": _encode(df)}, ttl_seconds=_TTL_SECONDS)
             written += 1
         except Exception as e:
             log.debug(f"Could not cache bars for {ticker}: {e}")

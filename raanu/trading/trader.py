@@ -18,6 +18,7 @@ from typing import Optional
 import httpx
 
 from raanu import config, state
+from raanu.state import keys
 
 STRATEGY_LABELS = {"s1": "S1 Pullback", "s2": "S2 Breakout", "s3": "S3 Leader Dip"}
 
@@ -57,21 +58,59 @@ WATCHLIST = config.watchlist()
 
 
 # ---------- TRADE LOG ----------
+# Fields kept from Alpaca's order response. The full body is ~840 bytes of
+# mostly nulls (replaced_by, hwm, subtag, legs, position_intent...) and was 65%
+# of the entire trade log. Dropping the rest is safe because the broker is the
+# record of record — the full order is always re-fetchable by id.
+_ALPACA_KEEP = ("id", "client_order_id", "status", "filled_avg_price",
+                "filled_qty", "filled_at", "created_at")
+
+
+def _trim_alpaca(response):
+    if not isinstance(response, dict):
+        return response
+    return {k: v for k, v in response.items() if k in _ALPACA_KEEP}
+
+
+def _parse_ts(value: str) -> datetime:
+    """Parse a stored timestamp, assuming UTC when it carries no zone.
+
+    Seeded and historical entries were written with a bare ``isoformat()``, so
+    both offset-aware and naive strings exist. Anything unparseable sorts to
+    the epoch rather than raising — a malformed row must not break a merge.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except Exception:
+        return datetime.fromtimestamp(0, UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 class TradeLog:
-    STATE_KEY = "trades_log.json"
+    """One DynamoDB item per trade, keyed by timestamp.
 
-    def __init__(self):
-        self.data = self._load()
+    It used to be a single item holding every trade ever, loaded once into
+    ``self.data`` and rewritten whole on each append. That had two failure
+    modes, and item-per-record removes both:
 
-    def _load(self):
-        return state.load(self.STATE_KEY, default={"trades": []})
-
-    def save(self):
-        state.save(self.STATE_KEY, self.data)
+    * **A hard ceiling.** At ~1.4 KB/trade the 400 KB item limit landed at
+      ~285 trades — roughly six months at the weekly-limit pace. An oversized
+      put was swallowed by a bare ``except``, so the log would simply stop
+      recording, which re-arms the weekly trade limit and resets Kelly's
+      sample.
+    * **Lost updates.** ``self.data`` was a snapshot cached for the life of a
+      Lambda container. The API and the worker each held their own, so a BUY
+      written by one and a SELL written by the other discarded each other.
+      There is deliberately no cached copy here now — every read is a query.
+    """
 
     def trades_in_last_7_days(self, strategy: str | None = None,
                               action: str | None = None):
-        """Log entries inside the rolling 7-day window.
+        """Trades inside the rolling 7-day window.
+
+        A key-range read, not a full-log walk. This runs four times per
+        ``/api/auto/status`` call and the dashboard polls that, so it used to
+        parse every timestamp in the entire history on every refresh.
 
         `action` filters by BUY/SELL. The weekly limit budgets *new orders*, so
         every limit check must pass action="BUY": exits land in the same log,
@@ -79,22 +118,20 @@ class TradeLog:
         a closed round-trip consumed the opening budget. With
         WEEKLY_TRADE_LIMIT_S2=1 a single exit locked S2 out for a whole week.
         """
-        cutoff = datetime.now(UTC) - timedelta(days=7)
-        out = []
-        for t in self.data.get("trades", []):
-            try:
-                ts = datetime.fromisoformat(t["timestamp"])
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=UTC)
-                if ts > cutoff:
-                    if strategy and t.get("strategy") != strategy:
-                        continue
-                    if action and (t.get("action") or "BUY").upper() != action.upper():
-                        continue
-                    out.append(t)
-            except Exception:
-                continue
+        cutoff = keys.stamp(datetime.now(UTC) - timedelta(days=7))
+        filters = {}
+        if strategy:
+            filters["strategy"] = strategy
+        rows = state.query(keys.TRADE, sk_gte=cutoff, filters=filters or None)
+        out = [r.data for r in rows]
+        if action:
+            out = [t for t in out if (t.get("action") or "BUY").upper() == action.upper()]
         return out
+
+    def all_trades(self, **kwargs):
+        """Every trade, oldest first. Used by Kelly and by attribution, both of
+        which genuinely need full history rather than a window."""
+        return [r.data for r in state.query(keys.TRADE, **kwargs)]
 
     def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
         recent = self.trades_in_last_7_days(strategy=strategy, action="BUY")
@@ -106,9 +143,14 @@ class TradeLog:
         return True, f"[{label}] OK ({len(recent)}/{limit} this week)"
 
     def record(self, payload: dict):
-        payload["timestamp"] = datetime.now(UTC).isoformat()
-        self.data.setdefault("trades", []).append(payload)
-        self.save()
+        """Write one trade as its own item. No read, no merge, no rewrite —
+        which is what makes concurrent writers safe."""
+        stamp = keys.now_stamp()
+        payload["timestamp"] = stamp
+        if "alpaca_response" in payload:
+            payload["alpaca_response"] = _trim_alpaca(payload["alpaca_response"])
+        state.put(keys.TRADE, keys.trade_sk(stamp), payload)
+        return payload
 
 
 # ---------- ALPACA HELPERS ----------
@@ -315,7 +357,7 @@ class AutoTrader:
     @property
     def enabled(self) -> bool:
         try:
-            saved = state.load(_AUTO_STATE_KEY, default=None)
+            saved = state.get(keys.FLAG, keys.flag_sk(_AUTO_STATE_KEY), default=None)
         except Exception as e:
             # Fail closed. An unreadable switch must never authorise trading,
             # and the dashboard showing "off" during a blip is the harmless
@@ -330,7 +372,7 @@ class AutoTrader:
 
     @enabled.setter
     def enabled(self, value: bool) -> None:
-        state.save(_AUTO_STATE_KEY, {
+        state.put(keys.FLAG, keys.flag_sk(_AUTO_STATE_KEY), {
             "enabled": bool(value),
             "changed_at": datetime.now(UTC).isoformat(),
         })
@@ -589,7 +631,7 @@ def seed_tradelog_from_env() -> dict:
     def _key(t):
         return (t.get("timestamp"), (t.get("ticker") or "").upper(), t.get("action"))
 
-    existing = get_trader().tradelog.data.setdefault("trades", [])
+    existing = get_trader().tradelog.all_trades()
     seen = {_key(t) for t in existing}
     added = 0
     for t in incoming:
@@ -598,12 +640,13 @@ def seed_tradelog_from_env() -> dict:
         if _key(t) in seen:
             continue
         seen.add(_key(t))
-        existing.append(t)
+        # One item per seeded trade, keyed by its own timestamp — so seeded
+        # history interleaves with live history in sort order rather than being
+        # appended to the end of a list and re-sorted.
+        state.put(keys.TRADE, keys.trade_sk(keys.stamp(_parse_ts(t["timestamp"]))), t)
         added += 1
 
-    if added:
-        existing.sort(key=lambda t: t.get("timestamp") or "")
-        get_trader().tradelog.save()
+    total = len(existing) + added
     log.info(f"TRADELOG_SEED: merged {added} new entries, "
-             f"{len(incoming) - added} already present, total now {len(existing)}")
-    return {"seeded": added, "skipped": len(incoming) - added, "total": len(existing)}
+             f"{len(incoming) - added} already present, total now {total}")
+    return {"seeded": added, "skipped": len(incoming) - added, "total": total}

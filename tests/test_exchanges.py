@@ -128,7 +128,8 @@ class TestResultCapping:
 
         job.run_shard("run-x", 0, ["A"])
         from raanu import state
-        shard = state.load(job._shard_key("run-x", 0))
+        from raanu.state import keys
+        shard = state.get(keys.SCAN, keys.scan_shard_sk("run-x", 0))
         assert len(shard["hits"]) == job._MAX_HITS_PER_SHARD
         assert shard["total_hits"] == 200
         # And it keeps the BEST ones, not the first ones it happened to see.

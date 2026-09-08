@@ -26,11 +26,12 @@ load_ssm_secrets()
 
 from raanu import state  # noqa: E402
 from raanu.clock import US_EAST  # noqa: E402
+from raanu.state import keys  # noqa: E402
 
 log = logging.getLogger("raanu.handlers.worker")
 logging.getLogger().setLevel(logging.INFO)
 
-MARKS_KEY = "scheduler_marks.json"
+MARKS_KEY = "scheduler_marks"
 
 _seeded = False
 
@@ -60,7 +61,7 @@ async def _run_due_jobs() -> None:
     now = datetime.now(US_EAST)
     today = now.strftime("%Y-%m-%d")
     is_weekday = now.weekday() < 5
-    marks = state.load(MARKS_KEY, default={})
+    marks = state.get(keys.FLAG, keys.flag_sk(MARKS_KEY), default={}) or {}
     changed = False
 
     # Pre-market: 03:30 ET, alert only, never orders.
@@ -96,7 +97,7 @@ async def _run_due_jobs() -> None:
         changed = True
 
     if changed:
-        state.save(MARKS_KEY, marks)
+        state.put(keys.FLAG, keys.flag_sk(MARKS_KEY), marks)
 
     # Exit checks run every invocation — already self-gated on market-open.
     try:
