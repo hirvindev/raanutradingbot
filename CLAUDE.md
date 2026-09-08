@@ -825,7 +825,7 @@ LLM_ADVISOR_SHADOW=0     # run + record the verdict, but do not act on it
 LLM_BUDGET_ENABLED=0     # let it redistribute the cash shares
 LLM_EXITS_ENABLED=0      # let it set per-trade stop/trail/ladder
 LLM_RETRO_ENABLED=0      # weekly look-back report
-LLM_MODEL=claude-opus-5
+LLM_MODEL=claude-sonnet-5
 LLM_API_KEY=<SSM / .env, never committed>
 ```
 

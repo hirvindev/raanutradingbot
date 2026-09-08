@@ -38,6 +38,10 @@ ALL_KEYS=(
   TELEGRAM_CHAT_ID    # alerts (optional)
   VAPID_PUBLIC_KEY    # browser web push (optional)
   VAPID_PRIVATE_KEY   # browser web push (optional)
+  LLM_API_KEY         # advisory gate (optional) — unset means the advisor
+                      # cannot be consulted, and it fails CLOSED, so leaving
+                      # this blank while LLM_ADVISOR_ENABLED=1 stops trading
+                      # rather than degrading to pure quant.
 )
 
 die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 1; }

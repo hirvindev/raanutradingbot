@@ -284,7 +284,18 @@ def llm_provider() -> str:
 
 
 def llm_model() -> str:
-    return env_str("LLM_MODEL", "claude-opus-5")
+    """Sonnet 5 ($3/$15 per MTok) rather than Opus 5 ($5/$25).
+
+    At ~2 calls a day the absolute difference is a few dollars a month, so
+    this is a deliberate choice rather than a forced one: revisit it if the
+    shadow-mode data shows the advisor reasoning poorly about the
+    counter-intuitive evidence it is given (the score does not rank; win rate
+    is a misleading target). Set LLM_MODEL to override without a deploy.
+
+    Thinking runs adaptively when the request omits `thinking`, and those
+    tokens count against max_tokens — which is why the caller asks for 16000
+    rather than something sized only to the JSON verdict."""
+    return env_str("LLM_MODEL", "claude-sonnet-5")
 
 
 def llm_api_key() -> str:

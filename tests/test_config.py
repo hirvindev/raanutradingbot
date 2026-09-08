@@ -128,7 +128,7 @@ class TestLLMAdvisorDefaults:
     def test_model_default_is_pinned(self):
         # A silent model change would alter every trading decision the advisor
         # makes, so this is config, never an implicit default.
-        assert config.llm_model() == "claude-opus-5"
+        assert config.llm_model() == "claude-sonnet-5"
 
     def test_timeout_is_generous_enough_for_web_search(self, monkeypatch):
         # A premature timeout reads as fail-closed, i.e. a day with no trades.
