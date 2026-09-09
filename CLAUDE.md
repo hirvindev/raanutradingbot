@@ -827,12 +827,88 @@ LLM_EXITS_ENABLED=0      # let it set per-trade stop/trail/ladder
 LLM_RETRO_ENABLED=0      # weekly look-back report
 LLM_MODEL=claude-sonnet-5
 LLM_API_KEY=<SSM / .env, never committed>
+LLM_TIMEOUT_SEC=150      # PER ATTEMPT — see the retry arithmetic below
+LLM_MAX_RETRIES=1        # NOT the SDK default of 2
+LLM_EFFORT=medium        # thinking depth; the biggest line on the bill
+LLM_SEARCH_MAX_USES=2    # web searches per call; the biggest input cost
 ```
 
 Separate flags on purpose: enable the gate, then budget, then exits, each with
 its own observation window. Exits last — the ladder evidence says that is
 where a confident wrong answer costs the most, and at ~2–3 trades/week
 `KELLY_MIN_SAMPLE=30` is about **a quarter**, not "a few weeks".
+
+### 🔴 The call must be STREAMED, and the retry budget is not the SDK's
+
+**The advisor's first live slot placed no orders** (9 Sep 2026, Open-9:35).
+Eleven actionable candidates — S1 BBY 77 / W 76 / DOCU 75, S2 STT 70 / VLO 70,
+S3 NLY 73 — a clean market snapshot, and then `APITimeoutError` after 184.96s.
+The gate failed closed exactly as designed; nothing was wrong except the
+transport.
+
+Two independent causes, and **neither is visible from the timeout value
+alone**:
+
+1. **The call was not streamed.** A non-streaming request carrying adaptive
+   thinking plus web search puts *nothing* on the socket until the model is
+   completely finished. From the client's side a request that is working
+   normally is indistinguishable from a dead connection, so the timeout is
+   not measuring health — it is measuring how long the whole job takes, and
+   any value you pick is a guess. `messages.stream()` takes the same
+   `output_format` and `get_final_message()` returns the same `ParsedMessage`,
+   so the validated-verdict contract is unchanged.
+2. **`max_retries` was left at the SDK default of 2.** The Anthropic SDK
+   retries timeouts, so the 60s timeout was really a **180s** one — three
+   attempts, logged as two `Retrying request to /v1/messages` lines 60s apart.
+
+    worst case wall clock = LLM_TIMEOUT_SEC x (LLM_MAX_RETRIES + 1)
+
+⚠️ **That product must stay well under the worker Lambda's 600s timeout.** The
+slot and the exit-monitor pass run in the SAME invocation — a hard Lambda kill
+would skip the exit check *and* lose the `llm.failed` trace row, so the
+failure would be both worse and invisible. 150 x 2 = 300s. A test
+(`TestRetryBudgetFitsTheLambda`) pins the arithmetic so raising one number
+without the other fails the suite.
+
+⚠️ **The failure was silent.** `send_whatsapp("Advisor unavailable")` fired and
+did nothing: there is no `TELEGRAM_BOT_TOKEN` in SSM, so every Telegram path
+on AWS is a no-op — pre/post-trade alerts, exit alerts, the daily digest. The
+fail-closed half worked; the tell-the-owner half was never deployed.
+
+### Token cost — what was measured, and what was only reasoned
+
+Per-slot payload measured **9,567 → 6,199 chars (~35% smaller)** on a
+realistic 11-candidate slot rebuilt from the real 9 Sep trace:
+
+* **`reasons` capped at 4** (the scorers emit up to nine). They are prose
+  restating fields the model already has as numbers; the first few carry the
+  structural facts with no numeric column — 52-week-high distance, base
+  tightness, breakout volume ratio — which is why they are capped and not
+  dropped.
+* **Floats rounded to 4dp.** `0.15000000000000002` is eighteen tokens of
+  nothing. Same lesson as the bars cache and Yahoo's float32 artefacts.
+* **`ensure_ascii=False` + compact separators.** Escaped, an em-dash is six
+  tokens instead of one character, and the reason strings are full of them —
+  the same measurement that made the state layer store a native map.
+
+Two more levers, **both unmeasured against decision quality**:
+
+* **`LLM_EFFORT=medium`** rather than the API default `high`. Thinking tokens
+  are billed as output and are the bulk of this call. The advisor is not
+  solving an open problem — the quant already picked the candidates and the
+  prompt states the rubric — but whether `medium` costs anything real here is
+  exactly the kind of claim this project keeps having to walk back. One env
+  var to revert.
+* **`LLM_SEARCH_MAX_USES=2`**, down from 3. Search results are the largest
+  *input* component by a wide margin: whole pages are injected and then
+  re-read on every later inference pass in the same request, so each extra
+  search costs more than the one before it.
+
+`cache_control` caches the tools+system prefix, but **do not expect a hit rate
+across slots** — 09:35 and 11:00 are 85 minutes apart and the longest cache
+TTL is an hour. The saving is within one request (several inference passes
+over the same ~1.3k-token prefix) and across a retry. `llm.response` now
+traces `cache_read_input_tokens` so this is falsifiable rather than assumed.
 
 ## 🔬 Regime filter — measure before enabling (`--sweep-regime`)
 

@@ -303,15 +303,69 @@ def llm_api_key() -> str:
 
 
 def llm_timeout_sec() -> float:
-    """60s, not the usual 20: web search plus thinking is a slower call than a
-    bare completion, and a premature timeout reads as a fail-closed no-trade."""
-    return env_float("LLM_TIMEOUT_SEC", 60.0)
+    """150s per attempt. Read this together with llm_max_retries().
+
+    60s was the original value and it failed closed on the advisor's very
+    first live slot (9 Sep 2026, Open-9:35): three attempts, each hitting
+    exactly 60s, 185s of wall clock, eleven actionable candidates, no orders.
+    Nothing was wrong with the request — a call carrying adaptive thinking
+    plus web search simply does not finish in 60s, and the old non-streaming
+    call put no bytes on the socket while it worked, so a healthy request was
+    indistinguishable from a dead connection.
+
+    ⚠️ The real ceiling is ``timeout x (max_retries + 1)`` and the worker
+    Lambda is killed at 600s. 150 x 2 = 300s leaves room for the exit-monitor
+    pass that runs in the same invocation immediately after the slot — a hard
+    Lambda kill would skip it AND lose the llm.failed trace row. Raise either
+    of these two numbers and you must check the other."""
+    return env_float("LLM_TIMEOUT_SEC", 150.0)
+
+
+def llm_max_retries() -> int:
+    """1 retry, not the Anthropic SDK's default of 2.
+
+    The SDK retries timeouts, so leaving this unset silently multiplies the
+    per-attempt timeout by three — which is what turned a 60s timeout into a
+    185s stall on the first live slot. See llm_timeout_sec() for the
+    arithmetic this has to satisfy."""
+    return env_int("LLM_MAX_RETRIES", 1)
+
+
+def llm_effort() -> str:
+    """Thinking depth — the single biggest lever on this call's token bill.
+
+    `medium` rather than the API's default `high`. The advisor is not solving
+    an open problem: the quant has already selected the candidates, the
+    prompt states the decision rubric and the measured evidence, and the
+    answer is a bounded JSON verdict over at most ~11 names. Thinking tokens
+    are billed as output ($15/MTok on Sonnet 5) and are the bulk of what this
+    call spends.
+
+    ⚠️ This is the one setting here that trades decision quality for cost, and
+    it is one env var to revert (LLM_EFFORT=high). Whether `medium` actually
+    costs anything in decision quality is unmeasured — check it against the
+    picks_log/verdict pairing before treating it as settled, the same way
+    every other claim in this project is supposed to be."""
+    return env_str("LLM_EFFORT", "medium").lower()
 
 
 def llm_web_search() -> bool:
     """Macro context the numbers cannot show — a war, a Fed decision, crude.
     No model knows this morning's news from training data."""
     return env_bool("LLM_WEB_SEARCH", True)
+
+
+def llm_search_max_uses() -> int:
+    """2 searches, down from 3.
+
+    Search results are the largest *input* component of the call by a wide
+    margin — whole pages are injected into context and then re-read on every
+    subsequent inference pass in the same request, so each extra search costs
+    more than the one before it. Two is enough to establish "what happened
+    this morning", which is all the prompt asks for; the prompt explicitly
+    forbids shopping for opinions, and that is the use a third search would
+    serve."""
+    return env_int("LLM_SEARCH_MAX_USES", 2)
 
 
 def llm_retro_enabled() -> bool:

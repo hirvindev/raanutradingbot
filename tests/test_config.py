@@ -132,9 +132,19 @@ class TestLLMAdvisorDefaults:
 
     def test_timeout_is_generous_enough_for_web_search(self, monkeypatch):
         # A premature timeout reads as fail-closed, i.e. a day with no trades.
-        assert config.llm_timeout_sec() >= 30
+        # 30 was the original floor and it was not enough: the advisor's first
+        # live slot (9 Sep 2026) timed out three times at 60s each and traded
+        # nothing, so the floor moved with the default.
+        assert config.llm_timeout_sec() >= 120
         monkeypatch.setenv("LLM_TIMEOUT_SEC", "90")
         assert config.llm_timeout_sec() == 90.0
+
+    def test_the_retry_budget_is_bounded_rather_than_left_to_the_sdk(self, monkeypatch):
+        # The SDK retries timeouts and defaults to 2 retries, so an unset
+        # value silently triples the wall clock — 60s became 185s live.
+        assert config.llm_max_retries() == 1
+        monkeypatch.setenv("LLM_MAX_RETRIES", "0")
+        assert config.llm_max_retries() == 0
 
     def test_budget_share_cap_bounds_concentration(self, monkeypatch):
         assert config.llm_max_budget_share() == 60.0
@@ -149,5 +159,7 @@ class TestLLMAdvisorDefaults:
     def test_malformed_llm_values_fall_back(self, monkeypatch):
         monkeypatch.setenv("LLM_TIMEOUT_SEC", "soon")
         monkeypatch.setenv("TRACE_RETAIN_DAYS", "forever")
-        assert config.llm_timeout_sec() == 60.0
+        monkeypatch.setenv("LLM_SEARCH_MAX_USES", "lots")
+        assert config.llm_timeout_sec() == 150.0
         assert config.trace_retain_days() == 90
+        assert config.llm_search_max_uses() == 2

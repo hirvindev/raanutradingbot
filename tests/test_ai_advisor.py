@@ -180,3 +180,150 @@ class TestFailsClosed:
         monkeypatch.setattr(advisor, "_call", ok)
         got = asyncio.run(advisor.review_slot({"s3": PICKS}, {}, "slot"))
         assert got is expected
+
+
+class TestTheCallIsStreamed:
+    """9 Sep 2026: the advisor's first live slot timed out three times at 60s
+    each and placed no orders. The request was non-streaming, so nothing
+    reached the socket while the model thought and searched, and a healthy
+    call was indistinguishable from a dead connection. These pin the fix.
+    """
+
+    def _fake_client(self, monkeypatch, *, stop_reason="end_turn"):
+        """A stand-in SDK client that records how it was called."""
+        from raanu.ai import advisor
+
+        seen: dict = {}
+
+        class FakeStream:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_): return False
+
+            async def get_final_message(self):
+                class Msg:
+                    pass
+                msg = Msg()
+                msg.stop_reason = stop_reason
+                msg.content = []
+                msg.parsed_output = _verdict(decisions=[_decision("NVDA")])
+                msg.usage = type("U", (), {
+                    "input_tokens": 1500, "output_tokens": 900,
+                    "cache_read_input_tokens": 1200,
+                    "cache_creation_input_tokens": 0})()
+                return msg
+
+        class FakeMessages:
+            def stream(self, **kwargs):
+                seen.update(kwargs)
+                return FakeStream()
+
+            def parse(self, **kwargs):  # pragma: no cover - must never be hit
+                raise AssertionError("the advisor must stream, not parse")
+
+        class FakeClient:
+            messages = FakeMessages()
+
+        monkeypatch.setattr(advisor, "_client", lambda: FakeClient())
+        return seen
+
+    def test_it_streams_rather_than_blocking_on_a_single_response(self, monkeypatch):
+        seen = self._fake_client(monkeypatch)
+        from raanu.ai import advisor
+        verdict = asyncio.run(advisor._call_anthropic('{"slot":"t"}'))
+        assert verdict.trade_today is True
+        assert seen, "messages.stream() was never called"
+
+    def test_the_structured_output_contract_survives_streaming(self, monkeypatch):
+        # The whole reason parse() was used. stream() takes the same
+        # output_format and returns a ParsedMessage, so this must not drift.
+        seen = self._fake_client(monkeypatch)
+        from raanu.ai import advisor
+        asyncio.run(advisor._call_anthropic('{}'))
+        assert seen["output_format"] is SlotVerdict
+
+    def test_the_prefix_is_cached_and_effort_is_set(self, monkeypatch):
+        seen = self._fake_client(monkeypatch)
+        from raanu.ai import advisor
+        asyncio.run(advisor._call_anthropic('{}'))
+        assert seen["cache_control"] == {"type": "ephemeral"}
+        assert seen["output_config"]["effort"] == "medium"
+
+    def test_usage_records_the_cache_lines_not_just_the_totals(self, monkeypatch):
+        # An unmeasured token-reduction claim is the thing this project keeps
+        # having to walk back. cache_read stuck at zero means the prefix cache
+        # is not engaging and cache_control is dead weight.
+        self._fake_client(monkeypatch)
+        from raanu.ai import advisor
+        verdict = asyncio.run(advisor._call_anthropic('{}'))
+        assert verdict._usage["cache_read_input_tokens"] == 1200
+
+    def test_a_refusal_still_raises_rather_than_returning_a_verdict(self, monkeypatch):
+        self._fake_client(monkeypatch, stop_reason="refusal")
+        from raanu.ai import advisor
+        with pytest.raises(RuntimeError):
+            asyncio.run(advisor._call_anthropic('{}'))
+
+
+class TestRetryBudgetFitsTheLambda:
+    """The SDK retries timeouts, so the worst case is timeout x (retries + 1).
+
+    The worker Lambda is killed at 600s and runs the exit-monitor pass in the
+    same invocation immediately after the slot — a hard kill would skip it and
+    lose the llm.failed trace row too. This is the arithmetic that has to hold.
+    """
+
+    def test_worst_case_wall_clock_stays_inside_the_worker_lambda(self):
+        from raanu import config
+        worst = config.llm_timeout_sec() * (config.llm_max_retries() + 1)
+        assert worst <= 450, (
+            f"{worst}s of retries against a 600s Lambda leaves no room for "
+            "the exit-monitor pass that follows the slot")
+
+    def test_max_retries_is_set_explicitly_not_left_to_the_sdk(self, monkeypatch):
+        # Leaving it unset means the SDK's default of 2, i.e. three attempts.
+        # That is what turned a 60s timeout into a 185s stall on 9 Sep 2026.
+        from raanu import config
+        assert config.llm_max_retries() < 2
+
+    def test_the_timeout_is_long_enough_for_thinking_plus_search(self):
+        from raanu import config
+        assert config.llm_timeout_sec() >= 120
+
+
+class TestPayloadIsTrimmed:
+    """The prompt-side token bill is the half this code controls."""
+
+    def _payload(self, **over):
+        from raanu.ai.advisor import _payload
+        pick = {"ticker": "NVDA", "score": 88, "price": 123.45000000000002,
+                "reasons": [f"reason {i} — with an em-dash" for i in range(9)]}
+        pick.update(over)
+        return _payload({"s3": [pick]}, {}, "slot")
+
+    def test_float_noise_is_rounded_away(self):
+        # 0.15000000000000002 is eighteen tokens of nothing. Same lesson the
+        # daily bars cache learned about Yahoo's float32 artefacts.
+        assert "123.45000000000002" not in self._payload()
+        assert "123.45" in self._payload()
+
+    def test_the_reason_list_is_capped(self):
+        import json
+        rows = json.loads(self._payload())["candidates"]["s3"]
+        assert len(rows[0]["reasons"]) == 4
+
+    def test_the_leading_reasons_are_kept_not_the_tail(self):
+        # The first few carry the structural facts with no numeric column
+        # (52-week-high distance, base tightness, volume ratio).
+        import json
+        rows = json.loads(self._payload())["candidates"]["s3"]
+        assert rows[0]["reasons"][0].startswith("reason 0")
+
+    def test_em_dashes_are_not_escaped(self):
+        # Escaped, one character becomes six. The state layer already pays
+        # this lesson: a native map measured 24% smaller than escaped JSON.
+        assert "\\u2014" not in self._payload()
+
+    def test_booleans_survive_the_rounding_pass(self):
+        import json
+        rows = json.loads(self._payload(uptrend=True))["candidates"]["s3"]
+        assert rows[0]["uptrend"] is True
