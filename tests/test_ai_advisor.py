@@ -327,3 +327,42 @@ class TestPayloadIsTrimmed:
         import json
         rows = json.loads(self._payload(uptrend=True))["candidates"]["s3"]
         assert rows[0]["uptrend"] is True
+
+
+class TestIncoherentVerdictsFailLoudly:
+    """`trade_today=True` with no decisions parses fine and trades nothing.
+
+    Measured on 9 Sep 2026: 1 live call in 8 came back this way, at BOTH
+    medium and high effort, on input the other 7 answered with six decisions.
+    Left alone it is a silent no-trade logged as a successful llm.response —
+    the exact failure this module exists to make loud.
+    """
+
+    def _review(self, monkeypatch, verdict, candidates=PICKS):
+        from raanu.ai import advisor
+
+        async def ok(_): return verdict
+        monkeypatch.setattr(advisor, "_call", ok)
+        return asyncio.run(advisor.review_slot({"s3": candidates}, {}, "slot"))
+
+    def test_trade_today_with_no_decisions_is_rejected(self, monkeypatch):
+        assert self._review(monkeypatch, _verdict(decisions=[])) is None
+
+    def test_a_stand_down_with_no_decisions_is_perfectly_normal(self, monkeypatch):
+        # trade_today=False and an empty list is coherent: nothing to decide.
+        v = _verdict(trade_today=False, decisions=[])
+        assert self._review(monkeypatch, v) is v
+
+    def test_a_verdict_with_decisions_is_untouched(self, monkeypatch):
+        v = _verdict(decisions=[_decision("NVDA")])
+        assert self._review(monkeypatch, v) is v
+
+    def test_it_lands_on_the_failed_path_not_the_response_path(self, monkeypatch):
+        # The outcome is the same either way — no orders. What changes is that
+        # it becomes an llm.failed row naming the reason.
+        seen = []
+        from raanu.ai import advisor
+        monkeypatch.setattr(advisor.trace, "emit",
+                            lambda event, **kw: seen.append(event))
+        self._review(monkeypatch, _verdict(decisions=[]))
+        assert "llm.failed" in seen and "llm.response" not in seen

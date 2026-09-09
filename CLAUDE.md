@@ -891,24 +891,50 @@ realistic 11-candidate slot rebuilt from the real 9 Sep trace:
   tokens instead of one character, and the reason strings are full of them —
   the same measurement that made the state layer store a native map.
 
-Two more levers, **both unmeasured against decision quality**:
+**`LLM_EFFORT=medium` — measured on 8 live calls, same input:**
 
-* **`LLM_EFFORT=medium`** rather than the API default `high`. Thinking tokens
-  are billed as output and are the bulk of this call. The advisor is not
-  solving an open problem — the quant already picked the candidates and the
-  prompt states the rubric — but whether `medium` costs anything real here is
-  exactly the kind of claim this project keeps having to walk back. One env
-  var to revert.
-* **`LLM_SEARCH_MAX_USES=2`**, down from 3. Search results are the largest
-  *input* component by a wide margin: whole pages are injected and then
-  re-read on every later inference pass in the same request, so each extra
-  search costs more than the one before it.
+| effort | output tokens (mean) | decisions produced |
+|--------|---------------------:|--------------------|
+| medium | ~1,257 | 6, 6, 6, 6 |
+| high   | ~3,129 | 6, 6, **0**, 6 |
 
-`cache_control` caches the tools+system prefix, but **do not expect a hit rate
-across slots** — 09:35 and 11:00 are 85 minutes apart and the longest cache
-TTL is an hour. The saving is within one request (several inference passes
-over the same ~1.3k-token prefix) and across a retry. `llm.response` now
-traces `cache_read_input_tokens` so this is falsifiable rather than assumed.
+**~60% fewer output tokens at medium, with no observable quality difference**
+on this input — both settings approve the same six names. Output is the
+expensive half ($15/MTok on Sonnet 5), so this is the single biggest lever on
+the bill. The sample is 8 calls on one slot's data: enough to justify the
+default, nowhere near enough to call it settled. `LLM_EFFORT=high` reverts it.
+
+**`LLM_SEARCH_MAX_USES=2`**, down from 3. Search results are the largest
+*input* component by a wide margin: whole pages are injected and then re-read
+on every later inference pass in the same request, so each extra search costs
+more than the one before it.
+
+**Prompt caching works, and the prefix is much bigger than it looks.**
+Measured live: `cache_creation_input_tokens: 11228` on a cold call and
+`cache_read_input_tokens: 11228` on an identical call seconds later — the
+cached prefix is ~11k tokens, not the ~1.3k the system prompt alone suggests,
+because the web-search results land inside it.
+
+⚠️ **A cache write costs ~1.25x and a read ~0.1x, so this is only a win when
+something reads it.** Across slots nothing does — 09:35 and 11:00 are 85
+minutes apart and the longest TTL is an hour, so every slot pays the write.
+What it buys is the **retry** path: a replayed prefix after a timeout reads
+instead of re-writing, which roughly halves the cost of the failure that
+started all this. Net ~+$0.008 on a clean slot, ~-$0.05 on a retrying one.
+`llm.response` traces both cache counters so this stays falsifiable.
+
+### ⚠️ `trade_today=true` with ZERO decisions — a silent no-trade
+
+**1 live call in 8 came back this way** (9 Sep 2026), at **both** medium and
+high effort, on input the other seven answered with six decisions. It is model
+variance, not a setting, and it was invisible: the verdict parses, so
+`llm.response` records a clean success — but `approved_for()` drops every
+candidate for want of a decision, and the slot places nothing.
+
+`_reject_incoherent()` now raises on it. The outcome is unchanged (no orders);
+what changes is that it lands on the `llm.failed` path naming the reason,
+instead of a success row that looks fine. A stand-down (`trade_today=false`)
+with no decisions is still perfectly normal and is left alone.
 
 ## 🔬 Regime filter — measure before enabling (`--sweep-regime`)
 

@@ -201,6 +201,30 @@ async def _call_anthropic(payload: str) -> SlotVerdict:
     return verdict
 
 
+def _reject_incoherent(verdict: SlotVerdict, candidates: int) -> None:
+    """Raise on a verdict that is well-formed but self-contradictory.
+
+    ``trade_today=True`` with an EMPTY decisions list is the one that matters.
+    It parses, so nothing downstream objects — but ``approved_for()`` drops
+    every candidate for want of a decision, so the slot places no orders while
+    the trace records a perfectly successful ``llm.response``. That is a
+    silent no-trade, which is the exact failure mode this whole module exists
+    to make loud.
+
+    Measured, not hypothetical: 1 in 8 live calls on 9 Sep 2026 came back this
+    way, at BOTH medium and high effort, on input that the other 7 answered
+    with six decisions. It is model variance, not a setting.
+
+    Raising sends it through the same ``except`` as a timeout, so the outcome
+    is unchanged — no orders — but it is now an ``llm.failed`` row naming the
+    reason instead of an ``llm.response`` that looks fine.
+    """
+    if verdict.trade_today and candidates and not verdict.decisions:
+        raise ValueError(
+            f"incoherent verdict: trade_today=True with 0 decisions for "
+            f"{candidates} candidate(s)")
+
+
 def _usage_of(resp) -> dict | None:
     """Token counts, including the cache and server-tool lines.
 
@@ -255,6 +279,7 @@ async def review_slot(candidates: dict[str, list[dict]], context: dict,
 
     try:
         verdict = await _call(payload)
+        _reject_incoherent(verdict, total)
         elapsed = round(time.monotonic() - started, 2)
 
         trace.emit("llm.response", slot=label,
