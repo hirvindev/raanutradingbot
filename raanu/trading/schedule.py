@@ -255,9 +255,17 @@ def _scan_actionable(strategy: str, n_orders: int, label: str = "") -> list[dict
             actionable.append(p)
 
     trace.emit("scan.done", slot=label, strategy=strategy,
+               # `scanned` is the SHORTLIST the scan returned (n_orders + 3),
+               # not the ~470-ticker universe it walked to build it.
                scanned=len(picks), actionable=len(actionable),
                elapsed_sec=round(time.monotonic() - started, 1),
-               top_scores=[p.get("score") for p in picks[:5]])
+               top_scores=[p.get("score") for p in picks[:5]],
+               # The exact input the advisor is about to be given. Without
+               # this the trace names only what was DROPPED, so on a slot
+               # where the LLM call fails there is no record of what it was
+               # asked about — which is precisely the slot you want to read.
+               actionable_picks=[{"ticker": p.get("ticker"),
+                                  "score": p.get("score")} for p in actionable])
     if dropped:
         trace.emit("filter.actionable", slot=label, strategy=strategy,
                    threshold=bar, gate=gate_key,
@@ -473,21 +481,36 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         return
 
     placed = 0
+    # Why an APPROVED candidate did not become an order. These were log-only,
+    # which made the trace read as if the advisor were the whole story: a slot
+    # could approve eleven names, place one, and leave no record of what
+    # stopped the other ten. Reading that back, every non-trade looks like a
+    # veto — so the prompt gets "fixed" for a decision the mechanical gates
+    # actually made.
+    def _skipped(ticker: str, gate: str, reason: str) -> None:
+        trace.emit("gate.blocked", slot=label, strategy=strategy,
+                   gate=gate, ticker=ticker, reason=reason)
+
     for pick in actionable:
+        ticker = pick["ticker"].upper()
         if placed >= n_orders:
+            _skipped(ticker, "n_orders", f"slot already placed {placed} order(s)")
             break
         if deployable < 1.0:
             log.info(f"[{label}][{strategy.upper()}] reserve reached after {placed} order(s)")
+            _skipped(ticker, "cash_reserve",
+                     f"deployable exhausted after {placed} order(s)")
             break
-        ticker = pick["ticker"].upper()
         if ticker in held:
             log.info(f"[{label}][{strategy.upper()}] {ticker} held or already on order — skipping")
+            _skipped(ticker, "already_held", "position open or buy order queued")
             continue
 
         entry_px = float(pick.get("price") or 0)
         atr = await _get_atr(ticker) if config.exit_config().stop_mode == "atr" else None
         if entry_px <= 0:
             log.info(f"[{label}][{strategy.upper()}] {ticker} has no price — skipping")
+            _skipped(ticker, "no_price", "scan returned no usable price")
             continue
 
         # ── The stop that SIZES the trade must be the stop that EXITS it ─────

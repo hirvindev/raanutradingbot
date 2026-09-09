@@ -609,6 +609,7 @@ details .inner{padding:0 18px 16px}
       <a data-p="signals"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V9M10 18V5M16 18v-6M22 18v-9"/></svg></i><span class="lb">Signals</span></a>
       <a data-p="alerts"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10.3 21a2 2 0 003.4 0"/></svg></i><span class="lb">Alerts</span></a>
       <a data-p="strategy"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></i><span class="lb">Strategy</span></a>
+      <a data-p="trace"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></svg></i><span class="lb">Trace</span></a>
       <a data-p="logs"><i class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></i><span class="lb">Logs</span></a>
     </nav>
     <button class="pill themebtn" id="bellBtn" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10.3 21a2 2 0 003.4 0"/></svg></button>
@@ -761,6 +762,27 @@ details .inner{padding:0 18px 16px}
     <h2>Activity <em>this browser session</em></h2>
     <div class="bar"><button class="btn ghost sm" id="clearLog">Clear</button></div>
     <div class="card"><div id="log"></div></div>
+  </section>
+
+  <!-- Trace: one execution slot, end to end.
+       Everything here is a client-side regroup of GET /api/trace — the
+       journal already records each step, this just puts one slot's rows in
+       pipeline order so "why did it buy that" is one screen instead of a
+       DynamoDB query. Deliberately plain: it is a debugging surface for
+       refining the advisor prompt, not a product feature. -->
+  <section class="page" id="p-trace">
+    <h2>Pipeline trace <em>one slot, scan → advisor → order</em></h2>
+    <div class="bar">
+      <select id="trRun" class="btn ghost sm" style="min-width:260px"></select>
+      <select id="trDays" class="btn ghost sm">
+        <option value="3">3 days</option>
+        <option value="7" selected>7 days</option>
+        <option value="30">30 days</option>
+      </select>
+      <button class="btn ghost sm" id="trReload">Reload</button>
+      <span class="muted" id="trMeta" style="margin-left:auto;font-size:12px"></span>
+    </div>
+    <div id="trBody" class="card pad">Loading…</div>
   </section>
 </main>
 
@@ -991,10 +1013,243 @@ function go(p){
   if(p==='strategy') renderStrategy();
   if(p==='signals'){ renderPicks(); renderOutcomes(); }
   if(p==='logs')     renderDiag();
+  if(p==='trace')    renderTrace();
   syncDayBar();
 }
 document.getElementById('nav').onclick = e => { const a=e.target.closest('a'); if(a) go(a.dataset.p); };
 el('clearLog').onclick = ()=>{ el('log').innerHTML=''; };
+
+/* ── Pipeline trace ────────────────────────────────────────
+   A debugging view over GET /api/trace. The journal already records one row
+   per state change; all this does is group them by slot and lay them out in
+   pipeline order, because the question being asked here — "what did the
+   advisor see, what did it decide, and what did that cost" — spans five
+   event types that are otherwise interleaved with every other slot's.
+
+   Read-only and derived: it adds no state and calls nothing but the trace
+   endpoint, so it cannot affect a trade. */
+const TR = {rows:[], runs:[], sel:null};
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => n==null ? '—' : Number(n).toLocaleString('en-US');
+
+/* A "run" is one (day, slot) pair. The slot label is what the scheduler
+   stamps on every row it emits, so grouping on it reassembles the pipeline
+   without needing a run id the backend never had a reason to mint. */
+function trGroup(rows){
+  const by = new Map();
+  for(const r of rows){
+    const slot = r.slot || '(no slot)';
+    const key = r.day + ' \u00b7 ' + slot;
+    if(!by.has(key)) by.set(key, {key, day:r.day, slot, rows:[], last:''});
+    const run = by.get(key);
+    run.rows.push(r);
+    if((r.ts||'') > run.last) run.last = r.ts || '';
+  }
+  // Newest first: this page is nearly always opened to read the last run.
+  // Ordered on the rows' own timestamps, NOT on the key — the key ends in the
+  // slot label, and "Midday-11am" sorts before "Open-9:35" alphabetically
+  // while running after it in the day, which put the wrong slot on top.
+  return [...by.values()].sort((a,b) => a.last < b.last ? 1 : -1);
+}
+
+async function renderTrace(){
+  const days = el('trDays').value;
+  el('trBody').innerHTML = 'Loading…';
+  const d = await j('/api/trace?days=' + days);
+  if(!d || !d.events){ el('trBody').innerHTML = '<span class="down">Could not read the trace.</span>'; return; }
+  TR.rows = d.events;
+  TR.runs = trGroup(d.events);
+  el('trMeta').textContent = d.events.length + ' events \u00b7 ' + TR.runs.length + ' runs';
+
+  const sel = el('trRun');
+  const keep = TR.sel;
+  sel.innerHTML = TR.runs.map(r => {
+    // Outcome in the option label, so the interesting run is pickable
+    // without opening each one.
+    const ev = new Set(r.rows.map(x => x.event));
+    const orders = r.rows.filter(x => x.event === 'order.placed').length;
+    let tag = ev.has('llm.failed') ? 'ADVISOR FAILED'
+            : orders ? orders + ' order' + (orders > 1 ? 's' : '')
+            : ev.has('gate.blocked') ? 'blocked' : 'no orders';
+    return `<option value="${esc(r.key)}">${esc(r.key)} — ${esc(tag)}</option>`;
+  }).join('');
+  TR.sel = (keep && TR.runs.some(r => r.key === keep)) ? keep
+         : (TR.runs[0] && TR.runs[0].key);
+  if(TR.sel) sel.value = TR.sel;
+  trDraw();
+}
+
+function trStep(title, body, kind){
+  const c = kind === 'bad' ? 'down' : kind === 'good' ? 'up' : '';
+  return `<div style="margin:0 0 18px">
+    <div class="${c}" style="font:600 12px/1.4 var(--mono,monospace);letter-spacing:.04em;
+      text-transform:uppercase;margin-bottom:6px">${esc(title)}</div>
+    <div style="font-size:13px;line-height:1.65">${body}</div></div>`;
+}
+
+function trTickerRow(t, score, extra, ok){
+  const dot = ok === false ? '\u2716' : ok === true ? '\u2714' : '\u00b7';
+  const c = ok === false ? 'down' : ok === true ? 'up' : 'muted';
+  return `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 0">
+    <span class="${c}" style="width:14px">${dot}</span>
+    <b style="width:64px">${esc(t)}</b>
+    <span class="muted" style="width:44px">${score==null?'':esc(score)}</span>
+    <span style="flex:1">${extra||''}</span></div>`;
+}
+
+function trDraw(){
+  const run = TR.runs.find(r => r.key === TR.sel);
+  if(!run){ el('trBody').innerHTML = '<span class="muted">No runs in this window.</span>'; return; }
+  const rows = [...run.rows].sort((a,b) => (a.ts||'') < (b.ts||'') ? -1 : 1);
+  const of = ev => rows.filter(r => r.event === ev);
+  let h = '';
+
+  /* 1. Scan — what each strategy shortlisted, and what the score bar cut. */
+  const scans = of('scan.done'), filters = of('filter.actionable');
+  if(scans.length){
+    let b = '';
+    for(const s of scans){
+      const f = filters.find(x => x.strategy === s.strategy);
+      const kept = s.actionable_picks || [];
+      b += `<div style="margin-bottom:10px"><b>${esc((s.strategy||'').toUpperCase())}</b>
+        <span class="muted">shortlist ${num(s.scanned)} \u00b7 actionable ${num(s.actionable)}
+        \u00b7 ${esc(s.elapsed_sec)}s</span>`;
+      // actionable_picks is newer than the first traces; fall back to the
+      // score list those rows do carry rather than showing nothing.
+      if(kept.length) b += kept.map(k => trTickerRow(k.ticker, k.score, '', true)).join('');
+      else if(s.actionable) b += `<div class="muted" style="padding:3px 0">
+        ${num(s.actionable)} actionable, tickers not recorded on this run \u00b7
+        top scores ${esc((s.top_scores||[]).join(', '))}</div>`;
+      if(f && (f.dropped||[]).length)
+        b += f.dropped.map(x => trTickerRow(x.ticker, x.score,
+              `<span class="muted">${esc(x.why)}</span>`, false)).join('');
+      b += '</div>';
+    }
+    h += trStep('1 \u00b7 Scan and score filter', b);
+  }
+
+  /* 2. Market context the advisor was handed. */
+  const ctx = of('context.snapshot')[0];
+  if(ctx){
+    const spy = (ctx.broad||{}).SPY || {}, vix = ctx.vix || {}, br = ctx.breadth || {};
+    h += trStep('2 \u00b7 Market context', `SPY ${esc(spy.day_pct)}% (gap ${esc(spy.gap_pct)}%)
+      \u00b7 breadth ${esc(br.sectors_green)}/${esc(br.sectors_reporting)} green
+      \u00b7 VIX ${esc(vix.level)} (${esc(vix.vs_mean_pct)}% vs 20d)`);
+  }
+
+  /* 3. The call. */
+  const req = of('llm.request')[0], res = of('llm.response')[0], fail = of('llm.failed')[0];
+  if(req){
+    h += trStep('3 \u00b7 Advisor request',
+      `${esc(req.model)} \u00b7 ${num(req.candidates)} candidates
+       ${req.by_strategy ? '(' + esc(Object.entries(req.by_strategy).map(([k,v])=>k+' '+v).join(', ')) + ')' : ''}
+       \u00b7 evidence ${esc(req.evidence_version)}
+       ${req.effort ? '\u00b7 effort ' + esc(req.effort) : ''}
+       ${req.web_search ? '\u00b7 web search on' : ''}
+       ${req.payload_chars ? '<br><span class="muted">payload ' + num(req.payload_chars) + ' chars</span>' : ''}`);
+  }
+  if(fail){
+    h += trStep('4 \u00b7 Advisor FAILED \u2014 no orders placed',
+      `<b>${esc(fail.error_type)}</b> after ${esc(fail.elapsed_sec)}s
+       <div class="muted" style="margin-top:4px">${esc(fail.error)}</div>
+       <div style="margin-top:6px">The gate fails closed, so all
+       ${num(fail.candidates)} candidate(s) were dropped.</div>`, 'bad');
+  }
+  if(res){
+    const u = res.usage || {};
+    h += trStep('4 \u00b7 Advisor verdict',
+      `<b>trade_today = ${esc(res.trade_today)}</b> \u00b7 regime ${esc(res.regime)}
+       \u00b7 ${esc(res.elapsed_sec)}s
+       <div style="margin-top:6px">${esc(res.market_summary)}</div>
+       ${res.budget_pct && Object.keys(res.budget_pct).length
+         ? '<div class="muted" style="margin-top:6px">budget split ' +
+           esc(JSON.stringify(res.budget_pct)) + '</div>'
+         : '<div class="muted" style="margin-top:6px">no budget split returned \u2014 configured CASH_SHARE_* used</div>'}`,
+      res.trade_today ? 'good' : 'bad');
+
+    /* The reasoning, which is the whole point of the page. */
+    const ds = res.decisions || [];
+    if(ds.length){
+      const sorted = [...ds].sort((a,b) => (a.rank||99) - (b.rank||99));
+      h += trStep('5 \u00b7 Per-ticker reasoning',
+        sorted.map(d => {
+          const plan = d.exit_plan && Object.entries(d.exit_plan)
+            .filter(([k,v]) => v != null && v !== '' && v !== 'strategy_default')
+            .map(([k,v]) => k + '=' + v);
+          return `<div style="padding:6px 0;border-bottom:1px solid var(--line,#eee)">
+            <div style="display:flex;gap:10px;align-items:baseline">
+              <span class="${d.approve?'up':'down'}" style="width:14px">${d.approve?'\u2714':'\u2716'}</span>
+              <b style="width:64px">${esc(d.ticker)}</b>
+              <span class="muted" style="width:34px">${esc(d.strategy)}</span>
+              <span class="muted" style="width:52px">#${esc(d.rank)}</span>
+              <span class="muted" style="width:70px">conf ${esc(d.confidence)}</span>
+              <span class="muted">${d.size_mult != null && d.size_mult !== 1 ? 'size \u00d7'+esc(d.size_mult) : ''}</span>
+            </div>
+            <div style="margin:2px 0 0 24px">${esc(d.rationale)}</div>
+            ${plan && plan.length ? '<div class="muted" style="margin-left:24px">exit: '+esc(plan.join(', '))+'</div>' : ''}
+          </div>`;
+        }).join(''));
+    } else {
+      h += trStep('5 \u00b7 Per-ticker reasoning',
+        '<span class="down">The verdict carried no decisions \u2014 every candidate would be dropped.</span>', 'bad');
+    }
+
+    /* Tokens. Output is the expensive half; a cache READ is ~0.1x input
+       while a WRITE is ~1.25x, so the two are shown separately. */
+    h += trStep('6 \u00b7 Token usage',
+      `<div style="display:flex;gap:26px;flex-wrap:wrap">
+        <span>input <b>${num(u.input_tokens)}</b></span>
+        <span>output <b>${num(u.output_tokens)}</b></span>
+        <span class="muted">cache read ${num(u.cache_read_input_tokens)}</span>
+        <span class="muted">cache write ${num(u.cache_creation_input_tokens)}</span>
+        ${u.web_searches != null ? '<span class="muted">web searches '+num(u.web_searches)+'</span>' : ''}
+      </div>`);
+  }
+
+  /* 6. Gates and orders. */
+  const blocked = of('gate.blocked');
+  if(blocked.length)
+    // Ticker-level rows matter as much as slot-level ones: an approved name
+    // that never traded because it was already held is NOT the advisor
+    // changing its mind, and reading it that way is how you end up rewriting
+    // a prompt to fix a cash-reserve gate.
+    h += trStep('7 \u00b7 Gates that blocked',
+      blocked.map(g => `<div style="padding:2px 0">
+        <span class="muted" style="display:inline-block;width:34px">${esc(g.strategy||'')}</span>
+        <b style="display:inline-block;width:64px">${esc(g.ticker||'\u2014')}</b>
+        <b>${esc(g.gate)}</b>
+        <span class="muted">${esc(g.reason||'')}</span></div>`).join(''), 'bad');
+
+  const sized = of('order.sized'), placed = of('order.placed'), ofail = of('order.failed');
+  if(sized.length || placed.length){
+    h += trStep('8 \u00b7 Orders', sized.map(s => {
+      const pl = placed.find(x => x.ticker === s.ticker);
+      return `<div style="padding:4px 0">
+        <b>${esc(s.ticker)}</b> <span class="muted">${esc(s.strategy)}</span>
+        \u2014 notional <b>$${num(s.notional)}</b>
+        <span class="muted">(risk-sized $${num(s.risk_sized)}, cap $${num(s.per_trade_cap)},
+        stop ${esc(s.stop_pct)}%, ATR ${esc(s.atr_pct)}%, risk ${esc(s.risk_pct)}%,
+        deployable $${num(s.deployable)})</span>
+        ${pl ? '<span class="up"> \u2192 '+esc(pl.status)+'</span>' : '<span class="down"> \u2192 not placed</span>'}
+      </div>`;
+    }).join('') + ofail.map(f => `<div class="down">${esc(f.ticker)} failed: ${esc(f.error||'')}</div>`).join(''),
+    placed.length ? 'good' : 'bad');
+  }
+
+  /* Raw rows last — the escape hatch when the shaped view is missing
+     something, which for a debugging page is a matter of when, not if. */
+  h += `<details style="margin-top:12px"><summary class="muted" style="cursor:pointer">
+    Raw events (${rows.length})</summary>
+    <pre style="overflow:auto;font-size:11px;line-height:1.5;max-height:420px">${
+      esc(JSON.stringify(rows, null, 2))}</pre></details>`;
+
+  el('trBody').innerHTML = h || '<span class="muted">No pipeline events on this run.</span>';
+}
+
+el('trRun').onchange   = e => { TR.sel = e.target.value; trDraw(); };
+el('trDays').onchange  = () => renderTrace();
+el('trReload').onclick = () => renderTrace();
 
 /* Alerts: notifications from the last 48h. Android drops a notification the
 

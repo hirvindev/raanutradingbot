@@ -203,6 +203,43 @@ paint("multi");
 check("Multiple on an empty scan shows its own empty state",
       dom.sig.innerHTML.includes("not an error"));
 
+/* ── Pipeline trace grouping ───────────────────────────────────────────────
+   trGroup reassembles one execution slot from the flat trace stream. It is
+   the only real logic on that page, and it is the piece that decides whether
+   "the 09:35 run" shows you 09:35's rows or a blend of two slots. */
+const trGroup = new Function(`
+  ${extractFunction("trGroup")}
+  return trGroup;
+`)();
+
+const traceRows = [
+  {day:"2026-09-09", slot:"Open-9:35",  ts:"2026-09-09T13:35:11", event:"scan.done", strategy:"s3"},
+  {day:"2026-09-09", slot:"Open-9:35",  ts:"2026-09-09T13:38:36", event:"llm.failed"},
+  {day:"2026-09-09", slot:"Midday-11am",ts:"2026-09-09T15:00:12", event:"scan.done", strategy:"s3"},
+  {day:"2026-09-09", slot:"Midday-11am",ts:"2026-09-09T15:02:37", event:"order.placed"},
+  {day:"2026-09-08", slot:"Midday-11am",ts:"2026-09-08T15:52:19", event:"order.placed"},
+];
+
+const runs = trGroup(traceRows);
+check("one run per (day, slot) pair", runs.length === 3,
+      `got ${runs.length}: ${runs.map(r => r.key).join(" | ")}`);
+check("the two slots on the same day do not merge",
+      runs.filter(r => r.day === "2026-09-09").length === 2);
+check("newest run is first — this page is opened to read the last run",
+      runs[0].key.startsWith("2026-09-09") && runs[0].slot === "Midday-11am",
+      `first run was ${runs[0].key}`);
+check("oldest run is last", runs[runs.length - 1].day === "2026-09-08");
+check("every row lands in exactly one run",
+      runs.reduce((n, r) => n + r.rows.length, 0) === traceRows.length);
+check("a run keeps the rows that belong to it",
+      runs.find(r => r.slot === "Open-9:35").rows.some(x => x.event === "llm.failed"));
+
+// A row with no slot must not be silently dropped — an untagged event is
+// exactly the kind of thing you open this page to find.
+const orphan = trGroup([{day:"2026-09-09", ts:"t", event:"scan.done"}]);
+check("a row with no slot still gets a run", orphan.length === 1 &&
+      orphan[0].rows.length === 1);
+
 if (failures) {
   console.error(`\n${failures} failure(s)`);
   process.exit(1);
