@@ -35,8 +35,10 @@ FLAG = "FLAG"         # small switches — was auto_trader.json / scheduler_mark
 SCAN = "SCAN"         # scan manifest + shards, TTL'd
 BARS = "BARS"         # daily bars cache, TTL'd
 TRACE = "TRACE"       # decision journal — one item per event, TTL'd
+SETTING = "SETTING"   # runtime-editable trading limits — see raanu.settings
 
-ALL_ENTITIES = (TRADE, PICK, NOTIF, PEAK, PUSHSUB, CACHE, FLAG, SCAN, BARS, TRACE)
+ALL_ENTITIES = (TRADE, PICK, NOTIF, PEAK, PUSHSUB, CACHE, FLAG, SCAN, BARS,
+                TRACE, SETTING)
 
 # Entities holding one item per record, i.e. the ones that used to be a single
 # growing blob. Analysis tooling iterates these; the rest are point lookups.
@@ -124,3 +126,14 @@ def trace_sk(day: str, ts: str | None = None, event: str = "",
 
 def trace_day_prefix(day: str) -> str:
     return f"{day}#"
+
+
+def setting_sk(name: str) -> str:
+    """One item per setting, not one blob.
+
+    Same reasoning as the trade and pick logs: a single item holding every
+    setting means two concurrent writers silently discard each other's change,
+    and on Lambda the API and the worker are different functions. One item per
+    name makes a write a point update that cannot clobber a neighbour.
+    """
+    return name

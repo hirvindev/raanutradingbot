@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from raanu import config, state
+from raanu import config, settings, state
 
 # Anything the application reads that could leak in from the developer's
 # shell or a .env file and change a test's outcome.
@@ -39,9 +39,11 @@ def clean_env(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "state"))
     config.reset_exit_config()
+    settings.reset()      # store-backed limits are cached per process
     state.reset()
     yield
     config.reset_exit_config()
+    settings.reset()
     state.reset()
 
 

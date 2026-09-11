@@ -31,8 +31,8 @@ class TestTheWeeklyPool:
 
     def test_an_empty_week_has_the_whole_pool(self):
         pool = budget.state()
-        assert pool["trades_left"] == 7
-        assert pool["usd_left"] == 7000.0
+        assert pool["trades_left"] == 10
+        assert pool["usd_left"] == 20000.0
         assert pool["exhausted"] is False
 
     def test_dollars_and_count_are_both_tracked(self):
@@ -41,31 +41,31 @@ class TestTheWeeklyPool:
         pool = budget.state()
         assert pool["trades_used"] == 2
         assert pool["usd_used"] == 3500.0
-        assert pool["usd_left"] == 3500.0
-        assert pool["trades_left"] == 5
+        assert pool["usd_left"] == 16500.0
+        assert pool["trades_left"] == 8
 
     def test_the_count_can_exhaust_before_the_dollars(self):
-        # Seven $100 trades: $6,300 still unspent, but the week is over.
-        for i in range(7):
+        # Ten $100 trades: $19,000 still unspent, but the week is over.
+        for i in range(10):
             _buy(f"T{i}", 100.0)
         pool = budget.state()
         assert pool["trades_left"] == 0
-        assert pool["usd_left"] == 6300.0
+        assert pool["usd_left"] == 19000.0
         assert pool["exhausted"] is True
 
     def test_the_dollars_can_exhaust_before_the_count(self):
-        # Two big trades: five slots free, nothing to fund them with. This is
-        # why the count alone is not a risk limit.
-        _buy("AAA", 3500.0)
-        _buy("BBB", 3500.0)
+        # Two big trades: eight slots free, nothing to fund them with. This
+        # is why the count alone is not a risk limit.
+        _buy("AAA", 10_000.0)
+        _buy("BBB", 10_000.0)
         pool = budget.state()
-        assert pool["trades_left"] == 5
+        assert pool["trades_left"] == 8
         assert pool["usd_left"] == 0.0
         assert pool["exhausted"] is True
 
     def test_a_remainder_below_the_minimum_counts_as_exhausted(self):
         # $40 left cannot buy anything worth having, so it is not capacity.
-        _buy("AAA", 6960.0)
+        _buy("AAA", 19_960.0)
         assert budget.state()["exhausted"] is True
 
     def test_exits_do_not_consume_the_budget(self):
@@ -87,11 +87,11 @@ class TestTheWeeklyPool:
     def test_the_pool_is_shared_not_split_by_strategy(self):
         # The whole point: S1 filling it genuinely does stop S3. The split is
         # still REPORTED, because "where did the week go" is worth answering.
-        for i in range(7):
+        for i in range(10):
             _buy(f"T{i}", 100.0, strategy="s1")
         pool = budget.state()
         assert pool["trades_left"] == 0
-        assert pool["trades_by_strategy_this_week"] == {"s1": 7}
+        assert pool["trades_by_strategy_this_week"] == {"s1": 10}
 
     def test_it_reports_when_capacity_returns(self):
         # "One trade left and three more on Tuesday" is a different decision
@@ -206,4 +206,4 @@ class TestAnUnreadableLogCannotGrantBudget:
 
     def test_a_genuinely_empty_week_is_still_a_full_pool(self):
         # The other half: empty must keep meaning empty when the read worked.
-        assert budget.state()["trades_left"] == 7
+        assert budget.state()["trades_left"] == 10

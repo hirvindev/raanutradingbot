@@ -200,6 +200,17 @@ def min_signal_score() -> int:
 # ── trading limits ───────────────────────────────────────────────────────────
 
 
+def _setting(name: str):
+    """One editable setting, store-backed. Falls back to env then default.
+
+    Routed through raanu.settings rather than read here so the value can be
+    changed without a deploy — see that module for the bounds, the cache and
+    why a read failure keeps the last known value instead of reverting to the
+    (more permissive) default."""
+    from raanu import settings
+    return settings.get(name)
+
+
 def weekly_trade_limit() -> int:
     """Trades per rolling 7 days, POOLED across every strategy.
 
@@ -210,8 +221,10 @@ def weekly_trade_limit() -> int:
     ⚠️ Takes no ``strategy`` argument on purpose. The old signature accepted
     one and silently returned a different number per strategy; leaving it in
     place would let a caller keep asking a question that no longer has a
-    per-strategy answer."""
-    return env_int("WEEKLY_TRADE_LIMIT", 7)
+    per-strategy answer.
+
+    Editable at runtime — stored in DynamoDB, see raanu.settings."""
+    return int(_setting("weekly_trade_limit"))
 
 
 def weekly_budget_usd() -> float:
@@ -222,8 +235,10 @@ def weekly_budget_usd() -> float:
     the constraint that actually caps how much capital the week can commit.
 
     Counts BUY notional only — exits do not refund it, because the budget
-    limits how much NEW exposure is opened per week, not net position."""
-    return env_float("WEEKLY_BUDGET_USD", 7000.0)
+    limits how much NEW exposure is opened per week, not net position.
+
+    Editable at runtime — stored in DynamoDB, see raanu.settings."""
+    return float(_setting("weekly_budget_usd"))
 
 
 def weekly_min_trade_usd() -> float:
@@ -250,12 +265,25 @@ def weekly_max_per_strategy() -> int:
 
 
 def per_trade_max_usd(strategy: str = "") -> float:
-    defaults = {"s1": 1000.0, "s2": 100.0, "s3": 5000.0}
-    fallback = defaults.get((strategy or "").lower(), env_float("PER_TRADE_MAX_USD", 1000.0))
+    """Hard ceiling on a single order, before Kelly sizing.
+
+    One number for every strategy now ($2,000), editable at runtime. The old
+    per-strategy defaults (s1 $1,000, s2 $100, s3 $5,000) predate the pooled
+    weekly budget and fought with it: $5,000 against a $7,000 week meant two
+    S3 trades exhausted the dollars while five trade slots sat unused.
+
+    $2,000 x 10 trades = the $20,000 week exactly, so the count and the
+    dollars run out together instead of one silently making the other
+    unreachable.
+
+    ``PER_TRADE_MAX_USD_S1/S2/S3`` still override per strategy for anyone who
+    wants that back; there is simply no longer a different DEFAULT per
+    strategy."""
+    base = float(_setting("per_trade_max_usd"))
     try:
-        return float(_per_strategy("PER_TRADE_MAX_USD", strategy, fallback))
+        return float(_per_strategy("PER_TRADE_MAX_USD", strategy, base))
     except (TypeError, ValueError):
-        return float(fallback)
+        return base
 
 
 def cash_reserve_pct() -> float:

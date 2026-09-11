@@ -707,13 +707,25 @@ ALPACA_DATA_FEED=iex        # iex | sip
 
 ## 💰 The Weekly Pool — WEEKLY_BUDGET_USD + WEEKLY_TRADE_LIMIT
 
-**One allowance across every strategy: 7 trades and $7,000 per rolling 7
+**One allowance across every strategy: 10 trades and $20,000 per rolling 7
 days.** The advisor decides which strategies spend it.
 
-    WEEKLY_TRADE_LIMIT=7        # trades, pooled
-    WEEKLY_BUDGET_USD=7000      # BUY notional, pooled
+    WEEKLY_TRADE_LIMIT=10       # trades, pooled          ← editable at runtime
+    WEEKLY_BUDGET_USD=20000     # BUY notional, pooled    ← editable at runtime
+    PER_TRADE_MAX_USD=2000      # ceiling on one order    ← editable at runtime
     WEEKLY_MIN_TRADE_USD=100    # floor; below this the remainder is dust
-    WEEKLY_MAX_PER_STRATEGY=7   # optional rail, defaults to the whole pool
+    WEEKLY_MAX_PER_STRATEGY=10  # optional rail, defaults to the whole pool
+
+The first three live in **DynamoDB** (`pk=SETTING`) and are changeable without
+a deploy — see the Settings section below. The env vars still work and sit
+behind the stored value.
+
+**$2,000 x 10 = $20,000 exactly**, so the count and the dollars run out
+together. That is deliberate: any per-trade cap above `budget / limit` makes
+the trade count unreachable (the dollars run out while trade slots sit
+unused), and any cap below it makes the dollars unreachable. The old
+per-strategy caps — s1 $1,000, s2 $100, s3 $5,000 — predate the pool and
+fought with it.
 
 **Both limits bind, and whichever runs out first stops the week.** The count
 alone is not a risk limit — seven $5,000 trades and seven $200 trades are the
@@ -751,16 +763,41 @@ on free cash if re-armed.
 one is. S1 2 / S2 1 / S3 3 summed to 6 and could not be used as a pool — a
 capped strategy could not lend to an uncapped one.
 
-### 🔴 The per-trade caps and the pool are two ceilings on the same money
+### ⚙️ Runtime settings — raanu/settings.py
 
-`PER_TRADE_MAX_USD_S3=5000` against a $7,000 week means **two S3 trades
-exhaust the dollars while five of the seven trade slots sit unused**. The
-count of 7 is unreachable unless the caps come down to roughly
-`budget / limit` — about **$1,000 a trade** for a $7,000 / 7 week.
+The three limits above are stored in DynamoDB so they can be changed without
+a deploy, and later from a UI:
 
-Both tests in `TestCapsAndPoolMustAgree` pin this so it stays a decision
-rather than a surprise. Decide which ceiling you want to bind before the
-next live slot.
+    GET    /api/settings              # value + WHERE it came from
+    PUT    /api/settings              # {"values": {"weekly_budget_usd": 15000}}
+    DELETE /api/settings/{name}       # drop the override, fall back to env
+
+Resolution is **stored → env → default**. Four properties, each because the
+alternative is dangerous:
+
+* **Bounds enforced on write AND on read.** A UI field that accepts
+  `20000000` is a foot-gun, and a corrupted row must not authorise spending
+  no human chose. Reads clamp and log rather than trust the table.
+* **Reads are cached (60s).** `weekly_budget_usd()` is on the status endpoint
+  the dashboard polls; a table read per call would put DynamoDB on a hot path
+  for a number that changes monthly.
+* 🔴 **A read failure keeps the LAST KNOWN value, not the default.** If the
+  owner turned the budget down and the table blips, the default is the
+  *higher* number — reverting to it would quietly undo a restriction.
+* **Unknown names are rejected**, so a typo in a form cannot create a setting
+  nothing reads, which looks like it worked and does nothing.
+
+⚠️ The cache is per process, so two Lambda containers can disagree for up to
+60s after a change. Fine for a weekly budget; would not be for anything
+decided per order.
+
+⚠️ **`PUT /api/settings` needs the trade PIN.** It places no order itself, but
+raising the weekly budget is exactly how an order gets placed — the PIN
+guards money, not HTTP verbs.
+
+⚠️ `PER_TRADE_MAX_USD_S1/S2/S3` still override per strategy. An override above
+`budget / limit` makes the trade count unreachable; `TestCapsAndPoolMustAgree`
+pins both directions.
 
 ## 🧠 LLM Advisory Gate — raanu/ai/
 
@@ -1417,6 +1454,7 @@ Every item is `pk` (entity) + `sk` (record) + `data` (+ optional `ttl`).
 | `PUSHSUB` | `{sha256(endpoint)[:16]}` | one per browser |
 | `CACHE` | `last_picks#{s1\|s2\|s3}` | latest scan per strategy |
 | `FLAG` | `auto_trader.json` \| `scheduler_marks` | small switches |
+| `SETTING` | `{name}` | one runtime-editable limit per item |
 | `SCAN` | `current` \| `{run_id}#shard#{i}` | TTL 24h |
 | `BARS` | `{day}#{ticker}` | TTL 4 days |
 

@@ -44,6 +44,9 @@ from raanu.api.routes import (
     trace,
     webhooks,
 )
+from raanu.api.routes import (
+    settings as settings_routes,
+)
 from raanu.paths import DOTENV
 
 log = logging.getLogger("raanu.api")
@@ -54,7 +57,7 @@ _ROUTERS = (
     auth.router, health.router, analysis.router, account.router, orders.router, auto.router, scan.router,
     push.router, picks.router, strategy.router, reports.router, notify.router,
     exits.router, webhooks.router, stocks.router, schedule.router,
-    trace.router, static.router,
+    trace.router, settings_routes.router, static.router,
 )
 
 

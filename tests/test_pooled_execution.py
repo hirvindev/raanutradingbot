@@ -71,12 +71,13 @@ def book(monkeypatch):
     from raanu.trading import exits
     monkeypatch.setattr(exits, "_get_atr", lambda t: _val(None))
     monkeypatch.setenv("STOP_MODE", "pct")
-    # $1,000 a trade against a $7,000 week: the COUNT and the DOLLARS run out
-    # together, which is the configuration the pool is sized for. See
-    # TestCapsAndPoolMustAgree for why the shipped defaults do not.
-    for key in ("PER_TRADE_MAX_USD", "PER_TRADE_MAX_USD_S1",
-                "PER_TRADE_MAX_USD_S2", "PER_TRADE_MAX_USD_S3"):
-        monkeypatch.setenv(key, "1000")
+    # Pinned rather than inherited so these scenarios do not drift when the
+    # shipped limits are retuned. $2,000 x 10 = the $20,000 week exactly, so
+    # the COUNT and the DOLLARS run out together.
+    from raanu import settings
+    settings.put("weekly_budget_usd", 20_000)
+    settings.put("weekly_trade_limit", 10)
+    settings.put("per_trade_max_usd", 2_000)
     monkeypatch.setenv("MAX_POSITION_PCT", "100")
     trader.AutoTrader().enabled = True
     return placed
@@ -92,7 +93,9 @@ def _pick(ticker, strategy, score=80, rank=1):
             "_llm_exit_plan": {}, "reasons": []}
 
 
-def _run(picks, n_orders=7, verdict=None):
+def _run(picks, n_orders=12, verdict=None):
+    # Above the pool's own count, so the POOL is what binds
+    # rather than this per-slot argument.
     asyncio.run(schedule._execute_scheduled_trades(
         n_orders, "test-slot", strategy=picks[0]["_strategy"],
         picks=picks, verdict=verdict))
@@ -111,38 +114,38 @@ class TestThePotIsShared:
         assert [p["ticker"] for p in book] == ["AAA", "BBB", "CCC"]
 
     def test_the_trade_count_stops_the_slot(self, book):
-        _buy(100.0, days_ago=1)          # 1 of 7 already used
-        _run([_pick(f"T{i}", "s1", rank=i + 1) for i in range(10)])
-        assert len(book) == 6, "the pooled count is not bounding the slot"
+        _buy(100.0, days_ago=1)          # 1 of 10 already used
+        _run([_pick(f"T{i}", "s1", rank=i + 1) for i in range(12)])
+        assert len(book) == 9, "the pooled count is not bounding the slot"
 
     def test_the_dollar_ceiling_stops_the_slot(self, book):
-        # $6,500 already committed: one $500 trade fits, the rest must not —
-        # even though five of the seven trade slots are still free.
-        _buy(6_500.0, days_ago=1)
+        # $19,500 already committed: one $500 trade fits, the rest must not —
+        # even though nine of the ten trade slots are still free.
+        _buy(19_500.0, days_ago=1)
         _run([_pick(f"T{i}", "s1", rank=i + 1) for i in range(5)])
         assert sum(p["notional"] for p in book) <= 500.01
         assert len(book) == 1
 
     def test_a_trade_is_trimmed_to_fit_rather_than_skipped(self, book):
-        # $500 left against a $1,000 cap: take the $500 rather than stand down
+        # $500 left against a $2,000 cap: take the $500 rather than stand down
         # and leave the allowance to expire unused.
-        _buy(6_500.0, days_ago=1)
+        _buy(19_500.0, days_ago=1)
         _run([_pick("AAA", "s1")])
         assert book and book[0]["notional"] == pytest.approx(500.0, abs=1)
 
     def test_dust_is_not_worth_placing(self, book):
         # $40 left cannot move the P&L, occupies a slot in the book, and
         # dilutes the per-trade sample Kelly reads.
-        _buy(6_960.0, days_ago=1)
+        _buy(19_960.0, days_ago=1)
         _run([_pick("AAA", "s1")])
         assert book == []
 
     def test_spending_draws_the_shared_pot_down_for_later_picks(self, book):
         # Consecutive orders belong to different strategies; the second must
         # see what the first actually took, or the pot is not shared at all.
-        _buy(5_500.0, days_ago=1)        # $1,500 left, $1,000 per-trade cap
+        _buy(17_500.0, days_ago=1)       # $2,500 left, $2,000 per-trade cap
         _run([_pick("AAA", "s3", rank=1), _pick("BBB", "s1", rank=2)])
-        assert [round(p["notional"]) for p in book] == [1000, 500]
+        assert [round(p["notional"]) for p in book] == [2000, 500]
 
 
 class TestTheAdvisorPaces:
@@ -160,7 +163,7 @@ class TestTheAdvisorPaces:
 
     def test_it_cannot_enlarge_the_pool(self, book, monkeypatch):
         monkeypatch.setenv("LLM_BUDGET_ENABLED", "1")
-        _buy(6_000.0, days_ago=1)        # only $1,000 genuinely left
+        _buy(19_000.0, days_ago=1)       # only $1,000 genuinely left
         _run([_pick("AAA", "s1")], verdict=self._verdict(usd_to_deploy=50_000))
         assert sum(p["notional"] for p in book) <= 1000.01
 
@@ -204,26 +207,23 @@ class TestPerStrategyThingsStayPerStrategy:
 
 
 class TestCapsAndPoolMustAgree:
-    """⚠️ The per-trade caps and the weekly pot are two ceilings on the same
-    money, and the SHIPPED defaults do not agree.
+    """⚠️ The per-trade cap and the weekly pot are two ceilings on the same
+    money, and they have to be set consistently.
 
-    PER_TRADE_MAX_USD_S3 is $5,000 against a $7,000 week, so two S3 trades
-    exhaust the dollars while five of the seven trade slots sit unused. The
-    count of 7 is unreachable unless the caps are brought down to roughly
-    budget/limit — $1,000 a trade for a $7,000 / 7 week.
-
-    Not asserted as a bug because the caps are a deliberate per-strategy
-    setting and the pool is deliberately shared; this pins the interaction so
-    it is a decision rather than a surprise.
+    The SHIPPED defaults now agree — $2,000 x 10 = $20,000 exactly — but the
+    per-strategy override can still break that, which is what these pin.
+    An override above budget/limit makes the trade count unreachable: the
+    dollars run out while trade slots sit unused, which is what
+    PER_TRADE_MAX_USD_S3=$5,000 did against the old $7,000 week.
     """
 
     def test_a_large_per_trade_cap_makes_the_count_unreachable(self, book, monkeypatch):
-        monkeypatch.setenv("PER_TRADE_MAX_USD_S3", "5000")
-        _run([_pick(f"T{i}", "s3", rank=i + 1) for i in range(7)])
+        monkeypatch.setenv("PER_TRADE_MAX_USD_S3", "10000")
+        _run([_pick(f"T{i}", "s3", rank=i + 1) for i in range(10)])
         assert len(book) == 2, "expected the dollar ceiling to bind first"
-        assert sum(p["notional"] for p in book) == pytest.approx(7000.0, abs=1)
+        assert sum(p["notional"] for p in book) == pytest.approx(20000.0, abs=1)
 
     def test_caps_at_budget_over_limit_let_the_count_bind(self, book, monkeypatch):
-        monkeypatch.setenv("PER_TRADE_MAX_USD_S3", "1000")
-        _run([_pick(f"T{i}", "s3", rank=i + 1) for i in range(9)])
-        assert len(book) == 7
+        monkeypatch.setenv("PER_TRADE_MAX_USD_S3", "2000")
+        _run([_pick(f"T{i}", "s3", rank=i + 1) for i in range(12)])
+        assert len(book) == 10

@@ -69,9 +69,12 @@ class TestWeeklyPool:
     usable as a pool. The advisor allocates the pool now.
     """
 
-    def test_the_pool_is_seven_trades_and_seven_thousand_dollars(self):
-        assert config.weekly_trade_limit() == 7
-        assert config.weekly_budget_usd() == 7000.0
+    def test_the_pool_is_ten_trades_and_twenty_thousand_dollars(self):
+        # $2,000 x 10 = $20,000 exactly, so the count and the dollars run out
+        # together rather than one making the other unreachable.
+        assert config.weekly_trade_limit() == 10
+        assert config.weekly_budget_usd() == 20000.0
+        assert config.per_trade_max_usd() == 2000.0
 
     def test_both_limits_are_configurable(self, monkeypatch):
         monkeypatch.setenv("WEEKLY_TRADE_LIMIT", "10")
@@ -98,10 +101,12 @@ class TestWeeklyPool:
         # rather than a percentage of a moving equity figure.
         assert config.cash_reserve_pct() == 0.0
 
-    def test_per_trade_caps_are_still_per_strategy(self):
-        # The BUDGET is pooled; per-trade caps, exits and attribution are not.
-        assert config.per_trade_max_usd("s3") == 5000.0
-        assert config.per_trade_max_usd("s2") == 100.0
+    def test_the_per_trade_cap_is_one_number_unless_overridden(self, monkeypatch):
+        # The old per-strategy DEFAULTS (s1 1000, s2 100, s3 5000) predate the
+        # pooled budget and fought with it. The override mechanism survives.
+        assert config.per_trade_max_usd("s3") == 2000.0
+        monkeypatch.setenv("PER_TRADE_MAX_USD_S2", "250")
+        assert config.per_trade_max_usd("s2") == 250.0
 
     def test_unknown_strategy_falls_through_to_shared_default(self):
         # "unknown" is what an unattributable position gets. It must resolve

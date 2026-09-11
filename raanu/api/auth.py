@@ -319,13 +319,16 @@ MONEY_MOVING = {
                               # AUTO ON, this is what actually lets the bot
                               # trade unattended
     "/api/schedule/disable",
+    "/api/settings",          # ⚠️ places no order, but raising the weekly
+                              # budget is exactly how an order gets placed.
+                              # The PIN guards money, not HTTP verbs.
 }
 
 # The whole /api/orders/ family: buy, sell, and DELETE /api/orders/{id} to
 # cancel. A prefix rather than three literals because the cancel route is
 # templated — the middleware sees "/api/orders/abc123", which would never
 # match the OpenAPI spelling "/api/orders/{order_id}".
-MONEY_MOVING_PREFIXES = ("/api/orders/",)
+MONEY_MOVING_PREFIXES = ("/api/orders/", "/api/settings/")
 
 # Changes nothing about money: research, notifications, device registration.
 # The passphrase alone is enough. Must be literal paths — a templated entry
