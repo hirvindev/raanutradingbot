@@ -553,3 +553,49 @@ class TestTheToolLoop:
 
 async def _async(value):
     return value
+
+
+class TestProseNeverCostsATradingDay:
+    """Over-long prose is clipped; risk bounds still fail hard.
+
+    Learned live on 11 Sep 2026: the model wrote a 340-character pacing_note
+    against a 300-character cap, pydantic rejected the field, and a complete
+    verdict — three tools consulted, 80s of work — became "no orders". A note
+    being forty characters too long is a terrible thing to lose a day to.
+    """
+
+    def test_a_long_summary_is_clipped_not_rejected(self):
+        v = SlotVerdict(trade_today=True, regime="neutral",
+                        market_summary="x" * 2000)
+        assert len(v.market_summary) == 600
+
+    def test_a_long_pacing_note_is_clipped_not_rejected(self):
+        v = SlotVerdict(trade_today=True, regime="neutral",
+                        market_summary="ok", pacing_note="y" * 2000)
+        assert len(v.pacing_note) == 600
+
+    def test_a_long_rationale_is_clipped_not_rejected(self):
+        d = CandidateDecision(ticker="NVDA", strategy="s3", approve=True,
+                              confidence=0.7, rationale="z" * 2000)
+        assert len(d.rationale) == 240
+
+    def test_a_long_exit_note_is_clipped_not_rejected(self):
+        assert len(ExitPlan(note="n" * 2000).note) == 200
+
+    def test_short_prose_is_left_exactly_alone(self):
+        v = SlotVerdict(trade_today=True, regime="neutral",
+                        market_summary="calm tape", pacing_note="saving two")
+        assert v.market_summary == "calm tape" and v.pacing_note == "saving two"
+
+    def test_risk_bounds_still_fail_hard(self):
+        # size_mult > 1 would let the advisor INCREASE exposure, and the
+        # ExitPlan ranges keep a plan inside what the backtester explored.
+        # These are not cosmetic and must never be silently coerced.
+        with pytest.raises(ValidationError):
+            CandidateDecision(ticker="NVDA", strategy="s3", approve=True,
+                              confidence=0.5, size_mult=1.5)
+        with pytest.raises(ValidationError):
+            ExitPlan(stop_atr_mult=9.0)
+        with pytest.raises(ValidationError):
+            SlotVerdict(trade_today=True, regime="neutral",
+                        market_summary="x", usd_to_deploy=-1)

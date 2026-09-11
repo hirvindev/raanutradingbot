@@ -24,9 +24,38 @@ candidate list it was given. That drop — not the system prompt — is what mak
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+
+def _clip(limit: int):
+    """Truncate over-long prose instead of rejecting the whole verdict.
+
+    🔴 Learned live, 11 Sep 2026. The model wrote a 340-character
+    ``pacing_note`` against a 300-character cap; pydantic rejected the field,
+    the ValidationError propagated to the advisor's single ``except``, and a
+    complete, sensible verdict — three tools consulted, 80s of work — became
+    "no orders this slot".
+
+    The distinction this encodes: **prose is cosmetic, bounds are risk.**
+    ``size_mult <= 1.0`` and the ``ExitPlan`` ranges exist to stop the advisor
+    from taking more risk than the design allows, and those must keep failing
+    hard. A note being forty characters too long is a formatting detail, and
+    trading it for a lost day is a terrible exchange rate.
+
+    Length caps stay on the fields so the schema still tells the model how
+    much to write — they just stop being fatal.
+    """
+    def clip(value):
+        if isinstance(value, str) and len(value) > limit:
+            return value[:limit - 1] + "\u2026"
+        return value
+    return BeforeValidator(clip)
+
+
+# Prose the model writes for a human to read. Clipped, never rejected.
+Prose = lambda limit: Annotated[str, _clip(limit)]  # noqa: E731
 
 # The three strategies the advisor allocates between. Kept here rather than
 # imported from raanu.strategies so the response contract does not depend on
@@ -58,8 +87,8 @@ class ExitPlan(BaseModel):
             "Profit ladder. NOT universally good: it helped S2 "
             "(+13.26%->+15.55%) and hurt S3 (+33.89%->+22.34%) by booking "
             "winners before they matured. Prefer strategy_default."))
-    note: str = Field(default="", max_length=200,
-                      description="Why these exits for this trade.")
+    note: Prose(200) = Field(default="", max_length=200,
+                             description="Why these exits for this trade.")
 
     def is_empty(self) -> bool:
         """True when nothing was chosen — the strategy defaults apply whole."""
@@ -97,7 +126,7 @@ class CandidateDecision(BaseModel):
         default=1.0, ge=0, le=1,
         description="Multiplier on the sized position. Trim only; 1.0 = full.")
     exit_plan: ExitPlan = Field(default_factory=ExitPlan)
-    rationale: str = Field(default="", max_length=240)
+    rationale: Prose(240) = Field(default="", max_length=240)
 
 
 class SlotVerdict(BaseModel):
@@ -108,7 +137,7 @@ class SlotVerdict(BaseModel):
                      "genuine dislocation, not ordinary weakness — S1 and S3 "
                      "are dip-buyers and ordinary red is their entry."))
     regime: Literal["risk_on", "neutral", "risk_off"]
-    market_summary: str = Field(
+    market_summary: Prose(600) = Field(
         max_length=600,
         description="What the tape and the news say. Names the reason when "
                     "trade_today is false.")
@@ -120,8 +149,8 @@ class SlotVerdict(BaseModel):
             "left. Use it to pace: approving two trades today out of seven "
             "for the week is a legitimate answer, and so is holding the whole "
             "budget back for a better tape."))
-    pacing_note: str = Field(
-        default="", max_length=300,
+    pacing_note: Prose(600) = Field(
+        default="", max_length=600,
         description=("Why this many trades now rather than more or fewer. "
                      "Required reading when fewer are approved than the "
                      "weekly budget allows."))
