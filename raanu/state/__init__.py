@@ -71,7 +71,8 @@ def put(pk: str, sk: str, data, *, ttl_seconds: int | None = None) -> None:
 def query(pk: str, *, sk_prefix: str | None = None, sk_gte: str | None = None,
           sk_lte: str | None = None, descending: bool = False,
           limit: int | None = None, filters: dict | None = None,
-          project: list[str] | None = None) -> list[Record]:
+          project: list[str] | None = None,
+          strict: bool = False) -> list[Record]:
     """Records under one entity, in sort-key order.
 
     ``filters`` are equality tests against dotted paths inside ``data``
@@ -81,10 +82,17 @@ def query(pk: str, *, sk_prefix: str | None = None, sk_gte: str | None = None,
 
     ``project`` limits which fields of ``data`` come back, which is worth using
     when scanning all of history for two fields.
+
+    🔴 ``strict`` re-raises a backend failure instead of returning what was
+    read so far. Use it wherever an EMPTY RESULT WOULD GRANT PERMISSION: a
+    swallowed read is indistinguishable from "there is nothing there", so an
+    unreadable trade log otherwise reads as "no trades this week" — the full
+    weekly allowance, on a week that may already be spent.
     """
     rows = _active().query(
         pk, sk_prefix=sk_prefix, sk_gte=sk_gte, sk_lte=sk_lte,
-        descending=descending, limit=limit, filters=filters, project=project)
+        descending=descending, limit=limit, filters=filters, project=project,
+        strict=strict)
     return [Record(sk=sk, data=data) for sk, data in rows]
 
 

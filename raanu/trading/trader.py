@@ -110,7 +110,8 @@ class TradeLog:
     """
 
     def trades_in_last_7_days(self, strategy: str | None = None,
-                              action: str | None = None):
+                              action: str | None = None,
+                              strict: bool = False):
         """Trades inside the rolling 7-day window.
 
         A key-range read, not a full-log walk. This runs four times per
@@ -127,7 +128,10 @@ class TradeLog:
         filters = {}
         if strategy:
             filters["strategy"] = strategy
-        rows = state.query(keys.TRADE, sk_gte=cutoff, filters=filters or None)
+        # strict=True for the weekly budget: an unreadable log must not read
+        # as "no trades this week", which would hand back the full allowance.
+        rows = state.query(keys.TRADE, sk_gte=cutoff, filters=filters or None,
+                           strict=strict)
         out = [r.data for r in rows]
         if action:
             out = [t for t in out if (t.get("action") or "BUY").upper() == action.upper()]

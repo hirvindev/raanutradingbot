@@ -42,8 +42,20 @@ required = True
 
 
 def _buys_this_week() -> list[dict]:
+    """The week's BUYs, or an exception.
+
+    🔴 ``strict=True`` is the whole fail-closed contract. The state layer
+    normally swallows a read failure and returns what it got, which for a
+    query means ``[]`` — indistinguishable from "nothing was bought this
+    week", i.e. the FULL weekly allowance available. On an already-spent week
+    that is the most dangerous answer available, and a DynamoDB blip would be
+    enough to produce it.
+
+    Caught live on 11 Sep 2026: a failing query reported a clean 0/7 trades
+    and $0/$7,000 used against a week that had six trades and $15,229 in it.
+    """
     from raanu.trading.trader import get_trader
-    return get_trader().tradelog.trades_in_last_7_days(action="BUY")
+    return get_trader().tradelog.trades_in_last_7_days(action="BUY", strict=True)
 
 
 def _notional_of(trade: dict) -> float:

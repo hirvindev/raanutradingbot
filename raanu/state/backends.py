@@ -196,7 +196,8 @@ class FileBackend:
             log.error(f"Failed to write state {pk}/{sk}: {e}")
 
     def query(self, pk, *, sk_prefix=None, sk_gte=None, sk_lte=None,
-              descending=False, limit=None, filters=None, project=None):
+              descending=False, limit=None, filters=None, project=None,
+              strict=False):
         directory = self._dir(pk)
         rows = []
         for path in directory.iterdir():
@@ -288,7 +289,8 @@ class DynamoBackend:
             log.error(f"Failed to write DynamoDB state {pk}/{sk}: {e}")
 
     def query(self, pk, *, sk_prefix=None, sk_gte=None, sk_lte=None,
-              descending=False, limit=None, filters=None, project=None):
+              descending=False, limit=None, filters=None, project=None,
+              strict=False):
         from boto3.dynamodb.conditions import Attr, Key
 
         cond = Key("pk").eq(pk)
@@ -341,7 +343,15 @@ class DynamoBackend:
                     break
                 kwargs["ExclusiveStartKey"] = nxt
         except Exception as e:
+            # 🔴 A swallowed read returns [], which is INDISTINGUISHABLE from
+            # "there is nothing there" — and for anything that budgets, those
+            # two answers are opposites. An unreadable trade log would read as
+            # "no trades this week", i.e. the full weekly allowance available,
+            # on a week that might already be spent. `strict` is for callers
+            # where empty-means-permission.
             log.warning(f"DynamoDB query {pk} failed: {e}")
+            if strict:
+                raise
         return rows
 
     def delete(self, pk, sk):

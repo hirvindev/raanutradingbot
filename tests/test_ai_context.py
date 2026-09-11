@@ -170,3 +170,40 @@ class TestTheSplit:
     def test_every_tool_resolves_to_a_real_provider(self):
         for name, provider in context.TOOLS.items():
             assert callable(getattr(provider, "fetch", None)), name
+
+
+class TestAnUnreadableLogCannotGrantBudget:
+    """🔴 The most dangerous answer available, and the easiest to produce.
+
+    The state layer normally swallows a read failure and returns what it got.
+    For a query that is `[]` — indistinguishable from "nothing was bought this
+    week", i.e. the FULL weekly allowance. On an already-spent week that is
+    exactly backwards, and a DynamoDB blip is enough to cause it.
+
+    Caught live on 11 Sep 2026: a failing query reported a clean 0/7 trades
+    and $0/$7,000 against a week holding six trades and $15,229.
+    """
+
+    def test_a_failed_read_raises_rather_than_reporting_a_full_pool(self, monkeypatch):
+        from raanu import state as state_mod
+
+        def boom(*a, **k):
+            if k.get("strict"):
+                raise RuntimeError("dynamodb unavailable")
+            return []
+
+        monkeypatch.setattr(state_mod, "query", boom)
+        with pytest.raises(RuntimeError):
+            budget.state()
+
+    def test_the_failure_propagates_through_assemble_as_a_stop(self, monkeypatch):
+        # It has to reach ProviderError, not be absorbed as "partial".
+        from raanu import state as state_mod
+        monkeypatch.setattr(state_mod, "query",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+        with pytest.raises(base.ProviderError):
+            asyncio.run(base.assemble([budget]))
+
+    def test_a_genuinely_empty_week_is_still_a_full_pool(self):
+        # The other half: empty must keep meaning empty when the read worked.
+        assert budget.state()["trades_left"] == 7
