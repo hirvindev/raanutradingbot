@@ -319,38 +319,32 @@ async def _refresh_or_alert(strategy: str, picks: list[dict] | None,
     _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
 
 
-def _unconditional_blockers(label: str, strategies: list[str]) -> dict[str, str]:
-    """Which strategies cannot place an order this slot, whatever the advisor says.
+def _pool_blocked(label: str) -> str:
+    """Why this slot cannot trade at all, or "" if it can.
 
-    Only gates that no verdict can lift belong here. The rolling weekly trade
-    limit is the archetype and, since the alternating rest-day rule was
-    removed, the single throttle on the whole system — so it is also the most
-    likely reason a day trades nothing.
+    The pooled counterpart to the old per-strategy weekly check. There is one
+    budget now, so exhaustion is a property of the SLOT rather than of each
+    strategy — a capped strategy can no longer sit out while another trades,
+    because there are no longer per-strategy caps to hit.
 
-    Deliberately does NOT include the per-ticker checks (already held, cash
-    reserve, price missing). Those depend on which names the advisor ranks
-    first and how big it sizes them, so they genuinely cannot be decided
-    before the call. These can.
+    Runs BEFORE the advisor call. On 10 Sep 2026 the slot scanned, called the
+    model, got a good verdict — 13 decisions, 12 approvals, 30s, ~$0.085 —
+    for a slot where no order was possible under any answer.
 
-    ⚠️ This does not replace the identical check inside
-    ``_execute_scheduled_trades``. That one still has to be there: it guards
-    ``run_one_cycle`` and the scan-now endpoint, which never pass through
-    ``run_slot``. This is an early-out to avoid paying for advice, not the
-    enforcement point.
+    ⚠️ Fails CLOSED. An unreadable budget means we do not know what we are
+    allowed to spend, and the only safe reading of that is zero.
     """
-    blockers: dict[str, str] = {}
-    trader = get_trader()
-    for strategy in strategies:
-        try:
-            ok, why = trader.tradelog.can_trade_now(strategy=strategy)
-        except Exception as e:
-            # A state blip must not silently authorise trading, but it must
-            # not stop the slot either — leave it to the real gate downstream.
-            log.warning(f"[{label}][{strategy.upper()}] weekly-limit check failed: {e}")
-            continue
-        if not ok:
-            blockers[strategy] = why
-    return blockers
+    from raanu.ai.context import budget as budget_ctx
+    try:
+        pool = budget_ctx.state()
+    except Exception as e:
+        log.warning(f"[{label}] weekly pool unreadable: {e}")
+        return f"weekly budget unreadable ({type(e).__name__}) — standing down"
+    if pool["exhausted"]:
+        return (f"weekly pool spent — {pool['trades_used']}/{pool['trades_max']} trades "
+                f"and ${pool['usd_used']:,.0f}/${pool['usd_max']:,.0f}; "
+                f"oldest frees {pool.get('oldest_frees_at') or 'unknown'}")
+    return ""
 
 
 def _seed_position_plan(ticker: str, entry_px: float, atr: float | None,
@@ -391,20 +385,20 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     advisor's budget split. Both default to None so every existing caller —
     and the tests guarding the auto-trader switch — are unaffected.
     """
+    # The per-trade cap is resolved PER PICK inside the loop — the queue is
+    # pooled, so consecutive orders can belong to different strategies.
+    from raanu.notify.telegram import (
+        _strat_tag,
+        format_pre_trade_alert,
+        format_trade_confirm,
+        send_whatsapp,
+    )
     from raanu.trading.trader import (
         alpaca_buy_notional,
         get_free_cash,
         get_held_symbols,
         market_is_open,
         per_trade_max_for,
-    )
-    # The cap is per strategy — see auto_trader.per_trade_max_for().
-    per_trade_cap = per_trade_max_for(strategy)
-    from raanu.notify.telegram import (
-        _strat_tag,
-        format_pre_trade_alert,
-        format_trade_confirm,
-        send_whatsapp,
     )
 
     stag = _strat_tag(strategy)
@@ -485,87 +479,96 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
         log.error(f"[{label}][{strategy.upper()}] Could not fetch account balance — aborting")
         return
 
-    # Never place more orders than the weekly budget still allows — the budget
-    # is per strategy, so this must not read the global WEEKLY_TRADE_LIMIT.
-    # BUYs only — exits are logged with the same strategy tag and must not eat
-    # the opening budget (see TradeLog.trades_in_last_7_days).
-    from raanu.trading.trader import weekly_limit_for
-    remaining = weekly_limit_for(strategy) - len(
-        get_trader().tradelog.trades_in_last_7_days(strategy=strategy, action="BUY")
-    )
-    n_orders  = min(n_orders, max(0, remaining))
+    # ── The weekly pool: a trade COUNT and a dollar CEILING, shared ─────────
+    #
+    # Replaces both the per-strategy weekly limit and the per-strategy cash
+    # share. Those two together meant a capped strategy could not lend its
+    # allowance to an uncapped one, and that execution ORDER decided
+    # allocation — on 13 Aug 2026 S1 and S2 consumed the whole account and S3,
+    # holding candidates scoring 90, 84 and 73, reached an empty one.
+    #
+    # ⚠️ CLAUDE.md used to say "do not go back to a single shared pot". That
+    # rule is deliberately reversed here, and what makes it safe is the pair
+    # of things that did not exist then: an absolute weekly dollar ceiling
+    # (nothing bounded the total at all in August), and an explicit
+    # cross-strategy ranking from the advisor, so order is now a decision
+    # rather than an artefact of a for-loop.
+    from raanu.ai.context import budget as budget_ctx
+    pool = budget_ctx.state()
+    min_trade = config.weekly_min_trade_usd()
+
+    n_orders = min(n_orders, pool["trades_left"])
+    # Money that is not in the account is a harder limit than any policy.
+    budget_left = min(pool["usd_left"], free_cash)
+
+    # The equity reserve is OFF by default now (the weekly ceiling replaced
+    # it) but composes as one more floor when re-armed — see cash_reserve_pct.
+    reserve_pct = config.cash_reserve_pct()
+    if reserve_pct > 0:
+        try:
+            equity_now = float((await alpaca_get("/account")).get("equity", free_cash))
+        except Exception:
+            equity_now = free_cash
+        budget_left = max(0.0, min(budget_left, free_cash - equity_now * reserve_pct / 100.0))
+
+    log.info(f"[{label}] weekly pool: {pool['trades_used']}/{pool['trades_max']} trades, "
+             f"${pool['usd_used']:,.0f}/${pool['usd_max']:,.0f} used "
+             f"-> {n_orders} order(s), ${budget_left:,.0f} spendable")
+
+    if n_orders <= 0 or budget_left < min_trade:
+        why = (f"weekly pool exhausted — {pool['trades_left']} trade(s) and "
+               f"${budget_left:,.0f} left (min ${min_trade:,.0f})")
+        log.info(f"[{label}] {why}")
+        trace.emit("gate.blocked", slot=label, gate="weekly_budget", reason=why,
+                   trades_left=pool["trades_left"], usd_left=pool["usd_left"])
+        send_whatsapp(f"📊 *RaanuBot — {label}*\n{why}")
+        return
+
+    # The advisor may pace WITHIN the pool — spend less today, keep the rest
+    # for a better tape. It can never enlarge it: budget_left came from the
+    # trade log, not from the verdict.
+    if verdict is not None and config.llm_budget_enabled():
+        asked = verdict.slot_budget(weekly_usd_left=budget_left)
+        if asked < budget_left:
+            log.info(f"[{label}] advisor paced this slot to ${asked:,.0f} "
+                     f"of ${budget_left:,.0f}: {verdict.pacing_note or 'no reason given'}")
+        budget_left = asked
+        if budget_left < min_trade:
+            trace.emit("gate.blocked", slot=label, gate="llm_pacing",
+                       reason=verdict.pacing_note or "advisor deployed nothing this slot")
+            return
 
     # ── Position sizing: Kelly-scaled risk budget ────────────────────────────
     # Equal-dollar sizing is incoherent once stops are ATR-scaled — a wide-stop
     # name would risk many times what a quiet one does. Instead, size so the
     # loss AT THE STOP is a fixed share of equity, with that share set by
     # Quarter Kelly on this strategy's own realized history.
+    #
+    # Resolved PER PICK now rather than once per call: the queue is pooled, so
+    # consecutive orders can belong to different strategies and Kelly reads
+    # each strategy's own realized history. Cached so a queue of five S1 names
+    # still walks the trade log once.
     from raanu.trading.exits import _get_atr, effective_stop_pct
     from raanu.trading.sizing import from_trade_log, shares_for
 
-    k = from_trade_log(strategy=strategy)
-    log.info(f"[{label}][{strategy.upper()}] sizing: {k.reason}")
-    if not k.tradeable:
-        send_whatsapp(
-            f"📊 *RaanuBot — {label}*\n{stag}\n"
-            f"No orders — {k.reason}\n"
-            f"_{k.sample} closed trades, win rate {k.win_rate*100:.0f}%, payoff {k.payoff_b:.2f}_",
-            strategy=strategy,
-        )
-        log.info(f"[{label}][{strategy.upper()}] Kelly says stand aside — no orders")
-        return
+    _kelly: dict[str, object] = {}
+
+    def kelly_for(strat: str):
+        if strat not in _kelly:
+            k = from_trade_log(strategy=strat)
+            log.info(f"[{label}][{strat.upper()}] sizing: {k.reason}")
+            _kelly[strat] = k
+        return _kelly[strat]
 
     try:
         equity = float((await alpaca_get("/account")).get("equity", free_cash))
     except Exception:
         equity = free_cash
 
-    # ── Cash reserve ─────────────────────────────────────────────────────────
-    # On the first slot that could actually execute, the bot deployed $99,414 of
-    # a $99,414 account and left $0.01. Every gate passed — per-trade cap, weekly
-    # limit, Kelly sizing — because none of them limits the TOTAL committed at
-    # once. The result: no capacity for the 11:00 slot, none for a better signal
-    # tomorrow, and the whole account in whichever strategies happened to fire
-    # first that morning.
-    #
-    # Measured against EQUITY, not free cash, so the reserve means "keep this
-    # share of the account liquid" rather than a share of whatever is left. When
-    # the account is already over-deployed this simply yields nothing to spend —
-    # it never forces a sale to rebuild the buffer.
-    reserve_pct = config.cash_reserve_pct()
-    reserve = equity * reserve_pct / 100.0
-    deployable = max(0.0, free_cash - reserve)
-
-    # ── Per-strategy share ───────────────────────────────────────────────────
-    # The slot runs s1, s2, s3 in that order against ONE pot, so whichever runs
-    # first can spend everything. On 13 Aug S1 and S2 consumed the whole account
-    # and S3 — holding candidates scoring 90, 84 and 73 — reached an empty one.
-    # Execution order was silently deciding allocation, and it decided against
-    # the only strategy profitable in both halves of the backtest.
-    #
-    # Each strategy now gets a slice of the deployable budget. Weights follow
-    # conviction, which is what CLAUDE.md always said capital should do.
-    #
-    # The advisor may redistribute these weights (LLM_BUDGET_ENABLED), but only
-    # ever *within* `deployable` — which was already computed net of the cash
-    # reserve above. It divides the pot; it cannot enlarge it. Its share is
-    # additionally capped by LLM_MAX_BUDGET_SHARE, because alpha improved at
-    # 4 -> 8 -> 15 positions and concentration works against the one
-    # diversification result this project has actually measured.
-    share = config.cash_share(strategy) or 33.0
-    if verdict is not None and config.llm_budget_enabled():
-        share = verdict.budget_share(
-            strategy, fallback=share, max_share=config.llm_max_budget_share())
-    deployable = deployable * share / 100.0
-    log.info(f"[{label}][{strategy.upper()}] share {share:.0f}% of deployable")
-    log.info(f"[{label}][{strategy.upper()}] cash {free_cash:,.0f} | "
-             f"reserve {reserve_pct:.0f}% = {reserve:,.0f} | deployable {deployable:,.0f}")
-    if deployable < 1.0:
-        msg = (f"Cash reserve reached — {free_cash:,.0f} free vs a "
-               f"{reserve_pct:.0f}% reserve of {reserve:,.0f}. No new positions.")
-        log.info(f"[{label}][{strategy.upper()}] {msg}")
-        send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{msg}", strategy=strategy)
-        return
+    # Optional per-strategy ceiling on the pooled count. Defaults to the whole
+    # pool, i.e. inert — see config.weekly_max_per_strategy for when to set it.
+    per_strategy_cap = config.weekly_max_per_strategy()
+    taken: dict[str, int] = dict(pool.get("trades_by_strategy_this_week") or {})
 
     placed = 0
     # Why an APPROVED candidate did not become an order. These were log-only,
@@ -574,30 +577,48 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     # stopped the other ten. Reading that back, every non-trade looks like a
     # veto — so the prompt gets "fixed" for a decision the mechanical gates
     # actually made.
-    def _skipped(ticker: str, gate: str, reason: str) -> None:
-        trace.emit("gate.blocked", slot=label, strategy=strategy,
+    def _skipped(ticker: str, gate: str, reason: str, strat: str = "") -> None:
+        trace.emit("gate.blocked", slot=label, strategy=strat or strategy,
                    gate=gate, ticker=ticker, reason=reason)
 
     for pick in actionable:
         ticker = pick["ticker"].upper()
+        # The queue is pooled, so the strategy is a property of the PICK, not
+        # of the call. `strategy` remains the default for the legacy callers
+        # (run_one_cycle, scan-now) that still pass one strategy's picks.
+        strat = (pick.get("_strategy") or strategy).lower()
+
         if placed >= n_orders:
-            _skipped(ticker, "n_orders", f"slot already placed {placed} order(s)")
+            _skipped(ticker, "n_orders",
+                     f"weekly trade count spent ({placed} placed this slot)", strat)
             break
-        if deployable < 1.0:
-            log.info(f"[{label}][{strategy.upper()}] reserve reached after {placed} order(s)")
-            _skipped(ticker, "cash_reserve",
-                     f"deployable exhausted after {placed} order(s)")
+        if budget_left < min_trade:
+            log.info(f"[{label}] weekly dollars spent after {placed} order(s)")
+            _skipped(ticker, "weekly_budget",
+                     f"${budget_left:,.0f} left, below the ${min_trade:,.0f} minimum", strat)
             break
-        if ticker in held:
-            log.info(f"[{label}][{strategy.upper()}] {ticker} held or already on order — skipping")
-            _skipped(ticker, "already_held", "position open or buy order queued")
+        if taken.get(strat, 0) >= per_strategy_cap:
+            _skipped(ticker, "per_strategy_cap",
+                     f"{strat} already has {taken.get(strat, 0)} of {per_strategy_cap} "
+                     f"allowed this week", strat)
             continue
+        if ticker in held:
+            log.info(f"[{label}][{strat.upper()}] {ticker} held or already on order — skipping")
+            _skipped(ticker, "already_held", "position open or buy order queued", strat)
+            continue
+
+        k = kelly_for(strat)
+        if not k.tradeable:
+            # Negative f* means stand aside, not size down.
+            _skipped(ticker, "kelly_stand_aside", k.reason, strat)
+            continue
+        per_trade_cap = per_trade_max_for(strat)
 
         entry_px = float(pick.get("price") or 0)
         atr = await _get_atr(ticker) if config.exit_config().stop_mode == "atr" else None
         if entry_px <= 0:
-            log.info(f"[{label}][{strategy.upper()}] {ticker} has no price — skipping")
-            _skipped(ticker, "no_price", "scan returned no usable price")
+            log.info(f"[{label}][{strat.upper()}] {ticker} has no price — skipping")
+            _skipped(ticker, "no_price", "scan returned no usable price", strat)
             continue
 
         # ── The stop that SIZES the trade must be the stop that EXITS it ─────
@@ -614,12 +635,12 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             # effective_stop_pct() is the SAME function the exit monitor calls,
             # so the stop that sizes this order cannot drift from the stop that
             # will close it. See its docstring for why that matters.
-            stop_pct = effective_stop_pct(strategy, atr / entry_px * 100, exit_plan)
+            stop_pct = effective_stop_pct(strat, atr / entry_px * 100, exit_plan)
         else:
             # No ATR available — fall back to the fixed stop so sizing stays
             # consistent with whatever the exit engine will actually use.
             stop_pct = float(os.getenv("STOP_LOSS_PCT", "3.0"))
-            log.warning(f"[{label}][{strategy.upper()}] {ticker}: no ATR, sizing off {stop_pct}% stop")
+            log.warning(f"[{label}][{strat.upper()}] {ticker}: no ATR, sizing off {stop_pct}% stop")
             # An ATR-based plan cannot be honoured without an ATR; drop it
             # rather than let the exit engine apply a stop sizing never saw.
             exit_plan.pop("stop_atr_mult", None)
@@ -633,35 +654,42 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                          max_position_pct=max_pos_pct)
         risk_sized = qty * entry_px
         size_mult = float(pick.get("_llm_size_mult", 1.0) or 1.0)
-        notional = round(min(risk_sized, per_trade_cap, deployable) * size_mult, 2)
-        if notional < 1.0:
+        # The weekly pot is one more ceiling in the same min() chain, so a
+        # trade is trimmed to what the week can still afford rather than
+        # skipped for being slightly too large.
+        notional = round(min(risk_sized, per_trade_cap, budget_left) * size_mult, 2)
+        if notional < min_trade:
+            # A $12 position cannot move the P&L, occupies a slot in the
+            # book, and dilutes the per-trade sample Kelly reads.
             log.info(
-                f"[{label}][{strategy.upper()}] {ticker} sized to ${notional} "
-                f"(risk {k.risk_pct}%, stop {stop_pct:.1f}%) — skipping"
+                f"[{label}][{strat.upper()}] {ticker} sized to ${notional} "
+                f"(risk {k.risk_pct}%, stop {stop_pct:.1f}%) — below the "
+                f"${min_trade:,.0f} minimum, skipping"
             )
+            _skipped(ticker, "below_min_trade", f"sized to ${notional}", strat)
             continue
 
         # If the per-strategy cap binds, sizing is flat again and the ATR stop
         # no longer equalises risk across names — worth saying out loud.
         if risk_sized > per_trade_cap * 1.05:
             log.warning(
-                f"[{label}][{strategy.upper()}] {ticker}: risk sizing wanted "
-                f"${risk_sized:,.0f} but PER_TRADE_MAX_USD_{strategy.upper()} caps at "
+                f"[{label}][{strat.upper()}] {ticker}: risk sizing wanted "
+                f"${risk_sized:,.0f} but PER_TRADE_MAX_USD_{strat.upper()} caps at "
                 f"${per_trade_cap:,.0f} — per-trade risk is NOT equalised while this cap binds"
             )
 
         log.info(
-            f"[{label}][{strategy.upper()}] {ticker} @ ${entry_px:.2f} stop {stop_pct:.1f}% "
+            f"[{label}][{strat.upper()}] {ticker} @ ${entry_px:.2f} stop {stop_pct:.1f}% "
             f"risk {k.risk_pct}% -> ${notional}"
         )
 
         # Every input to the notional, so "why was this $412?" is answerable
         # from the trace alone rather than by re-deriving it from logs.
-        trace.emit("order.sized", slot=label, strategy=strategy, ticker=ticker,
+        trace.emit("order.sized", slot=label, strategy=strat, ticker=ticker,
                    entry_px=entry_px, atr_pct=round(atr / entry_px * 100, 2) if atr else None,
                    stop_pct=round(stop_pct, 2), risk_pct=k.risk_pct,
                    risk_sized=round(risk_sized, 2), per_trade_cap=per_trade_cap,
-                   deployable=round(deployable, 2), size_mult=size_mult,
+                   weekly_usd_left=round(budget_left, 2), size_mult=size_mult,
                    notional=notional, exit_plan=exit_plan or None,
                    llm_rationale=pick.get("_llm_rationale") or None)
 
@@ -669,9 +697,9 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             send_whatsapp(format_pre_trade_alert(
                 ticker, pick.get("ticker", ticker), notional,
                 pick["score"], free_cash, pick.get("reasons", []),
-                strategy=strategy,
+                strategy=strat,
                 llm_rationale=pick.get("_llm_rationale", ""),
-            ), strategy=strategy)
+            ), strategy=strat)
             await asyncio.sleep(2)
 
             result = await alpaca_buy_notional(ticker, notional)
@@ -681,7 +709,7 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
                 "notional_usd": notional,
                 "score":        pick["score"],
                 "reasons":      pick.get("reasons", []),
-                "strategy":     strategy,
+                "strategy":     strat,
                 "scheduled":    label,
                 "entry_price":  entry_px,
                 "stop_pct":     round(stop_pct, 2),
@@ -698,30 +726,33 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             # sized this order.
             _seed_position_plan(ticker, entry_px, atr, exit_plan)
 
-            trace.emit("order.placed", slot=label, strategy=strategy, ticker=ticker,
+            trace.emit("order.placed", slot=label, strategy=strat, ticker=ticker,
                        notional=notional, score=pick.get("score"),
                        status=result.get("status") if isinstance(result, dict) else None,
                        client_order_id=(result or {}).get("client_order_id")
                        if isinstance(result, dict) else None)
-            get_trader().event("buy", f"[{label}][{strategy.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
+            get_trader().event("buy", f"[{label}][{strat.upper()}] BUY ${notional} of {ticker} score {pick['score']}")
             # Push is best-effort and must never break an order that already filled.
             try:
                 from raanu.notify import push
-                push.notify_buy(ticker, notional, strategy,
+                push.notify_buy(ticker, notional, strat,
                                              pick.get("score"), pick)
             except Exception as e:
                 log.warning(f"[push] buy notify skipped: {e}")
-            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strategy), strategy=strategy)
+            send_whatsapp(format_trade_confirm("BUY", ticker, notional, result.get("status", "submitted"), strategy=strat), strategy=strat)
 
             held.add(ticker)
             free_cash -= notional
-            deployable -= notional
+            # Draw down the SHARED pot, so the next pick — whatever strategy
+            # it belongs to — sees what this one actually took.
+            budget_left -= notional
+            taken[strat] = taken.get(strat, 0) + 1
             placed += 1
         except Exception as e:
-            log.error(f"[{label}][{strategy.upper()}] Order failed for {ticker}: {e}")
-            trace.emit("order.failed", slot=label, strategy=strategy, ticker=ticker,
+            log.error(f"[{label}][{strat.upper()}] Order failed for {ticker}: {e}")
+            trace.emit("order.failed", slot=label, strategy=strat, ticker=ticker,
                        notional=notional, error_type=type(e).__name__, error=str(e))
-            get_trader().event("error", f"[{label}][{strategy.upper()}] {ticker} failed: {e}")
+            get_trader().event("error", f"[{label}][{strat.upper()}] {ticker} failed: {e}")
 
     if placed == 0:
         send_whatsapp(
@@ -730,7 +761,8 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
             f"Top picks already held. No new positions opened.",
             strategy=strategy,
         )
-    log.info(f"[{label}][{strategy.upper()}] Done — placed {placed}/{n_orders} order(s)")
+    log.info(f"[{label}] Done — placed {placed}/{n_orders} order(s), "
+             f"${budget_left:,.0f} of the weekly pot still unspent")
 
 
 # ── The execution slot ───────────────────────────────────────────────────────
@@ -803,23 +835,12 @@ async def run_slot(n_orders: int, label: str) -> None:
                       f"_No trades placed._")
         return
 
-    # ── Phase 1b: drop what cannot trade, BEFORE paying for advice ───────────
+    # ── Phase 1b: decide the unconditional gates BEFORE paying for advice ───
     #
-    # 🔴 These gates are unconditional: no verdict can unblock them. Asking a
-    # paid model to rank candidates that the weekly budget has already
-    # excluded is spending money to decide something already decided.
-    #
-    # Measured on 10 Sep 2026: all three strategies were at their weekly cap
-    # (s1 2/2, s2 1/1, s3 3/3, five of the six trades placed in one burst two
-    # days earlier). The slot still scanned, still called the advisor, and
-    # still got back a perfectly good verdict — 13 decisions, 12 approvals,
-    # 30s, ~$0.085 — for a slot in which no order was possible under ANY
-    # answer. It would have repeated at 11:00, and twice a day until the
-    # oldest trade aged out five days later.
-    # Market hours is the other gate no verdict can lift. Checked here as
-    # well as in the executor for the same reason as the weekly limit: a
-    # holiday that the weekday test does not know about would otherwise buy
-    # a full advisory review and then discard it one function later.
+    # 🔴 These are the gates no verdict can lift. Asking a paid model to rank
+    # candidates the weekly pool has already excluded is spending money to
+    # decide something already decided — measured at ~$0.085 a slot, twice a
+    # day, for five days straight on 10 Sep 2026.
     from raanu.trading.trader import market_is_open
     is_open, clock_msg = await market_is_open()
     if not is_open:
@@ -831,38 +852,45 @@ async def run_slot(n_orders: int, label: str) -> None:
                 _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
         return
 
-    blocked = _unconditional_blockers(label, list(candidates))
-    for strategy, reason in blocked.items():
-        picks = candidates.pop(strategy, []) or []
-        log.info(f"[{label}][{strategy.upper()}] {reason} — excluded before the advisor call")
-        trace.emit("gate.blocked", slot=label, strategy=strategy,
-                   gate="weekly_limit", reason=reason,
-                   # The names that WOULD have been put to the advisor. A
-                   # blocked strategy still surfaced candidates, and on
-                   # 10 Sep one of them was the highest score this project
-                   # has recorded (QLYS 90) — which is worth seeing, not
-                   # silently dropping.
-                   would_have_reviewed=[{"ticker": p.get("ticker"),
-                                         "score": p.get("score")} for p in picks])
-        # Still alert on high-conviction names. The budget stops the ORDER;
-        # it is not a reason to stop telling the owner what the scan found.
-        if picks:
-            _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
-
-    total = sum(len(v) for v in candidates.values())
-    if not total:
-        log.info(f"[{label}] every strategy is blocked — no advisor call")
-        trace.emit("gate.blocked", slot=label, gate="all_strategies_blocked",
-                   reason="; ".join(f"{s}: {r}" for s, r in blocked.items()))
+    pool_reason = _pool_blocked(label)
+    if pool_reason:
+        log.info(f"[{label}] {pool_reason} — no advisor call")
+        trace.emit("gate.blocked", slot=label, gate="weekly_budget",
+                   reason=pool_reason,
+                   # The names that WOULD have gone to the advisor. A blocked
+                   # slot still surfaced candidates, and on 10 Sep one of them
+                   # was the highest score this project has recorded (QLYS 90).
+                   would_have_reviewed=[
+                       {"ticker": p.get("ticker"), "score": p.get("score"),
+                        "strategy": s}
+                       for s, picks in candidates.items() for p in picks])
+        # The pool stops the ORDER; it is not a reason to stop telling the
+        # owner what the scan found.
+        for strategy, picks in candidates.items():
+            if picks:
+                _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
         return
 
     # ── Phase 2: one advisory review for the whole slot ──────────────────────
+    from raanu.ai import context as ai_context
     from raanu.ai import market_context
     from raanu.ai.advisor import review_slot
     from raanu.notify.telegram import send_whatsapp
 
-    context = market_context.snapshot()
-    log.info(f"[{label}] market: {market_context.headline(context)}")
+    # Pre-assembled providers only — market and budget. The history/picks/
+    # positions services are declared to the model as tools instead, so a slot
+    # with an obvious answer does not pay to research one it did not need.
+    #
+    # Raises if `budget` cannot answer: not knowing what we are allowed to
+    # spend is the one context failure with no safe default.
+    try:
+        context = await ai_context.snapshot()
+    except ai_context.ProviderError as e:
+        log.warning(f"[{label}] required context unavailable: {e} — no orders")
+        trace.emit("gate.blocked", slot=label, gate="context_unavailable",
+                   reason=str(e))
+        return
+    log.info(f"[{label}] market: {market_context.headline(context.get('market') or {})}")
     trace.emit("context.snapshot", slot=label, **context)
 
     verdict = await review_slot(candidates, context, label)
@@ -901,25 +929,43 @@ async def run_slot(n_orders: int, label: str) -> None:
         log.info(f"[{label}] SHADOW — advisor said trade_today={verdict.trade_today}, "
                  f"regime={verdict.regime}; executing the quant's picks unchanged")
 
-    # ── Phase 3: execute ─────────────────────────────────────────────────────
-    for strategy in _SLOT_ORDER:
-        picks = candidates.get(strategy) or []
-        if not picks:
-            continue
-        if not shadow:
-            picks = verdict.approved_for(
-                strategy, picks, apply_exits=config.llm_exits_enabled())
+    # ── Phase 3: execute ONE pooled queue, in the advisor's rank order ──────
+    #
+    # Was `for strategy in _SLOT_ORDER: execute(strategy)`. That loop existed
+    # because the budget was per strategy; with one pot there is one queue,
+    # and the cross-strategy ranking the advisor produces is what decides who
+    # gets funded. The old order (s3 first) was a tie-break hedge for exactly
+    # the allocation problem this removes.
+    if shadow:
+        # Shadow runs the quant's picks unchanged, so it keeps the old
+        # per-strategy shape — there is no advisor ranking to pool by.
+        for strategy in _SLOT_ORDER:
+            picks = candidates.get(strategy) or []
             if not picks:
-                log.info(f"[{label}][{strategy.upper()}] all candidates vetoed")
-                trace.emit("gate.blocked", slot=label, strategy=strategy,
-                           gate="llm_veto", reason="every candidate vetoed")
                 continue
-        try:
-            await _execute_scheduled_trades(
-                n_orders, label, strategy=strategy, picks=picks,
-                verdict=None if shadow else verdict)
-        except Exception as e:
-            log.exception(f"[{label}][{strategy.upper()}] slot failed: {e}")
+            try:
+                await _execute_scheduled_trades(n_orders, label, strategy=strategy,
+                                                picks=picks, verdict=None)
+            except Exception as e:
+                log.exception(f"[{label}][{strategy.upper()}] slot failed: {e}")
+        return
+
+    queue = verdict.approved_ranked(
+        candidates, apply_exits=config.llm_exits_enabled())
+    if not queue:
+        log.info(f"[{label}] every candidate vetoed")
+        trace.emit("gate.blocked", slot=label, gate="llm_veto",
+                   reason="every candidate vetoed")
+        return
+
+    log.info(f"[{label}] queue: " + ", ".join(
+        f"{p['_strategy']}/{p['ticker']}#{p.get('_llm_rank')}" for p in queue))
+    try:
+        await _execute_scheduled_trades(n_orders, label,
+                                        strategy=queue[0]["_strategy"],
+                                        picks=queue, verdict=verdict)
+    except Exception as e:
+        log.exception(f"[{label}] slot failed: {e}")
 
 
 # ── Pre-market scan (3:30 AM ET = 30 min before pre-market open) ────────────
@@ -1028,9 +1074,14 @@ async def _premarket_scan_and_notify():
 # the new hidden throttle — the same mistake the alternating-day rule made.
 # Free cash and MAX_POSITION_PCT are meant to be what stops the bot, so the
 # slot allows more orders than either will ever permit in one sitting.
+# The third number is the slot's order cap. It tracks WEEKLY_TRADE_LIMIT so
+# nothing silently caps a slot below the pool: the pooled budget is the real
+# bound, and pacing across the two daily slots is the advisor's decision
+# (usd_to_deploy), not a hardcoded rail. It was 5, which quietly made "seven
+# trades a week, the advisor decides" untrue in any single slot.
 _ET_SLOTS = [
-    (9,  35, 5, "Open-9:35"),
-    (11, 0,  5, "Midday-11am"),
+    (9,  35, config.weekly_trade_limit(), "Open-9:35"),
+    (11, 0,  config.weekly_trade_limit(), "Midday-11am"),
 ]
 
 

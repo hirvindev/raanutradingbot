@@ -123,18 +123,102 @@ def _client():
                           max_retries=config.llm_max_retries())
 
 
+# What the model may ask this system about itself. Each maps to a provider in
+# raanu.ai.context; see that package for why these are tools while market and
+# budget are pre-assembled.
+_CONTEXT_TOOLS = [
+    {
+        "name": "get_trade_history",
+        "description": (
+            "Closed round-trips over the last N days, with win rate, payoff "
+            "and EXPECTANCY per strategy. Use when deciding whether a "
+            "strategy's recent record should change how much it is trusted. "
+            "Expectancy decides profitability, not win rate."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "minimum": 7,
+                                    "maximum": 365,
+                                    "description": "Look-back window."}},
+            "required": [],
+        },
+    },
+    {
+        "name": "get_pick_outcomes",
+        "description": (
+            "What past picks actually returned 1/5/20 trading days later, "
+            "bucketed by score band and measured against SPY over the same "
+            "window. Use to check whether a higher score has been earning a "
+            "higher return lately. Refuses to conclude on a thin sample."),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_open_positions",
+        "description": (
+            "The current book: each position's value, unrealised P&L, and how "
+            "concentrated the largest holding is. Use when weighing whether "
+            "a candidate adds correlated exposure."),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+
 def _tools() -> list[dict]:
-    if not config.llm_web_search():
-        return []
-    return [{
-        "type": "web_search_20260209",
-        "name": "web_search",
-        "max_uses": config.llm_search_max_uses(),
-        "allowed_domains": search_domains(),
-    }]
+    """Server tools plus this system's own read-only tools.
+
+    ``web_search`` is Anthropic-hosted and reaches the open web through a
+    domain allowlist; the rest run in this process against this account's own
+    DynamoDB and broker data. Keeping both in one list is fine — they differ
+    in who executes them, not in how they are declared — but the trust
+    boundary is not symmetric, and only the first one crosses it.
+    """
+    tools: list[dict] = []
+    if config.llm_web_search():
+        tools.append({
+            "type": "web_search_20260209",
+            "name": "web_search",
+            "max_uses": config.llm_search_max_uses(),
+            "allowed_domains": search_domains(),
+        })
+    if config.llm_tools_enabled():
+        tools.extend(_CONTEXT_TOOLS)
+    return tools
 
 
-async def _stream_once(client, kwargs: dict):
+# Below this there is not enough time left for a request to plausibly finish,
+# so the loop stops rather than starting one it knows will time out.
+_MIN_REQUEST_SEC = 10.0
+
+# A tool result is untrusted-by-size if not by origin: an unbounded blob would
+# be re-sent on every later turn of the loop, multiplying its cost.
+_MAX_TOOL_RESULT_CHARS = 20000
+
+
+async def _run_tool(name: str, args: dict) -> dict:
+    """Execute one context tool. Never raises — an error is a tool result.
+
+    A failed tool must not fail the slot: the model asked an optional
+    question, and "that lookup did not work" is an answer it can reason
+    around. Raising here would turn a degraded picture into no trades at all,
+    which is the opposite of what the tool is for.
+    """
+    from raanu.ai import context
+
+    provider = context.TOOLS.get(name)
+    if provider is None:
+        return {"error": f"unknown tool {name!r}"}
+    try:
+        if name == "get_trade_history":
+            days = int(args.get("days") or context.history.DEFAULT_DAYS)
+            data = await provider.fetch(days=days)
+        else:
+            data = await provider.fetch()
+    except Exception as e:
+        log.warning(f"[llm] tool {name} failed: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
+    return data if data is not None else {"error": "no data available"}
+
+
+async def _stream_once(client, kwargs: dict, *, timeout: float | None = None):
     """One streamed request, returning the accumulated final message.
 
     🔴 **Streaming is the fix, not a style choice.** The first live advisory
@@ -151,6 +235,8 @@ async def _stream_once(client, kwargs: dict):
     ``messages.parse()`` and ``get_final_message()`` returns a
     ``ParsedMessage``, so the validated-verdict contract is unchanged.
     """
+    if timeout is not None:
+        kwargs = {**kwargs, "timeout": timeout}
     async with client.messages.stream(**kwargs) as stream:
         return await stream.get_final_message()
 
@@ -191,17 +277,73 @@ async def _call_anthropic(payload: str) -> SlotVerdict:
     if tools:
         kwargs["tools"] = tools
 
-    resp = await _stream_once(client, kwargs)
+    # 🔴 One deadline for the WHOLE review, tool loop included.
+    #
+    # llm_timeout_sec() bounds one HTTP request. With a tool loop the review
+    # is several of them, so per-request timeouts no longer bound the review:
+    # 3 iterations x 2 attempts x 150s = 900s against a 600s Lambda. Being
+    # killed there is strictly worse than failing — the exit-monitor pass
+    # shares the invocation and would be skipped, and the llm.failed row would
+    # never be written, so the outage would also be invisible.
+    #
+    # Each request's timeout is shrunk to the time actually remaining, so an
+    # overrun surfaces as a normal APITimeoutError through the single except
+    # rather than as a dead Lambda.
+    deadline = time.monotonic() + config.llm_total_budget_sec()
+    messages: list[dict] = [{"role": "user", "content": payload}]
+    tool_calls = 0
 
-    # A server-tool turn can stop mid-flight rather than erroring. Resuming
-    # once is the difference between a usable answer and a silently truncated
-    # one that looks like a refusal to trade.
-    if getattr(resp, "stop_reason", None) == "pause_turn":
-        log.info("[llm] pause_turn — resuming once")
-        resp = await _stream_once(client, {**kwargs, "messages": [
-            {"role": "user", "content": payload},
-            {"role": "assistant", "content": resp.content},
-        ]})
+    for _ in range(config.llm_max_tool_iterations() + 1):
+        left = deadline - time.monotonic()
+        if left <= _MIN_REQUEST_SEC:
+            raise TimeoutError(
+                f"advisory review exceeded {config.llm_total_budget_sec()}s "
+                f"after {tool_calls} tool call(s)")
+
+        resp = await _stream_once(
+            client, {**kwargs, "messages": messages},
+            timeout=min(config.llm_timeout_sec(), left))
+        stop = getattr(resp, "stop_reason", None)
+
+        # A server-tool turn can stop mid-flight rather than erroring.
+        # Resuming is the difference between a usable answer and a silently
+        # truncated one that looks like a refusal to trade.
+        if stop == "pause_turn":
+            log.info("[llm] pause_turn — resuming")
+            messages = messages + [{"role": "assistant", "content": resp.content}]
+            continue
+
+        if stop != "tool_use":
+            break
+
+        # Every tool_result for one assistant turn goes back in a SINGLE user
+        # message. Splitting them teaches the model to stop calling tools in
+        # parallel, which costs a round trip on every later slot.
+        results = []
+        for block in resp.content:
+            if getattr(block, "type", None) != "tool_use":
+                continue
+            tool_calls += 1
+            data = await _run_tool(block.name, dict(getattr(block, "input", {}) or {}))
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(data, default=str)[:_MAX_TOOL_RESULT_CHARS],
+                "is_error": isinstance(data, dict) and "error" in data,
+            })
+        if not results:
+            break
+        log.info(f"[llm] ran {len(results)} tool(s), "
+                 f"{deadline - time.monotonic():.0f}s of budget left")
+        messages = messages + [{"role": "assistant", "content": resp.content},
+                               {"role": "user", "content": results}]
+    else:
+        # Ran out of iterations while the model still wanted tools. Treat it
+        # as a failure rather than accepting whatever half-formed answer the
+        # last turn contained.
+        raise RuntimeError(
+            f"advisor still calling tools after "
+            f"{config.llm_max_tool_iterations()} iteration(s)")
 
     if getattr(resp, "stop_reason", None) == "refusal":
         raise RuntimeError(f"model refused: {getattr(resp, 'stop_details', None)}")
@@ -282,6 +424,8 @@ async def review_slot(candidates: dict[str, list[dict]], context: dict,
                candidates=total,
                web_search=config.llm_web_search(),
                effort=config.llm_effort(),
+               tools_enabled=config.llm_tools_enabled(),
+               total_budget_sec=config.llm_total_budget_sec(),
                # The prompt-side token bill, tracked because it is the half
                # this code controls. `usage` on llm.response reports what the
                # call actually cost, including what web search dragged in.
@@ -300,7 +444,8 @@ async def review_slot(candidates: dict[str, list[dict]], context: dict,
                    trade_today=verdict.trade_today,
                    regime=verdict.regime,
                    market_summary=verdict.market_summary,
-                   budget_pct=verdict.budget_pct,
+                   usd_to_deploy=verdict.usd_to_deploy,
+                   pacing_note=verdict.pacing_note,
                    usage=getattr(verdict, "_usage", None),
                    decisions=[d.model_dump() for d in verdict.decisions])
 

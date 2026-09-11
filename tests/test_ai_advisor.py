@@ -110,41 +110,78 @@ class TestExitPlans:
             ExitPlan(**{field: value})
 
 
-class TestBudgetShare:
-    CAP, FALLBACK = 60.0, 50.0
+class TestSlotBudget:
+    """The pooled weekly pot replaced the per-strategy cash shares.
 
-    def _share(self, verdict, strategy="s3"):
-        return verdict.budget_share(strategy, fallback=self.FALLBACK, max_share=self.CAP)
+    The advisor may pace WITHIN what the week has left; it may never enlarge
+    it. weekly_usd_left is computed from the trade log, so this clamps rather
+    than trusts.
+    """
 
-    def test_a_valid_split_is_used(self):
-        v = _verdict(budget_pct={"s1": 30, "s2": 20, "s3": 50})
-        assert self._share(v) == 50
+    def test_it_may_spend_less_than_the_week_has_left(self):
+        # Pacing is a real decision: "two trades today, hold five" is an
+        # answer a numeric rule cannot give.
+        v = _verdict(usd_to_deploy=2000)
+        assert v.slot_budget(weekly_usd_left=7000) == 2000
 
-    def test_concentration_is_capped(self):
-        # Alpha improved at 4 -> 8 -> 15 positions, so the advisor may tilt
-        # toward conviction but not pour everything into one strategy.
-        v = _verdict(budget_pct={"s1": 0, "s2": 0, "s3": 100})
-        assert self._share(v) == self.CAP
+    def test_it_may_never_spend_more(self):
+        v = _verdict(usd_to_deploy=50000)
+        assert v.slot_budget(weekly_usd_left=7000) == 7000
 
-    def test_a_split_summing_over_100_falls_back(self):
-        v = _verdict(budget_pct={"s1": 80, "s2": 80, "s3": 80})
-        assert self._share(v) == self.FALLBACK
+    def test_an_absent_value_uses_what_is_left_not_zero(self):
+        # A missing field must not silently stand the slot down.
+        assert _verdict().slot_budget(weekly_usd_left=7000) == 7000
 
-    def test_a_negative_weight_falls_back(self):
-        v = _verdict(budget_pct={"s1": -10, "s2": 50, "s3": 50})
-        assert self._share(v) == self.FALLBACK
+    def test_a_negative_value_falls_back_rather_than_inverting(self):
+        v = _verdict(usd_to_deploy=0)
+        assert v.slot_budget(weekly_usd_left=7000) == 0
 
-    def test_absent_split_falls_back(self):
-        assert self._share(_verdict()) == self.FALLBACK
+    def test_an_exhausted_week_yields_nothing_however_keen_the_advisor(self):
+        v = _verdict(usd_to_deploy=5000)
+        assert v.slot_budget(weekly_usd_left=0) == 0
 
-    def test_a_strategy_missing_from_the_split_falls_back(self):
-        v = _verdict(budget_pct={"s1": 50, "s2": 20})
-        assert self._share(v) == self.FALLBACK
+    def test_the_schema_rejects_a_negative_request(self):
+        with pytest.raises(ValidationError):
+            SlotVerdict(trade_today=True, regime="neutral",
+                        market_summary="x", usd_to_deploy=-1)
 
-    def test_zero_is_honoured_rather_than_treated_as_missing(self):
-        # "spend nothing on S2 today" is a real instruction, not a gap.
-        v = _verdict(budget_pct={"s1": 50, "s2": 0, "s3": 50})
-        assert self._share(v, "s2") == 0
+
+class TestApprovedRanked:
+    """One pot, one queue. The advisor's cross-strategy rank is what decides
+    who gets funded — not the order a for-loop happened to iterate in, which
+    is what silently allocated capital on 13 Aug 2026."""
+
+    CANDS = {"s1": [{"ticker": "AMD", "score": 74}],
+             "s2": [{"ticker": "STT", "score": 70}],
+             "s3": [{"ticker": "NVDA", "score": 88}]}
+
+    def test_ordering_is_global_not_per_strategy(self):
+        v = _verdict(decisions=[
+            _decision("STT", strategy="s2", rank=1),
+            _decision("NVDA", strategy="s3", rank=2),
+            _decision("AMD", strategy="s1", rank=3)])
+        out = v.approved_ranked(self.CANDS)
+        assert [p["ticker"] for p in out] == ["STT", "NVDA", "AMD"]
+
+    def test_each_pick_still_knows_its_strategy(self):
+        # The budget is pooled; per-trade caps, exit defaults and attribution
+        # are still per strategy, so the label has to survive the merge.
+        v = _verdict(decisions=[_decision("NVDA", strategy="s3", rank=1)])
+        assert v.approved_ranked(self.CANDS)[0]["_strategy"] == "s3"
+
+    def test_vetoed_picks_do_not_reach_the_queue(self):
+        v = _verdict(decisions=[
+            _decision("NVDA", strategy="s3", rank=1, approve=False),
+            _decision("AMD", strategy="s1", rank=2)])
+        assert [p["ticker"] for p in v.approved_ranked(self.CANDS)] == ["AMD"]
+
+    def test_an_invented_ticker_is_still_dropped(self):
+        # The one power the advisor never gets, now across the pooled queue.
+        v = _verdict(decisions=[_decision("TSLA", strategy="s3", rank=1)])
+        assert v.approved_ranked(self.CANDS) == []
+
+    def test_no_decisions_means_an_empty_queue(self):
+        assert _verdict(decisions=[]).approved_ranked(self.CANDS) == []
 
 
 class TestFailsClosed:
@@ -377,3 +414,142 @@ class TestIncoherentVerdictsFailLoudly:
                             lambda event, **kw: seen.append(event))
         self._review(monkeypatch, _verdict(decisions=[]))
         assert "llm.failed" in seen and "llm.response" not in seen
+
+
+class TestTheToolLoop:
+    """The hybrid split: market and budget are in the prompt; history, picks
+    and positions are tools the model pulls only when a call is close.
+
+    🔴 The loop is what makes the per-request timeout stop bounding the
+    review. llm_timeout_sec() bounds ONE request; three iterations of two
+    attempts at 150s is 900s against a 600s Lambda — and being killed there is
+    worse than failing, because the exit-monitor pass shares the invocation
+    and the llm.failed row never gets written.
+    """
+
+    def _client(self, monkeypatch, script):
+        """A fake client that replays `script`, one entry per request."""
+        from raanu.ai import advisor
+        calls = {"n": 0, "messages": [], "timeouts": []}
+
+        class Block:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+        class FakeStream:
+            def __init__(self, resp): self._resp = resp
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_): return False
+            async def get_final_message(self): return self._resp
+
+        class FakeMessages:
+            def stream(self, **kwargs):
+                i = calls["n"]
+                calls["n"] += 1
+                calls["messages"].append(kwargs["messages"])
+                calls["timeouts"].append(kwargs.get("timeout"))
+                spec = script[min(i, len(script) - 1)]
+                resp = Block(**spec)
+                return FakeStream(resp)
+
+        class FakeClient:
+            messages = FakeMessages()
+
+        monkeypatch.setattr(advisor, "_client", lambda: FakeClient())
+        monkeypatch.setenv("LLM_TOOLS_ENABLED", "1")
+        calls["Block"] = Block
+        return calls
+
+    def _final(self):
+        return {"stop_reason": "end_turn", "content": [],
+                "parsed_output": _verdict(decisions=[_decision("NVDA")]),
+                "usage": None}
+
+    def test_a_tool_call_is_executed_and_fed_back(self, monkeypatch):
+        from raanu.ai import advisor
+
+        class Use:
+            type = "tool_use"
+            id = "tu_1"
+            name = "get_pick_outcomes"
+            input = {}
+
+        calls = self._client(monkeypatch, [
+            {"stop_reason": "tool_use", "content": [Use()]},
+            self._final(),
+        ])
+        monkeypatch.setattr(advisor, "_run_tool",
+                            lambda n, a: _async({"bands": "ok"}))
+        verdict = asyncio.run(advisor._call_anthropic('{}'))
+        assert verdict.trade_today is True
+        assert calls["n"] == 2, "the tool result was never sent back"
+        # Results ride in a single user message, or the model learns to stop
+        # calling tools in parallel.
+        last = calls["messages"][-1][-1]
+        assert last["role"] == "user"
+        assert last["content"][0]["type"] == "tool_result"
+
+    def test_the_deadline_shrinks_each_request_timeout(self, monkeypatch):
+        monkeypatch.setenv("LLM_TOTAL_BUDGET_SEC", "40")
+        monkeypatch.setenv("LLM_TIMEOUT_SEC", "150")
+        calls = self._client(monkeypatch, [self._final()])
+        from raanu.ai import advisor
+        asyncio.run(advisor._call_anthropic('{}'))
+        # Never longer than what is left of the review's whole budget.
+        assert calls["timeouts"][0] <= 40
+
+    def test_an_exhausted_deadline_fails_closed(self, monkeypatch):
+        from raanu.ai import advisor
+
+        class Use:
+            type, id, name, input = "tool_use", "tu_1", "get_pick_outcomes", {}
+
+        self._client(monkeypatch, [{"stop_reason": "tool_use", "content": [Use()]}])
+        monkeypatch.setenv("LLM_TOTAL_BUDGET_SEC", "0")
+        # Raises rather than returning a half-formed verdict; review_slot's
+        # single except turns it into "no orders".
+        with pytest.raises((TimeoutError, RuntimeError)):
+            asyncio.run(advisor._call_anthropic('{}'))
+
+    def test_endless_tool_calling_is_stopped(self, monkeypatch):
+        from raanu.ai import advisor
+
+        class Use:
+            type, id, name, input = "tool_use", "tu_1", "get_pick_outcomes", {}
+
+        monkeypatch.setenv("LLM_MAX_TOOL_ITERATIONS", "2")
+        calls = self._client(monkeypatch, [{"stop_reason": "tool_use", "content": [Use()]}])
+        monkeypatch.setattr(advisor, "_run_tool", lambda n, a: _async({"x": 1}))
+        with pytest.raises(RuntimeError):
+            asyncio.run(advisor._call_anthropic('{}'))
+        assert calls["n"] <= 3
+
+    def test_a_failing_tool_does_not_fail_the_slot(self, monkeypatch):
+        # The model asked an optional question. "That lookup did not work" is
+        # something it can reason around; raising would turn a degraded
+        # picture into no trades at all.
+        from raanu.ai import advisor
+        out = asyncio.run(advisor._run_tool("get_trade_history", {"days": "oops"}))
+        assert "error" in out
+
+    def test_an_unknown_tool_is_an_error_result_not_a_crash(self, monkeypatch):
+        from raanu.ai import advisor
+        out = asyncio.run(advisor._run_tool("get_nuclear_codes", {}))
+        assert "error" in out
+
+    def test_tools_can_be_switched_off_entirely(self, monkeypatch):
+        monkeypatch.setenv("LLM_TOOLS_ENABLED", "0")
+        monkeypatch.setenv("LLM_WEB_SEARCH", "0")
+        from raanu.ai import advisor
+        assert advisor._tools() == []
+
+    def test_web_search_and_context_tools_coexist(self, monkeypatch):
+        monkeypatch.setenv("LLM_TOOLS_ENABLED", "1")
+        monkeypatch.setenv("LLM_WEB_SEARCH", "1")
+        from raanu.ai import advisor
+        names = [t["name"] for t in advisor._tools()]
+        assert "web_search" in names and "get_trade_history" in names
+
+
+async def _async(value):
+    return value

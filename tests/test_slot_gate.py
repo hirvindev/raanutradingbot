@@ -48,16 +48,25 @@ def slot(monkeypatch):
     # advice, so a test that wants the advisor reached has to look tradeable.
     # Both default to "yes"; the tests below flip them deliberately.
     seen["market_open"] = True
-    seen["blockers"] = {}
+    seen["pool_blocked"] = ""
 
     async def fake_clock():
         return (seen["market_open"], "market closed for the test")
 
     monkeypatch.setattr(trader, "market_is_open", fake_clock)
-    monkeypatch.setattr(schedule, "_unconditional_blockers",
-                        lambda label, strategies: dict(seen["blockers"]))
+    monkeypatch.setattr(schedule, "_pool_blocked", lambda label: seen["pool_blocked"])
     monkeypatch.setattr(schedule, "_send_confident_buy_alerts",
                         lambda picks, strategy="s1", slot="": None)
+
+    # The pre-assembled context is network-bound; the slot logic under test
+    # only cares that it arrived.
+    from raanu.ai import context as ai_context
+
+    async def fake_context():
+        return {"market": {"broad": {}, "breadth": {}},
+                "budget": {"trades_left": 7, "usd_left": 7000.0}, "partial": []}
+
+    monkeypatch.setattr(ai_context, "snapshot", fake_context)
 
     def set_verdict(verdict):
         from raanu.ai import advisor
@@ -149,13 +158,16 @@ class TestApprovedPicksReachTheExecutor:
 
         assert slot["executed"][0][2] is verdict
 
-    def test_s3_runs_first(self, slot):
-        slot["set_verdict"](_verdict(decisions=[_approve("NVDA", "s3"),
-                                                _approve("AMD", "s1")]))
+    def test_the_queue_follows_the_advisors_rank_not_the_strategy_order(self, slot):
+        # One pot, one queue. The old loop ran s3/s1/s2 as a tie-break hedge
+        # for an allocation problem the pooled budget removes; ordering is the
+        # advisor's explicit rank now, so a low-ranked S3 name goes last.
+        slot["set_verdict"](_verdict(decisions=[_approve("AMD", "s1", rank=1),
+                                                _approve("NVDA", "s3", rank=2)]))
         asyncio.run(schedule.run_slot(5, "test-slot"))
-        # S3 is the only strategy profitable in both halves of the backtest,
-        # so any rounding edge falls its way.
-        assert [s for s, _, _ in slot["executed"]] == ["s3", "s1"]
+        assert len(slot["executed"]) == 1, "the pooled queue is one executor call"
+        _, tickers, _ = slot["executed"][0]
+        assert tickers == ["AMD", "NVDA"]
 
 
 class TestShadowMode:
@@ -181,12 +193,14 @@ class TestShadowMode:
         assert slot["advisor_calls"] == 1
 
     def test_shadow_passes_no_verdict_to_the_executor(self, slot, monkeypatch):
-        # Otherwise the budget split would take effect while "not acting on it".
+        # Otherwise the advisor's pacing would take effect while the whole
+        # point of shadow mode is that nothing it says is acted on.
         monkeypatch.setenv("LLM_ADVISOR_SHADOW", "1")
         monkeypatch.setenv("LLM_BUDGET_ENABLED", "1")
-        slot["set_verdict"](_verdict(budget_pct={"s3": 100.0}))
+        slot["set_verdict"](_verdict(usd_to_deploy=0))
         asyncio.run(schedule.run_slot(5, "test-slot"))
         assert all(v is None for _, _, v in slot["executed"])
+        assert slot["executed"], "shadow must still trade the quant's picks"
 
 
 class TestUnconditionalGatesRunBeforeTheAdvisor:
@@ -199,35 +213,19 @@ class TestUnconditionalGatesRunBeforeTheAdvisor:
     oldest trade aged out five days later.
     """
 
-    def test_a_fully_weekly_limited_slot_never_calls_the_advisor(self, slot):
-        slot["blockers"] = {"s1": "weekly limit (2/2)", "s2": "weekly limit (1/1)",
-                            "s3": "weekly limit (3/3)"}
+    def test_an_exhausted_pool_never_calls_the_advisor(self, slot):
+        slot["pool_blocked"] = "weekly pool spent — 7/7 trades and $7,000/$7,000"
         slot["set_verdict"](_verdict(decisions=[_approve("NVDA", "s3")]))
         asyncio.run(schedule.run_slot(5, "test-slot"))
         assert slot["advisor_calls"] == 0, "paid for advice on a slot that could not trade"
         assert slot["executed"] == []
 
-    def test_a_partially_blocked_slot_still_reviews_what_is_left(self, slot):
-        # S3 is capped; S1 is not. The advisor should be asked about S1 only.
-        slot["blockers"] = {"s3": "weekly limit (3/3)"}
-        slot["set_verdict"](_verdict(decisions=[_approve("AMD", "s1")]))
+    def test_the_pool_is_all_or_nothing(self, slot):
+        # Pooling means one strategy filling the budget DOES stop the others.
+        # That is the trade for letting any strategy take any share of it.
+        slot["pool_blocked"] = "weekly pool spent"
         asyncio.run(schedule.run_slot(5, "test-slot"))
-        assert slot["advisor_calls"] == 1
-        assert [s for s, _, _ in slot["executed"]] == ["s1"]
-
-    def test_a_blocked_strategy_is_not_shown_to_the_advisor(self, slot, monkeypatch):
-        seen_candidates = {}
-        from raanu.ai import advisor
-
-        async def capture(candidates, context, label):
-            seen_candidates.update({k: len(v) for k, v in candidates.items()})
-            return _verdict(decisions=[_approve("AMD", "s1")])
-
-        monkeypatch.setattr(advisor, "review_slot", capture)
-        slot["blockers"] = {"s3": "weekly limit (3/3)"}
-        asyncio.run(schedule.run_slot(5, "test-slot"))
-        assert "s3" not in seen_candidates
-        assert seen_candidates.get("s1") == 1
+        assert slot["executed"] == []
 
     def test_a_closed_market_never_calls_the_advisor(self, slot):
         slot["market_open"] = False

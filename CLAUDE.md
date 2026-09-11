@@ -666,20 +666,14 @@ DATA_DIR=/data
 # S3 is the only strategy profitable in both halves of the backtest, so it gets
 # the most of both; S2 is throttled to token size purely to keep its live
 # sample growing. Blank/absent falls back to the global value below.
-WEEKLY_TRADE_LIMIT=2        # global fallback for untagged paths
-WEEKLY_TRADE_LIMIT_S1=2
-WEEKLY_TRADE_LIMIT_S2=1
-WEEKLY_TRADE_LIMIT_S3=3
+WEEKLY_TRADE_LIMIT=7        # POOLED across all strategies
+WEEKLY_BUDGET_USD=7000      # POOLED dollar ceiling on new BUY notional
+WEEKLY_MIN_TRADE_USD=100
 PER_TRADE_MAX_USD=2500      # hard cap; overrides Kelly risk sizing when it binds
 PER_TRADE_MAX_USD_S1=1000
 PER_TRADE_MAX_USD_S2=100
 PER_TRADE_MAX_USD_S3=5000
-CASH_RESERVE_PCT=30         # keep 30% of EQUITY liquid; see below
-# Per-strategy slice of the deployable budget. Without these, whichever
-# strategy ran first could spend the whole account — and once did.
-CASH_SHARE_S1=30
-CASH_SHARE_S2=20
-CASH_SHARE_S3=50            # highest conviction; the loop also runs s3 first
+CASH_RESERVE_PCT=0          # OFF — the weekly ceiling replaced it
 MIN_SIGNAL_SCORE=60
 PROFIT_CHECK_SEC=300
 
@@ -711,53 +705,62 @@ ALPACA_DATA_FEED=iex        # iex | sip
 
 ---
 
-## 💵 Cash Reserve — CASH_RESERVE_PCT
+## 💰 The Weekly Pool — WEEKLY_BUDGET_USD + WEEKLY_TRADE_LIMIT
 
-On the first slot that could actually execute (13 Aug 2026, 09:35 ET) the bot
-deployed **$99,414 of a $99,414 account and left $0.01**. Every gate passed —
-per-trade cap, weekly limit, Kelly sizing — because **none of them limits the
-total committed at once**. Consequences: no capacity for the 11:00 slot, none
-for a better signal the next day, and the whole account in whichever strategies
-happened to fire first that morning (13 buys: S1 x8, S2 x5, S3 x0 — i.e. all of
-it in the two strategies that fail the second-half backtest, none in the one
-that survives it).
+**One allowance across every strategy: 7 trades and $7,000 per rolling 7
+days.** The advisor decides which strategies spend it.
 
-`CASH_RESERVE_PCT` (default 30) is measured against **equity, not free cash**,
-so it means "keep this share of the account liquid" rather than a share of
-whatever happens to be left. When the account is already over-deployed it simply
-yields nothing to spend — **it never forces a sale** to rebuild the buffer.
+    WEEKLY_TRADE_LIMIT=7        # trades, pooled
+    WEEKLY_BUDGET_USD=7000      # BUY notional, pooled
+    WEEKLY_MIN_TRADE_USD=100    # floor; below this the remainder is dust
+    WEEKLY_MAX_PER_STRATEGY=7   # optional rail, defaults to the whole pool
 
-    reserve    = equity * CASH_RESERVE_PCT / 100
-    deployable = max(0, free_cash - reserve)
+**Both limits bind, and whichever runs out first stops the week.** The count
+alone is not a risk limit — seven $5,000 trades and seven $200 trades are the
+same number and a 25x difference in exposure. Counts **BUY notional only**:
+exits never refund the budget, because it limits how much NEW exposure a week
+opens, not the net position.
 
-Orders size against `deployable` and draw it down as they go; the slot stops
-when it falls below $1. Do not size against raw `free_cash` again.
+**Rolling, not calendar.** Capacity drips back one trade at a time as each
+ages out. `budget.oldest_frees_at` says when, and the advisor is shown it —
+"one trade left and three more on Tuesday" is a different decision from "one
+trade left and nothing for six days".
 
----
+### ⚠️ This reverses two rules that used to be in this file
 
-## 🍰 Per-Strategy Cash Share — CASH_SHARE_S1/S2/S3
+**"Do not go back to a single shared pot."** That rule came from 13 Aug 2026,
+when S1 and S2 consumed a $99,414 account at 09:35 and S3 — holding candidates
+scoring 90, 84 and 73 — arrived at $0.01. Two things that did not exist then
+make the single pot safe now:
 
-The scheduled slot used to run `for strat in ("s1","s2","s3")` against a single
-pot of cash, so **whichever ran first could spend everything**. On 13 Aug 2026
-S1 and S2 consumed the entire account at 09:35 ET and S3 — holding candidates
-scoring **90, 84 and 73** — arrived at $0.01 and bought nothing.
+1. **An absolute weekly dollar ceiling.** In August *nothing* bounded the
+   total committed at once; every gate bounded one order. $7,000 a week on a
+   ~$100k account is ~7%, against the 100% that actually happened.
+2. **An explicit cross-strategy ranking.** Execution order was silently
+   deciding allocation — `for strat in ("s1","s2","s3")` against one pot. The
+   advisor now ranks across strategies and the queue follows that rank, so
+   order is a decision rather than an artefact of a for-loop.
 
-Execution order was silently deciding capital allocation, and it decided against
-the one strategy profitable in both halves of the backtest. That is the exact
-opposite of what this file says the design intends.
+`CASH_SHARE_S1/S2/S3` are **deleted**. `CASH_RESERVE_PCT` now defaults to
+**0** — the weekly ceiling replaced it, and it is a tighter bound: a
+percentage of a moving equity figure says nothing about pace, while $7,000 a
+rolling week is absolute. It survives as a dial and composes as another floor
+on free cash if re-armed.
 
-Each strategy now receives a slice of the deployable budget:
+**"The per-strategy weekly limit is the single throttle."** Now the pooled
+one is. S1 2 / S2 1 / S3 3 summed to 6 and could not be used as a pool — a
+capped strategy could not lend to an uncapped one.
 
-    deployable = max(0, free_cash - equity * CASH_RESERVE_PCT/100)
-    budget(s)  = deployable * CASH_SHARE_S{n} / 100
+### 🔴 The per-trade caps and the pool are two ceilings on the same money
 
-Defaults follow conviction: **S3 50%, S1 30%, S2 20%**. The loop also runs
-**s3 first**, so any rounding edge falls its way rather than against it.
+`PER_TRADE_MAX_USD_S3=5000` against a $7,000 week means **two S3 trades
+exhaust the dollars while five of the seven trade slots sit unused**. The
+count of 7 is unreachable unless the caps come down to roughly
+`budget / limit` — about **$1,000 a trade** for a $7,000 / 7 week.
 
-⚠️ Do not go back to a single shared pot. Per-trade caps and weekly limits bound
-one order and one count; neither bounds what a strategy can take from the whole.
-
----
+Both tests in `TestCapsAndPoolMustAgree` pin this so it stays a decision
+rather than a surprise. Decide which ceiling you want to bind before the
+next live slot.
 
 ## 🧠 LLM Advisory Gate — raanu/ai/
 
@@ -827,6 +830,9 @@ LLM_EXITS_ENABLED=0      # let it set per-trade stop/trail/ladder
 LLM_RETRO_ENABLED=0      # weekly look-back report
 LLM_MODEL=claude-sonnet-5
 LLM_API_KEY=<SSM / .env, never committed>
+LLM_TOOLS_ENABLED=1      # history / picks / positions as model-called tools
+LLM_TOTAL_BUDGET_SEC=300 # the WHOLE review, tool loop included
+LLM_MAX_TOOL_ITERATIONS=3
 LLM_TIMEOUT_SEC=150      # PER ATTEMPT — see the retry arithmetic below
 LLM_MAX_RETRIES=1        # NOT the SDK default of 2
 LLM_EFFORT=medium        # thinking depth; the biggest line on the bill
@@ -935,6 +941,53 @@ candidate for want of a decision, and the slot places nothing.
 what changes is that it lands on the `llm.failed` path naming the reason,
 instead of a success row that looks fine. A stand-down (`trade_today=false`)
 with no decisions is still perfectly normal and is left alone.
+
+## 🧩 The advisor's information layer — raanu/ai/context/
+
+Five services behind one protocol (`name`, `required`, `async fetch()`), split
+by **when** the advisor needs them rather than by what they contain.
+
+| Service | Answers | How it reaches the model | On failure |
+|---------|---------|--------------------------|------------|
+| `market` | what is the tape doing | **in the prompt** | partial, listed |
+| `budget` | what may I spend | **in the prompt** | 🔴 **raises — no orders** |
+| `history` | has a strategy been working | tool `get_trade_history` | section omitted |
+| `picks` | do high scores pay | tool `get_pick_outcomes` | section omitted |
+| `positions` | what do we already hold | tool `get_open_positions` | section omitted |
+
+**Why hybrid.** Pre-assembling everything makes the common slot pay for
+research it did not need; making everything a tool adds an inference round
+trip to every slot for data that is always required — and this system has
+already lost a trading day to advisor latency. So: always-needed and cheap
+goes in the prompt, occasionally-decisive becomes a tool.
+
+**`budget` is the only `required` provider.** Every other one degrades to a
+smaller picture. That one degrades to "we do not know what we are allowed to
+spend", and the only safe reading of that is zero — so it raises, and lands in
+the advisor's single `except` as "no orders this slot".
+
+⚠️ **Not Lambda layers.** Layers are a zip-packaging feature and this project
+deploys a **container image** (the dependency set is 266 MB, past the 250 MB
+zip ceiling). The decoupling is package-level, which buys the same
+testability and independent failure without a deployment mechanism that does
+not apply here.
+
+### 🔴 The tool loop needs its own deadline
+
+`LLM_TIMEOUT_SEC` bounds **one HTTP request**. With a tool loop the review is
+several of them, so it no longer bounds the review: 3 iterations x 2 attempts
+x 150s = **900s against a 600s Lambda**.
+
+Being killed there is strictly worse than failing — the exit-monitor pass
+shares the invocation and would be skipped, and the `llm.failed` row would
+never be written, so the outage would also be invisible.
+
+    LLM_TOTAL_BUDGET_SEC=300     # the WHOLE review, tool calls included
+    LLM_MAX_TOOL_ITERATIONS=3
+    LLM_TOOLS_ENABLED=1
+
+Each request's timeout is shrunk to the time actually remaining, so an
+overrun surfaces as an ordinary timeout through the fail-closed path.
 
 ## 🔬 Regime filter — measure before enabling (`--sweep-regime`)
 

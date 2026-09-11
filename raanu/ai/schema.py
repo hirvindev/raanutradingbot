@@ -11,7 +11,9 @@ inside them; these make it true. Two in particular are load-bearing:
 
   * ``size_mult`` is capped at 1.0 — the advisor may shrink a position or
     remove it, never inflate one. Increasing exposure has exactly one lever
-    (``budget_pct``) and that lever is bounded by the cash reserve.
+    (``usd_to_deploy``) and that lever is clamped to what the weekly budget
+    actually has left, computed from the trade log rather than from anything
+    the model said.
   * every ``ExitPlan`` bound sits inside the range the backtester actually
     explored, so a plan can pick a different stop but not an untested one.
 
@@ -110,10 +112,19 @@ class SlotVerdict(BaseModel):
         max_length=600,
         description="What the tape and the news say. Names the reason when "
                     "trade_today is false.")
-    budget_pct: dict[str, float] | None = Field(
-        default=None,
-        description="Per-strategy share of the deployable budget, e.g. "
-                    '{"s1": 30, "s2": 20, "s3": 50}. Must sum to <= 100.')
+    usd_to_deploy: float | None = Field(
+        default=None, ge=0,
+        description=(
+            "Dollars of the REMAINING weekly budget to commit in this slot. "
+            "Omit to let the approved trades size themselves against what is "
+            "left. Use it to pace: approving two trades today out of seven "
+            "for the week is a legitimate answer, and so is holding the whole "
+            "budget back for a better tape."))
+    pacing_note: str = Field(
+        default="", max_length=300,
+        description=("Why this many trades now rather than more or fewer. "
+                     "Required reading when fewer are approved than the "
+                     "weekly budget allows."))
     decisions: list[CandidateDecision] = Field(default_factory=list)
 
     # ── consumption helpers ──────────────────────────────────────────────────
@@ -153,26 +164,44 @@ class SlotVerdict(BaseModel):
         out.sort(key=lambda pair: pair[0])
         return [pick for _, pick in out]
 
-    def budget_share(self, strategy: str, *, fallback: float,
-                     max_share: float) -> float:
-        """This strategy's percentage of the deployable budget.
+    def slot_budget(self, *, weekly_usd_left: float) -> float:
+        """Dollars this slot may commit.
 
-        Falls back to the configured ``CASH_SHARE_*`` whenever the advisor did
-        not supply a usable split — a malformed allocation must not fail the
-        slot, and it must not silently mean "zero".
+        The advisor may spend LESS than what the week has left — pacing is a
+        real decision, and "hold the budget for a better tape" is one of the
+        few things a model can contribute that a numeric rule cannot. It may
+        never spend MORE: ``weekly_usd_left`` is computed from the trade log,
+        not from anything the model said, so this clamps rather than trusts.
+
+        An absent or unusable value means "use what is left", not "zero" — a
+        malformed field must not silently stand the slot down.
         """
-        weights = self.budget_pct or {}
         try:
-            values = {k.lower(): float(v) for k, v in weights.items()}
+            asked = float(self.usd_to_deploy) if self.usd_to_deploy is not None else None
         except (TypeError, ValueError):
-            return fallback
-        if not values or any(v < 0 for v in values.values()):
-            return fallback
-        if sum(values.values()) > 100.0001:
-            return fallback
-        share = values.get(strategy.lower())
-        if share is None:
-            return fallback
-        # Capped even when the advisor's own numbers are internally valid:
-        # concentration is bounded by policy, not by the model's restraint.
-        return min(share, max_share)
+            asked = None
+        if asked is None or asked < 0:
+            return max(0.0, weekly_usd_left)
+        return max(0.0, min(asked, weekly_usd_left))
+
+    def approved_ranked(self, candidates: dict[str, list[dict]], *,
+                        apply_exits: bool = True) -> list[dict]:
+        """Every approved pick across ALL strategies, in the advisor's order.
+
+        The pooled budget's counterpart to ``approved_for``. Execution is no
+        longer per strategy — there is one pot and one queue — so the ranking
+        the advisor produces across strategies is what actually decides who
+        gets funded, rather than the order a for-loop happened to iterate in.
+
+        Each survivor carries ``_strategy`` so the executor still knows what
+        it is placing: per-trade caps, exit defaults and attribution are all
+        still per strategy even though the budget is not.
+        """
+        out: list[tuple[int, dict]] = []
+        for strategy, picks in (candidates or {}).items():
+            for pick in self.approved_for(strategy, picks, apply_exits=apply_exits):
+                annotated = dict(pick)
+                annotated["_strategy"] = strategy
+                out.append((annotated.get("_llm_rank", 99), annotated))
+        out.sort(key=lambda pair: pair[0])
+        return [pick for _, pick in out]

@@ -45,7 +45,6 @@ def _state_health() -> dict:
 def health():
     from raanu.notify.telegram import is_configured as tg_configured
     from raanu.trading.trader import per_trade_max_for as _per_trade_max_for
-    from raanu.trading.trader import weekly_limit_for as _weekly_limit_for
     # Surfaced because a non-persistent state dir silently breaks strategy
     # attribution, the weekly trade limit and Kelly's sample.
 
@@ -94,9 +93,12 @@ def health():
             "per_trade_max_by_strategy": {
                 s: _per_trade_max_for(s) for s in ("s1", "s2", "s3")
             },
-            "weekly_limit_by_strategy": {
-                s: _weekly_limit_for(s) for s in ("s1", "s2", "s3")
-            },
+            # Pooled since 11 Sep 2026: one weekly allowance across every
+            # strategy, in BOTH trades and dollars. Reported together because
+            # the count alone does not bound risk — seven $5,000 trades and
+            # seven $200 trades are the same number.
+            "weekly_budget_usd":   config.weekly_budget_usd(),
+            "weekly_min_trade_usd": config.weekly_min_trade_usd(),
             "profit_check_sec":    _exit.check_interval,
         },
     }

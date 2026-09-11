@@ -8,6 +8,8 @@ silently ignored.
 
 from __future__ import annotations
 
+import pytest
+
 from raanu import config
 
 
@@ -59,20 +61,47 @@ class TestCoercion:
         assert config.broker_base() == "https://api.alpaca.markets/v2"
 
 
-class TestPerStrategy:
-    def test_defaults_follow_conviction(self):
-        # S3 is the only strategy profitable in both halves of the backtest,
-        # so it gets the most attempts and the most capital.
-        assert config.weekly_trade_limit("s3") == 3
-        assert config.weekly_trade_limit("s2") == 1
+class TestWeeklyPool:
+    """One allowance across every strategy, in trades AND dollars.
+
+    The per-strategy quotas are gone: they meant a capped strategy could not
+    lend its allowance to an uncapped one, and the split (2/1/3 = 6) was not
+    usable as a pool. The advisor allocates the pool now.
+    """
+
+    def test_the_pool_is_seven_trades_and_seven_thousand_dollars(self):
+        assert config.weekly_trade_limit() == 7
+        assert config.weekly_budget_usd() == 7000.0
+
+    def test_both_limits_are_configurable(self, monkeypatch):
+        monkeypatch.setenv("WEEKLY_TRADE_LIMIT", "10")
+        monkeypatch.setenv("WEEKLY_BUDGET_USD", "12000")
+        assert config.weekly_trade_limit() == 10
+        assert config.weekly_budget_usd() == 12000.0
+
+    def test_it_takes_no_strategy_argument(self):
+        # The old signature accepted one and returned a different number per
+        # strategy. Leaving it would let callers keep asking a question that
+        # no longer has a per-strategy answer.
+        with pytest.raises(TypeError):
+            config.weekly_trade_limit("s3")
+
+    def test_the_per_strategy_ceiling_is_inert_by_default(self):
+        # A dial, not a quota: defaults to the whole pool.
+        assert config.weekly_max_per_strategy() == config.weekly_trade_limit()
+
+    def test_the_minimum_trade_stops_dust_positions(self):
+        assert config.weekly_min_trade_usd() == 100.0
+
+    def test_the_equity_reserve_is_off_by_default(self):
+        # The weekly ceiling replaced it — an absolute cap on new exposure
+        # rather than a percentage of a moving equity figure.
+        assert config.cash_reserve_pct() == 0.0
+
+    def test_per_trade_caps_are_still_per_strategy(self):
+        # The BUDGET is pooled; per-trade caps, exits and attribution are not.
         assert config.per_trade_max_usd("s3") == 5000.0
         assert config.per_trade_max_usd("s2") == 100.0
-        assert config.cash_share("s3") == 50.0
-
-    def test_env_overrides_per_strategy(self, monkeypatch):
-        monkeypatch.setenv("WEEKLY_TRADE_LIMIT_S3", "7")
-        assert config.weekly_trade_limit("s3") == 7
-        assert config.weekly_trade_limit("s1") == 2
 
     def test_unknown_strategy_falls_through_to_shared_default(self):
         # "unknown" is what an unattributable position gets. It must resolve
@@ -146,10 +175,13 @@ class TestLLMAdvisorDefaults:
         monkeypatch.setenv("LLM_MAX_RETRIES", "0")
         assert config.llm_max_retries() == 0
 
-    def test_budget_share_cap_bounds_concentration(self, monkeypatch):
-        assert config.llm_max_budget_share() == 60.0
-        monkeypatch.setenv("LLM_MAX_BUDGET_SHARE", "40")
-        assert config.llm_max_budget_share() == 40.0
+    def test_the_per_strategy_ceiling_can_bound_concentration(self, monkeypatch):
+        # Replaces LLM_MAX_BUDGET_SHARE, which capped a strategy's slice of a
+        # split that no longer exists. Off by default — the pool is meant to
+        # be unrestricted by strategy — but available if the retro shows the
+        # advisor piling into the two strategies with the weaker record.
+        monkeypatch.setenv("WEEKLY_MAX_PER_STRATEGY", "4")
+        assert config.weekly_max_per_strategy() == 4
 
     def test_trace_retention_is_configurable(self, monkeypatch):
         assert config.trace_retain_days() == 90

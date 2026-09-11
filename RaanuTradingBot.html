@@ -1437,13 +1437,15 @@ el('pos').addEventListener('click', e=>{
 });
 
 function renderStrats(){
-  const caps=S.cfg.per_trade_max_by_strategy||{}, lims=S.cfg.weekly_limit_by_strategy||{};
+  // The weekly allowance is POOLED across strategies now, so it is shown once
+  // above rather than repeated per row where it read as a per-strategy quota.
+  const caps=S.cfg.per_trade_max_by_strategy||{};
   el('strats').innerHTML = ['s1','s2','s3'].map(k=>{
     const st=S.cmp[k]||{}, meta=STRAT[k];
     const mine=S.pos.filter(p=>sof(p)===k);
     const val=mine.reduce((a,p)=>a+(p.currentPrice||p.averagePrice)*p.quantity,0);
     const closed=st.closed_trades||0, net=st.net_pnl||0;
-    const budget=`${caps[k]!=null?money(caps[k]):'—'} · ${lims[k]!=null?lims[k]+'/wk':'—'}`;
+    const budget=`${caps[k]!=null?money(caps[k]):'—'} / trade`;
     const name=`<div class="sname" style="border-left-color:${meta.c}">${meta.n}</div>`;
     if(!mine.length && !closed)
       return `<div class="srow">${name}<div class="idle">No trades yet · budget ${budget}</div></div>`;
@@ -2190,13 +2192,30 @@ const BACKTEST = [
 ];
 
 function renderStrategy(){
-  const caps=S.cfg.per_trade_max_by_strategy||{}, lims=S.cfg.weekly_limit_by_strategy||{}, e=S.exit;
-  el('budgets').innerHTML = ['s1','s2','s3'].map(k=>{
+  const caps=S.cfg.per_trade_max_by_strategy||{}, e=S.exit;
+  // One pooled allowance, in trades AND dollars. Both bind, and whichever
+  // runs out first stops the week — the count alone is not a risk limit,
+  // since seven $5,000 trades and seven $200 trades are the same number.
+  const pool=(S.auto&&S.auto.weekly_pool)||{};
+  const usedT=pool.trades_used, maxT=pool.trades_max, usedU=pool.usd_used, maxU=pool.usd_max;
+  const bar=(a,b)=>{ const pctv=b?Math.min(100,Math.round(a/b*100)):0;
+    return `<div style="height:6px;border-radius:3px;background:var(--line,#eee);overflow:hidden">
+      <div style="height:100%;width:${pctv}%;background:${pctv>=100?'var(--down,#f43f5e)':'var(--accent,#00c896)'}"></div></div>`; };
+  el('budgets').innerHTML =
+    (maxT!=null ? `<div class="srow">
+       <div class="sname">Weekly pool <span class="mut">shared by all strategies</span></div>
+       <div><div class="sk">Trades</div><div class="sv num">${usedT} / ${maxT}</div>${bar(usedT,maxT)}</div>
+       <div><div class="sk">Dollars</div><div class="sv num">${money(usedU||0)} / ${money(maxU||0)}</div>${bar(usedU,maxU)}</div>
+       <div><div class="sk">Frees next</div><div class="sv num">${
+         pool.oldest_frees_at ? new Date(pool.oldest_frees_at).toLocaleDateString() : '—'}</div></div>
+       </div>` : '') +
+    ['s1','s2','s3'].map(k=>{
     const m=STRAT[k], atr=e['stop_atr_mult_'+k];
+    const took=(pool.trades_by_strategy_this_week||{})[k];
     return `<div class="srow">
       <div class="sname" style="border-left-color:${m.c}">${m.n}</div>
       <div><div class="sk">Per trade</div><div class="sv num">${caps[k]!=null?money(caps[k]):'—'}</div></div>
-      <div><div class="sk">Weekly limit</div><div class="sv num">${lims[k]!=null?lims[k]:'—'}</div></div>
+      <div><div class="sk">Took this week</div><div class="sv num">${took||0}</div></div>
       <div><div class="sk">Stop</div><div class="sv num">${atr!=null?atr+'×ATR':'—'}</div></div>
       <div><div class="sk">Profit ladder</div><div class="sv">${e['profit_ladder_'+k]?'On':'Off'}</div></div></div>`;
   }).join('');

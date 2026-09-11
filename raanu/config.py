@@ -200,13 +200,53 @@ def min_signal_score() -> int:
 # ── trading limits ───────────────────────────────────────────────────────────
 
 
-def weekly_trade_limit(strategy: str = "") -> int:
-    defaults = {"s1": 2, "s2": 1, "s3": 3}
-    fallback = defaults.get((strategy or "").lower(), env_int("WEEKLY_TRADE_LIMIT", 2))
-    try:
-        return int(_per_strategy("WEEKLY_TRADE_LIMIT", strategy, fallback))
-    except (TypeError, ValueError):
-        return int(fallback)
+def weekly_trade_limit() -> int:
+    """Trades per rolling 7 days, POOLED across every strategy.
+
+    Was per strategy (s1 2, s2 1, s3 3 = 6, unusable as a pool because a
+    capped strategy could not lend to an uncapped one). One number now, and
+    the advisor decides which strategies spend it.
+
+    ⚠️ Takes no ``strategy`` argument on purpose. The old signature accepted
+    one and silently returned a different number per strategy; leaving it in
+    place would let a caller keep asking a question that no longer has a
+    per-strategy answer."""
+    return env_int("WEEKLY_TRADE_LIMIT", 7)
+
+
+def weekly_budget_usd() -> float:
+    """Dollars of NEW BUY notional per rolling 7 days, pooled.
+
+    The count limit alone does not bound risk: seven $5,000 trades and seven
+    $200 trades are the same number and a 25x difference in exposure. This is
+    the constraint that actually caps how much capital the week can commit.
+
+    Counts BUY notional only — exits do not refund it, because the budget
+    limits how much NEW exposure is opened per week, not net position."""
+    return env_float("WEEKLY_BUDGET_USD", 7000.0)
+
+
+def weekly_min_trade_usd() -> float:
+    """Smallest trade worth placing from what is left of the weekly pot.
+
+    Without a floor the last few dollars of the budget become a $12 position:
+    it pays commission-free but it cannot move the P&L, it occupies a slot in
+    the book, and it dilutes the per-trade sample that Kelly reads."""
+    return env_float("WEEKLY_MIN_TRADE_USD", 100.0)
+
+
+def weekly_max_per_strategy() -> int:
+    """Optional ceiling on how many of the weekly trades one strategy may take.
+
+    Defaults to the full pool, i.e. OFF — the pooled budget is deliberately
+    unrestricted by strategy, which is the whole point of pooling it.
+
+    It exists as a dial because the evidence cuts both ways: S1 and S2 both
+    collapse in the second half of the backtest while S3 survives, so an
+    advisor that puts all seven trades into S1 is concentrating into the two
+    strategies with the weaker record. If that shows up in the retro, set
+    this rather than going back to per-strategy quotas."""
+    return env_int("WEEKLY_MAX_PER_STRATEGY", weekly_trade_limit())
 
 
 def per_trade_max_usd(strategy: str = "") -> float:
@@ -219,18 +259,23 @@ def per_trade_max_usd(strategy: str = "") -> float:
 
 
 def cash_reserve_pct() -> float:
-    """Share of EQUITY (not free cash) kept liquid. Measured against equity so
-    it means "keep this much of the account uninvested" rather than "a share
-    of whatever happens to be left" — on 13 Aug 2026 the bot deployed
-    $99,414 of a $99,414 account because nothing bounded the total."""
-    return env_float("CASH_RESERVE_PCT", 30.0)
+    """Share of EQUITY held back from entries. Now 0 by default — OFF.
 
+    ⚠️ Read the history before re-arming this. On 13 Aug 2026 the bot deployed
+    $99,414 of a $99,414 account and left $0.01, because every gate bounded
+    ONE order and nothing bounded the total committed at once. This reserve
+    was the answer to that.
 
-def cash_share(strategy: str) -> float:
-    """Per-strategy slice of the deployable budget. Without these, whichever
-    strategy ran first could spend the whole account — and once did."""
-    defaults = {"s1": 30.0, "s2": 20.0, "s3": 50.0}
-    return env_float(f"CASH_SHARE_{strategy.upper()}", defaults.get(strategy.lower(), 0.0))
+    ``weekly_budget_usd()`` is the answer now, and it is a tighter one: the
+    reserve was a percentage of a moving equity figure that said nothing about
+    pace, while $7,000 per rolling week is an absolute ceiling on new exposure
+    regardless of account size. On a ~$100k account that is ~7% a week, so the
+    13 Aug failure mode is bounded by roughly 14x more headroom than the
+    reserve gave it.
+
+    Kept as a dial rather than deleted: set CASH_RESERVE_PCT to re-arm it and
+    it composes with the weekly budget as another floor on free cash."""
+    return env_float("CASH_RESERVE_PCT", 0.0)
 
 
 def max_position_pct() -> float:
@@ -355,6 +400,42 @@ def llm_web_search() -> bool:
     return env_bool("LLM_WEB_SEARCH", True)
 
 
+def llm_tools_enabled() -> bool:
+    """Let the advisor pull trade history / pick outcomes / positions itself.
+
+    The hybrid split: what is always needed and must be known BEFORE the call
+    (the market picture, and the weekly budget the fail-closed gate depends
+    on) is pre-assembled into the prompt. What is only sometimes decisive —
+    "has S2 actually been working", "do 90s outperform 75s" — is a tool the
+    model pulls when a call is close, so the common slot does not pay for it."""
+    return env_bool("LLM_TOOLS_ENABLED", True)
+
+
+def llm_max_tool_iterations() -> int:
+    """How many tool round trips one review may take.
+
+    Each iteration is a whole extra inference pass over a growing transcript,
+    so this multiplies both latency and tokens. Three is enough for "check
+    history, check picks, decide"; more usually means the model is browsing."""
+    return env_int("LLM_MAX_TOOL_ITERATIONS", 3)
+
+
+def llm_total_budget_sec() -> float:
+    """Wall-clock ceiling on the WHOLE review, tool loop included.
+
+    🔴 Load-bearing. llm_timeout_sec() bounds one HTTP request; with a tool
+    loop the review is now several of them, so the per-request timeout no
+    longer bounds the review. Unbounded, 3 iterations x 2 attempts x 150s =
+    900s against a 600s Lambda — the function would be killed mid-slot,
+    skipping the exit-monitor pass that shares the invocation AND losing the
+    llm.failed row, so the failure would be both worse and invisible.
+
+    300s leaves 300s of Lambda for everything else. The deadline is enforced
+    by shrinking each request's timeout to the time actually left, so an
+    overrun fails closed through the normal path instead of being killed."""
+    return env_float("LLM_TOTAL_BUDGET_SEC", 300.0)
+
+
 def llm_search_max_uses() -> int:
     """2 searches, down from 3.
 
@@ -370,16 +451,6 @@ def llm_search_max_uses() -> int:
 
 def llm_retro_enabled() -> bool:
     return env_bool("LLM_RETRO_ENABLED", False)
-
-
-def llm_max_budget_share() -> float:
-    """Ceiling on any single strategy's slice of the deployable budget.
-
-    Alpha improved at 4 -> 8 -> 15 positions at every score threshold, so
-    letting the advisor pour everything into one strategy pushes the book
-    against the one diversification result this project has actually
-    measured. It may tilt with conviction; it may not concentrate."""
-    return env_float("LLM_MAX_BUDGET_SHARE", 60.0)
 
 
 # ── tracing ──────────────────────────────────────────────────────────────────

@@ -44,9 +44,14 @@ def per_trade_max_for(strategy: str) -> float:
 # per-trade cap: S3 is the only strategy profitable in both halves of the
 # backtest, so it gets the most attempts; S2 gets one, purely to keep its live
 # sample growing. A blank/absent value falls back to the global limit.
-def weekly_limit_for(strategy: str) -> int:
-    """Weekly trade limit for this strategy, falling back to the global limit."""
-    return config.weekly_trade_limit(strategy or "s1")
+def weekly_limit_for(strategy: str = "") -> int:
+    """The weekly trade limit — POOLED, so the argument is ignored.
+
+    Kept as a shim rather than deleted because several callers pass a
+    strategy. It now returns the same number for every one of them, which is
+    the point: there is one budget and the advisor decides how it is spent.
+    """
+    return config.weekly_trade_limit()
 
 
 # NOTE: there is deliberately no periodic scan interval. Scans are driven by
@@ -133,14 +138,27 @@ class TradeLog:
         which genuinely need full history rather than a window."""
         return [r.data for r in state.query(keys.TRADE, **kwargs)]
 
-    def can_trade_now(self, strategy: str = "s1") -> tuple[bool, str]:
-        recent = self.trades_in_last_7_days(strategy=strategy, action="BUY")
-        label = STRATEGY_LABELS.get(strategy, "S1 Pullback")
-        limit = weekly_limit_for(strategy)   # per strategy, not the global cap
+    def can_trade_now(self, strategy: str = "") -> tuple[bool, str]:
+        """Is there room in the POOLED weekly trade count?
+
+        ⚠️ Counts every strategy's BUYs, not just ``strategy``'s. The argument
+        survives only so existing callers keep working and so the message can
+        name who is asking; it no longer narrows the count. A per-strategy
+        answer would be wrong now — one strategy filling the pool genuinely
+        does stop the others, which is what pooling means.
+
+        BUYs only: exits land in the same log tagged with the strategy they
+        were opened under, and without that filter a closed round-trip
+        consumed the opening budget.
+        """
+        recent = self.trades_in_last_7_days(action="BUY")
+        label = STRATEGY_LABELS.get(strategy, "Weekly pool") if strategy else "Weekly pool"
+        limit = weekly_limit_for()
         if len(recent) >= limit:
             oldest = min(recent, key=lambda x: x["timestamp"])
-            return False, f"[{label}] Weekly limit reached ({len(recent)}/{limit}). Oldest expires {oldest['timestamp']}"
-        return True, f"[{label}] OK ({len(recent)}/{limit} this week)"
+            return False, (f"[{label}] Weekly trade limit reached ({len(recent)}/{limit} "
+                           f"across all strategies). Oldest expires {oldest['timestamp']}")
+        return True, f"[{label}] OK ({len(recent)}/{limit} this week, pooled)"
 
     def record(self, payload: dict):
         """Write one trade as its own item. No read, no merge, no rewrite —
@@ -392,30 +410,35 @@ class AutoTrader:
             s: len(self.tradelog.trades_in_last_7_days(strategy=s, action="BUY"))
             for s in ("s1", "s2", "s3")
         }
-        remaining_by_strat = {
-            s: max(0, weekly_limit_for(s) - n) for s, n in buys_by_strat.items()
-        }
+        # One pool now: the per-strategy split is still REPORTED, because it
+        # answers "where did the week go", but it is no longer a budget.
+        from raanu.ai.context import budget as budget_ctx
+        try:
+            pool = budget_ctx.state()
+        except Exception:
+            pool = {}
         return {
             "enabled": self.enabled,
             "config": {
                 "weekly_limit":       config.weekly_trade_limit(),
+                "weekly_budget_usd":  config.weekly_budget_usd(),
+                "min_trade_usd":      config.weekly_min_trade_usd(),
                 "per_trade_max_usd":  config.per_trade_max_usd(),
                 "per_trade_max_by_strategy": {
                     s: per_trade_max_for(s) for s in ("s1", "s2", "s3")
                 },
-                "weekly_limit_by_strategy": {
-                    s: weekly_limit_for(s) for s in ("s1", "s2", "s3")
-                },
                 "min_score":          config.min_signal_score(),
                 "watchlist":          WATCHLIST,
             },
-            # Budgets count BUYs only, and they are per strategy — comparing an
-            # all-strategy count against the global limit reported "0 remaining"
-            # while S3 still had its full allowance.
-            "trades_this_week":           sum(buys_by_strat.values()),
-            "trades_remaining_this_week": sum(remaining_by_strat.values()),
+            # Budgets count BUYs only — exits are logged with the strategy they
+            # were opened under, and counting them once locked a strategy out
+            # for a week on a single close.
+            "trades_this_week":           pool.get("trades_used", sum(buys_by_strat.values())),
+            "trades_remaining_this_week": pool.get("trades_left", 0),
+            "usd_this_week":              pool.get("usd_used", 0.0),
+            "usd_remaining_this_week":    pool.get("usd_left", 0.0),
+            "weekly_pool":                pool,
             "trades_this_week_by_strategy":      buys_by_strat,
-            "trades_remaining_by_strategy":      remaining_by_strat,
             "recent_trades":   recent[-5:],
             "last_scan":       self.last_scan,
             "last_decision":   self.last_decision,
@@ -469,9 +492,26 @@ class AutoTrader:
                 self.last_decision = {"action": "hold", "reason": clock_msg}
                 return
 
-        # ── Gate 2: weekly trade limit (per strategy) ─────────────────────
+        # ── Gate 2: the pooled weekly budget — COUNT and DOLLARS ─────────
+        # Both, not just the count. This path (/api/auto/scan-now) does not go
+        # through run_slot, so without the dollar check it would be a way to
+        # spend past the weekly ceiling that the scheduled slots respect.
         ok, why = self.tradelog.can_trade_now(strategy=strategy)
         if not ok:
+            self.event("limit", why)
+            self.last_decision = {"action": "skip", "reason": why}
+            return
+
+        from raanu.ai.context import budget as budget_ctx
+        try:
+            pool = budget_ctx.state()
+        except Exception as e:
+            # Fail closed: not knowing the budget reads as none left.
+            pool = {"usd_left": 0.0, "exhausted": True}
+            log.warning(f"[auto] weekly pool unreadable: {e} — standing down")
+        if pool["exhausted"]:
+            why = (f"Weekly budget spent — ${pool.get('usd_used', 0):,.0f} of "
+                   f"${pool.get('usd_max', 0):,.0f} committed this week")
             self.event("limit", why)
             self.last_decision = {"action": "skip", "reason": why}
             return
@@ -516,13 +556,18 @@ class AutoTrader:
 
         sym = best["ticker"]
 
-        # ── Gate 5: position sizing (min of cap and 10% of free cash) ────
+        # ── Gate 5: position sizing (cap, 10% of free cash, weekly pot) ──
         strat_cap   = per_trade_max_for(strategy)
         max_by_cash = round(free_cash * 0.10, 2)   # never risk >10% of cash
-        notional    = min(strat_cap, max_by_cash)
+        # Trimmed to what the week can still afford rather than skipped for
+        # being slightly too large — the same min() chain the slot path uses.
+        notional    = round(min(strat_cap, max_by_cash, pool.get("usd_left", 0.0)), 2)
 
-        if notional < 1.0:
-            msg = f"Insufficient free cash (${free_cash:.2f}) to open a position"
+        if notional < config.weekly_min_trade_usd():
+            msg = (f"Position would be ${notional:.2f} — below the "
+                   f"${config.weekly_min_trade_usd():.0f} minimum "
+                   f"(free cash ${free_cash:.2f}, "
+                   f"weekly pot ${pool.get('usd_left', 0):,.0f})")
             self.event("hold", msg)
             self.last_decision = {"action": "hold", "reason": msg}
             return
