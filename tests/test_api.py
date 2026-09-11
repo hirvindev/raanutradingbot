@@ -276,7 +276,10 @@ class TestHealth:
         monkeypatch.setenv("STATE_BACKEND", "dynamodb")
         monkeypatch.setenv("STATE_TABLE", "raanu-state")
         state = client.get("/api/health").json()["state"]
-        assert state == {"backend": "dynamodb", "table": "raanu-state", "persistent": True}
+        # trade_count rides along on this block; the shape assertion is about
+        # the backend fields, so it names them rather than the whole dict.
+        assert {k: state[k] for k in ("backend", "table", "persistent")} == {
+            "backend": "dynamodb", "table": "raanu-state", "persistent": True}
 
     def test_reports_the_min_score_actually_enforced(self, client):
         # This used to report 60 while the auto-trader gated at 70.

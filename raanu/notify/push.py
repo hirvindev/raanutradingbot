@@ -188,17 +188,23 @@ def history() -> list:
         return []
 
 
-def _fanout(title: str, body: str, tag: str, sticky: bool = False):
+def _fanout(title: str, body: str, tag: str, sticky: bool = False) -> dict:
     """One call, every registered browser.
 
     Kept as a seam even though there is only one transport left: every
     notify_* helper goes through here, so recording-before-sending stays in
     one place rather than being repeated five times.
+
+    Returns the delivery result so callers can record whether anything was
+    actually reached. ``{"sent": 0}`` is a normal, silent outcome — no
+    browser has ever subscribed — and it is exactly the outcome that needs
+    to be visible somewhere other than a log line.
     """
     _record(title, body, tag)          # before sending: a delivery failure
                                        # must not also lose the record of it
     web = send(title, body, tag=tag, sticky=sticky)
     log.info(f"[push] {tag}: {web.get('sent', 0)} web")
+    return web
 
 
 def _strat_name(strategy: str) -> str:
@@ -317,14 +323,14 @@ def format_signal(p: dict, strategy: str) -> tuple:
     return f"🔥 CONFIDENT BUY — {t}", "\n".join(L)
 
 
-def notify_signal(p: dict, strategy: str):
+def notify_signal(p: dict, strategy: str) -> dict:
     """High-conviction pick — the push twin of the Telegram CONFIDENT BUY.
 
     This is the notification with the most reason to interrupt someone: it is
     the one that may need a decision, and it arrives before any order exists.
     """
     title, body = format_signal(p, strategy)
-    _fanout(title, body, f"signal-{p.get('ticker', '?')}", sticky=True)
+    return _fanout(title, body, f"signal-{p.get('ticker', '?')}", sticky=True)
 
 
 def notify_buy(ticker: str, usd: float, strategy: str, score=None,

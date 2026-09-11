@@ -1207,6 +1207,23 @@ function trDraw(){
       </div>`);
   }
 
+  /* 5b. Alert delivery. "Sent" and "reached someone" are different
+     questions, and on 10 Sep a score-90 pick answered yes to the first and
+     no to the second with nothing but a log line to show for it. */
+  const notes = of('notify.signal');
+  if(notes.length)
+    h += trStep('6b \u00b7 Alerts', notes.map(n => {
+      const reached = Number(n.delivered || 0);
+      return `<div class="${reached ? '' : 'down'}" style="padding:2px 0">
+        <b style="display:inline-block;width:64px">${esc(n.ticker)}</b>
+        <span class="muted" style="display:inline-block;width:34px">${esc(n.strategy)}</span>
+        <span class="muted" style="display:inline-block;width:54px">score ${esc(n.score)}</span>
+        ${reached ? 'reached ' + num(reached) + ' channel(s)'
+                  : '<b>reached nobody</b> \u2014 no push subscriber, Telegram off'}
+        <span class="muted"> (telegram ${n.telegram ? 'yes' : 'no'},
+        web ${num(n.web_subscribers)})</span></div>`;
+    }).join(''), notes.some(n => Number(n.delivered || 0)) ? '' : 'bad');
+
   /* 6. Gates and orders. */
   const blocked = of('gate.blocked');
   if(blocked.length)
@@ -1219,7 +1236,11 @@ function trDraw(){
         <span class="muted" style="display:inline-block;width:34px">${esc(g.strategy||'')}</span>
         <b style="display:inline-block;width:64px">${esc(g.ticker||'\u2014')}</b>
         <b>${esc(g.gate)}</b>
-        <span class="muted">${esc(g.reason||'')}</span></div>`).join(''), 'bad');
+        <span class="muted">${esc(g.reason||'')}</span>
+        ${(g.would_have_reviewed||[]).length
+          ? '<div class="muted" style="margin-left:98px">suppressed before the advisor: ' +
+            esc(g.would_have_reviewed.map(x => x.ticker + ' ' + x.score).join(', ')) + '</div>'
+          : ''}</div>`).join(''), 'bad');
 
   const sized = of('order.sized'), placed = of('order.placed'), ofail = of('order.failed');
   if(sized.length || placed.length){

@@ -166,13 +166,26 @@ async def _call_anthropic(payload: str) -> SlotVerdict:
         "output_format": SlotVerdict,
         # Thinking depth, and the largest single line on this call's bill.
         "output_config": {"effort": config.llm_effort()},
-        # Caches the tools + system prefix. The saving is almost entirely
-        # WITHIN one request rather than across slots: a web-searching turn
-        # runs several inference passes over the same ~1.3k-token prefix, and
-        # a retry after a timeout replays it again. Across slots it does
-        # nothing — 09:35 and 11:00 are 85 minutes apart and the longest
-        # cache TTL is an hour — so do not expect a hit rate here.
-        "cache_control": {"type": "ephemeral"},
+        #
+        # ⚠️ NO `cache_control` here, and that is a measured decision rather
+        # than an oversight. Prompt caching was added alongside the streaming
+        # fix on the theory that a replayed prefix after a timeout would pay
+        # for itself. Three live slots later the numbers say otherwise:
+        #
+        #   cached prefix          ~12,700 tokens (search results land in it,
+        #                          so it is ~10x the system prompt alone)
+        #   write premium          1.25x  ->  +$0.0095 per slot
+        #   read discount          0.10x  ->  -$0.0248 per slot that retries
+        #   break-even retry rate  27.7%
+        #
+        # Slots are 85 minutes apart and the longest TTL is an hour, so
+        # nothing ever reads across slots — every observed slot logged
+        # `cache_read_input_tokens: 0`. The only reader is a retry, and the
+        # streaming fix is precisely what made retries rare (0 in the three
+        # slots since). Caching therefore bills a 25% premium as insurance
+        # against a failure that no longer happens. Re-add it if the retry
+        # rate ever climbs back above ~28%; `llm.response` traces both cache
+        # counters, so that is a question with an answer.
     }
     tools = _tools()
     if tools:

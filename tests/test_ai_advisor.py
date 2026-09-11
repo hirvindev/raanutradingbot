@@ -241,12 +241,23 @@ class TestTheCallIsStreamed:
         asyncio.run(advisor._call_anthropic('{}'))
         assert seen["output_format"] is SlotVerdict
 
-    def test_the_prefix_is_cached_and_effort_is_set(self, monkeypatch):
+    def test_effort_is_set(self, monkeypatch):
         seen = self._fake_client(monkeypatch)
         from raanu.ai import advisor
         asyncio.run(advisor._call_anthropic('{}'))
-        assert seen["cache_control"] == {"type": "ephemeral"}
         assert seen["output_config"]["effort"] == "medium"
+
+    def test_the_prompt_cache_is_NOT_declared(self, monkeypatch):
+        # Measured, not assumed: the cached prefix is ~12,700 tokens, a write
+        # costs 1.25x and a read 0.1x, and nothing ever reads across slots
+        # (85 minutes apart, 1h max TTL) — every observed slot logged
+        # cache_read_input_tokens: 0. The only reader is a retry, and the
+        # streaming fix is what made retries rare. Break-even is a ~28% retry
+        # rate; the observed rate is 0. Re-add it if that changes.
+        seen = self._fake_client(monkeypatch)
+        from raanu.ai import advisor
+        asyncio.run(advisor._call_anthropic('{}'))
+        assert "cache_control" not in seen
 
     def test_usage_records_the_cache_lines_not_just_the_totals(self, monkeypatch):
         # An unmeasured token-reduction claim is the thing this project keeps

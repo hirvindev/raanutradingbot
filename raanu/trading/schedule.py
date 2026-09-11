@@ -158,8 +158,20 @@ async def _run_scan_and_cache_s2(alert: bool = True) -> list:
 _CONFIDENT_BUY_THRESHOLD = 75
 
 
-def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
-    """Send Telegram alert for high-conviction picks, tagged by strategy."""
+def _send_confident_buy_alerts(picks: list, strategy: str = "s1", slot: str = ""):
+    """Send Telegram + web-push alerts for high-conviction picks.
+
+    Traces what each alert actually REACHED, which is a different question
+    from whether it was sent. On 10 Sep 2026 the S3 scan surfaced QLYS at 90 —
+    the highest score this project has recorded — and the alert went to
+    `0 web` subscribers with Telegram unconfigured, i.e. to nobody. The only
+    evidence was two lines in CloudWatch. CLAUDE.md already recorded that S3
+    had produced 90s and 84s "that were never reported"; it happened again,
+    on the same strategy, for the same reason, and nothing surfaced it.
+
+    ``delivered`` counts channels that actually took the message, so a zero
+    is legible on the trace page rather than inferred from its absence.
+    """
     from raanu.notify.telegram import send_telegram
     gate_key = {"s2": "stage2", "s3": "leader_dip"}.get(strategy, "uptrend")
     confident = [p for p in picks if p.get("score", 0) >= _CONFIDENT_BUY_THRESHOLD and p.get(gate_key)]
@@ -176,12 +188,18 @@ def _send_confident_buy_alerts(picks: list, strategy: str = "s1"):
         # to read both to trust either.
         from raanu.notify import push
         title, body = push.format_signal(p, strategy)
-        send_telegram(f"*{title}* ({name})\n{body}", strategy=strategy)
+        tg = bool(send_telegram(f"*{title}* ({name})\n{body}", strategy=strategy))
+        web = 0
         try:
-            push.notify_signal(p, strategy)
+            web = int((push.notify_signal(p, strategy) or {}).get("sent", 0))
         except Exception as e:
             log.warning(f"[push] signal notify skipped: {e}")
-        log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score}")
+        log.info(f"[{strategy.upper()}] Confident buy alert sent: {ticker} score {score} "
+                 f"(telegram={tg}, web={web})")
+        trace.emit("notify.signal", slot=slot, strategy=strategy,
+                   ticker=ticker, score=score,
+                   telegram=tg, web_subscribers=web,
+                   delivered=(1 if tg else 0) + web)
 
 
 async def _run_scan_and_cache_s3(alert: bool = True) -> list:
@@ -273,6 +291,68 @@ def _scan_actionable(strategy: str, n_orders: int, label: str = "") -> list[dict
     return actionable
 
 
+async def _refresh_or_alert(strategy: str, picks: list[dict] | None,
+                            label: str = "") -> None:
+    """Keep the dashboard cache fresh after a gate stopped the orders.
+
+    ⚠️ Only RESCANS when this call has no picks of its own.
+
+    The gate returns used to call ``_run_scan_and_cache_*()`` unconditionally,
+    which was right before the advisor existed — back then
+    ``_execute_scheduled_trades`` scanned for itself, so an early return
+    genuinely had nothing cached and the dashboard would have shown days-old
+    picks. Under ``run_slot`` that is no longer true: it has already scanned,
+    and ``_scan_actionable`` already wrote the cache through the SAME
+    ``_pick_saver`` these functions use.
+
+    Measured on the 10 Sep 09:35 slot: three strategies, all weekly-limited,
+    each rescanning all 470 tickers a second time — ~28s of a 110s invocation
+    spent recomputing what was cached 30 seconds earlier.
+
+    The alert is NOT redundant and is still sent: a strategy that cannot
+    trade has still found something, and on that slot one of those somethings
+    was QLYS at 90.
+    """
+    if picks is None:
+        await _scan_and_cache_for(strategy)()
+        return
+    _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
+
+
+def _unconditional_blockers(label: str, strategies: list[str]) -> dict[str, str]:
+    """Which strategies cannot place an order this slot, whatever the advisor says.
+
+    Only gates that no verdict can lift belong here. The rolling weekly trade
+    limit is the archetype and, since the alternating rest-day rule was
+    removed, the single throttle on the whole system — so it is also the most
+    likely reason a day trades nothing.
+
+    Deliberately does NOT include the per-ticker checks (already held, cash
+    reserve, price missing). Those depend on which names the advisor ranks
+    first and how big it sizes them, so they genuinely cannot be decided
+    before the call. These can.
+
+    ⚠️ This does not replace the identical check inside
+    ``_execute_scheduled_trades``. That one still has to be there: it guards
+    ``run_one_cycle`` and the scan-now endpoint, which never pass through
+    ``run_slot``. This is an early-out to avoid paying for advice, not the
+    enforcement point.
+    """
+    blockers: dict[str, str] = {}
+    trader = get_trader()
+    for strategy in strategies:
+        try:
+            ok, why = trader.tradelog.can_trade_now(strategy=strategy)
+        except Exception as e:
+            # A state blip must not silently authorise trading, but it must
+            # not stop the slot either — leave it to the real gate downstream.
+            log.warning(f"[{label}][{strategy.upper()}] weekly-limit check failed: {e}")
+            continue
+        if not ok:
+            blockers[strategy] = why
+    return blockers
+
+
 def _seed_position_plan(ticker: str, entry_px: float, atr: float | None,
                         exit_plan: dict) -> None:
     """Write the position's exit record at BUY time.
@@ -342,7 +422,9 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     # the bot "off" in the UI would not have stopped 09:35 and 11:00.
     if not get_trader().enabled:
         log.info(f"[{label}][{strategy.upper()}] auto-trader is OFF — scanning only, no orders")
-        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
+        trace.emit("gate.blocked", slot=label, strategy=strategy,
+                   gate="auto_trader_enabled", reason="auto-trader is off")
+        await _refresh_or_alert(strategy, picks, label)
         return
 
     # ── Gate: market hours ────────────────────────────────────────────────
@@ -351,19 +433,24 @@ async def _execute_scheduled_trades(n_orders: int, label: str, strategy: str = "
     is_open, clock_msg = await market_is_open()
     if not is_open:
         log.info(f"[{label}][{strategy.upper()}] {clock_msg} — scanning only, no orders")
-        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
+        trace.emit("gate.blocked", slot=label, strategy=strategy,
+                   gate="market_closed", reason=clock_msg)
+        await _refresh_or_alert(strategy, picks, label)
         return
 
     # ── Gate: rolling weekly trade limit (per strategy) ───────────────────
     ok, why = get_trader().tradelog.can_trade_now(strategy=strategy)
     if not ok:
         log.info(f"[{label}][{strategy.upper()}] {why} — no orders")
+        # This was log-only until 11 Sep 2026, which made it invisible to the
+        # trace — and it is the single most likely reason a day trades
+        # nothing. Reading 10 Sep back, the journal showed the advisor
+        # approving 12 of 13 and then simply stopped; every non-trade looked
+        # like a veto when the weekly budget had made the decision.
+        trace.emit("gate.blocked", slot=label, strategy=strategy,
+                   gate="weekly_limit", reason=why)
         send_whatsapp(f"📊 *RaanuBot — {label}*\n{stag}\n{why}", strategy=strategy)
-        # Still refresh the cache. The weekly budget is now the ONLY throttle, so
-        # a strategy that has spent it sits out the rest of the week — and with
-        # the alternating rest-day scan gone, returning bare here would leave the
-        # dashboard showing days-old picks for exactly those strategies.
-        await {"s2": _run_scan_and_cache_s2, "s3": _run_scan_and_cache_s3}.get(strategy, _run_scan_and_cache)()
+        await _refresh_or_alert(strategy, picks, label)
         return
 
     # `picks` supplied ⇒ run_slot already scanned, filtered and had the
@@ -714,6 +801,59 @@ async def run_slot(n_orders: int, label: str) -> None:
         send_whatsapp(f"📊 *RaanuBot — {label}*\n"
                       f"No stocks above score {config.min_signal_score()} today.\n"
                       f"_No trades placed._")
+        return
+
+    # ── Phase 1b: drop what cannot trade, BEFORE paying for advice ───────────
+    #
+    # 🔴 These gates are unconditional: no verdict can unblock them. Asking a
+    # paid model to rank candidates that the weekly budget has already
+    # excluded is spending money to decide something already decided.
+    #
+    # Measured on 10 Sep 2026: all three strategies were at their weekly cap
+    # (s1 2/2, s2 1/1, s3 3/3, five of the six trades placed in one burst two
+    # days earlier). The slot still scanned, still called the advisor, and
+    # still got back a perfectly good verdict — 13 decisions, 12 approvals,
+    # 30s, ~$0.085 — for a slot in which no order was possible under ANY
+    # answer. It would have repeated at 11:00, and twice a day until the
+    # oldest trade aged out five days later.
+    # Market hours is the other gate no verdict can lift. Checked here as
+    # well as in the executor for the same reason as the weekly limit: a
+    # holiday that the weekday test does not know about would otherwise buy
+    # a full advisory review and then discard it one function later.
+    from raanu.trading.trader import market_is_open
+    is_open, clock_msg = await market_is_open()
+    if not is_open:
+        log.info(f"[{label}] {clock_msg} — no advisor call, scanning only")
+        trace.emit("gate.blocked", slot=label, gate="market_closed",
+                   reason=clock_msg, candidates=total)
+        for strategy, picks in candidates.items():
+            if picks:
+                _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
+        return
+
+    blocked = _unconditional_blockers(label, list(candidates))
+    for strategy, reason in blocked.items():
+        picks = candidates.pop(strategy, []) or []
+        log.info(f"[{label}][{strategy.upper()}] {reason} — excluded before the advisor call")
+        trace.emit("gate.blocked", slot=label, strategy=strategy,
+                   gate="weekly_limit", reason=reason,
+                   # The names that WOULD have been put to the advisor. A
+                   # blocked strategy still surfaced candidates, and on
+                   # 10 Sep one of them was the highest score this project
+                   # has recorded (QLYS 90) — which is worth seeing, not
+                   # silently dropping.
+                   would_have_reviewed=[{"ticker": p.get("ticker"),
+                                         "score": p.get("score")} for p in picks])
+        # Still alert on high-conviction names. The budget stops the ORDER;
+        # it is not a reason to stop telling the owner what the scan found.
+        if picks:
+            _send_confident_buy_alerts(picks, strategy=strategy, slot=label)
+
+    total = sum(len(v) for v in candidates.values())
+    if not total:
+        log.info(f"[{label}] every strategy is blocked — no advisor call")
+        trace.emit("gate.blocked", slot=label, gate="all_strategies_blocked",
+                   reason="; ".join(f"{s}: {r}" for s, r in blocked.items()))
         return
 
     # ── Phase 2: one advisory review for the whole slot ──────────────────────

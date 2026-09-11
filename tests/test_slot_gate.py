@@ -44,6 +44,21 @@ def slot(monkeypatch):
     from raanu.ai import market_context
     monkeypatch.setattr(market_context, "snapshot", lambda: {"broad": {}, "breadth": {}})
 
+    # The slot now checks the gates no verdict can lift BEFORE paying for
+    # advice, so a test that wants the advisor reached has to look tradeable.
+    # Both default to "yes"; the tests below flip them deliberately.
+    seen["market_open"] = True
+    seen["blockers"] = {}
+
+    async def fake_clock():
+        return (seen["market_open"], "market closed for the test")
+
+    monkeypatch.setattr(trader, "market_is_open", fake_clock)
+    monkeypatch.setattr(schedule, "_unconditional_blockers",
+                        lambda label, strategies: dict(seen["blockers"]))
+    monkeypatch.setattr(schedule, "_send_confident_buy_alerts",
+                        lambda picks, strategy="s1", slot="": None)
+
     def set_verdict(verdict):
         from raanu.ai import advisor
 
@@ -172,3 +187,91 @@ class TestShadowMode:
         slot["set_verdict"](_verdict(budget_pct={"s3": 100.0}))
         asyncio.run(schedule.run_slot(5, "test-slot"))
         assert all(v is None for _, _, v in slot["executed"])
+
+
+class TestUnconditionalGatesRunBeforeTheAdvisor:
+    """The paid call must not happen when no verdict could change the outcome.
+
+    Measured on 10 Sep 2026: all three strategies were at their weekly cap,
+    and the slot still scanned, still called the advisor, and still got a
+    good verdict — 13 decisions, 12 approvals, 30s, ~$0.085 — for a slot in
+    which no order was possible under ANY answer. Twice a day, until the
+    oldest trade aged out five days later.
+    """
+
+    def test_a_fully_weekly_limited_slot_never_calls_the_advisor(self, slot):
+        slot["blockers"] = {"s1": "weekly limit (2/2)", "s2": "weekly limit (1/1)",
+                            "s3": "weekly limit (3/3)"}
+        slot["set_verdict"](_verdict(decisions=[_approve("NVDA", "s3")]))
+        asyncio.run(schedule.run_slot(5, "test-slot"))
+        assert slot["advisor_calls"] == 0, "paid for advice on a slot that could not trade"
+        assert slot["executed"] == []
+
+    def test_a_partially_blocked_slot_still_reviews_what_is_left(self, slot):
+        # S3 is capped; S1 is not. The advisor should be asked about S1 only.
+        slot["blockers"] = {"s3": "weekly limit (3/3)"}
+        slot["set_verdict"](_verdict(decisions=[_approve("AMD", "s1")]))
+        asyncio.run(schedule.run_slot(5, "test-slot"))
+        assert slot["advisor_calls"] == 1
+        assert [s for s, _, _ in slot["executed"]] == ["s1"]
+
+    def test_a_blocked_strategy_is_not_shown_to_the_advisor(self, slot, monkeypatch):
+        seen_candidates = {}
+        from raanu.ai import advisor
+
+        async def capture(candidates, context, label):
+            seen_candidates.update({k: len(v) for k, v in candidates.items()})
+            return _verdict(decisions=[_approve("AMD", "s1")])
+
+        monkeypatch.setattr(advisor, "review_slot", capture)
+        slot["blockers"] = {"s3": "weekly limit (3/3)"}
+        asyncio.run(schedule.run_slot(5, "test-slot"))
+        assert "s3" not in seen_candidates
+        assert seen_candidates.get("s1") == 1
+
+    def test_a_closed_market_never_calls_the_advisor(self, slot):
+        slot["market_open"] = False
+        slot["set_verdict"](_verdict(decisions=[_approve("NVDA", "s3")]))
+        asyncio.run(schedule.run_slot(5, "test-slot"))
+        assert slot["advisor_calls"] == 0
+        assert slot["executed"] == []
+
+    def test_an_open_market_with_budget_still_calls_the_advisor(self, slot):
+        # The guard must not become a reason the slot never trades.
+        slot["set_verdict"](_verdict(decisions=[_approve("NVDA", "s3")]))
+        asyncio.run(schedule.run_slot(5, "test-slot"))
+        assert slot["advisor_calls"] == 1
+
+
+class TestRefreshOrAlert:
+    """A gate stopped the orders — what still has to happen?"""
+
+    def test_supplied_picks_are_not_rescanned(self, monkeypatch):
+        # run_slot already scanned and _scan_actionable already wrote the
+        # cache through the same _pick_saver. Rescanning 470 tickers a second
+        # time cost ~28s of a 110s invocation on 10 Sep.
+        rescans, alerts = [], []
+
+        async def boom(*a, **k):
+            rescans.append(True)
+            return []
+
+        monkeypatch.setattr(schedule, "_scan_and_cache_for", lambda s: boom)
+        monkeypatch.setattr(schedule, "_send_confident_buy_alerts",
+                            lambda picks, strategy="s1", slot="": alerts.append(len(picks)))
+        asyncio.run(schedule._refresh_or_alert("s3", [{"ticker": "QLYS", "score": 90}], "slot"))
+        assert rescans == [], "rescanned picks it had already been handed"
+        assert alerts == [1], "a capped strategy still found something worth saying"
+
+    def test_no_picks_means_the_cache_is_refreshed(self, monkeypatch):
+        # The pre-advisor callers (run_one_cycle, scan-now) genuinely have
+        # nothing cached, so the rescan must survive for them.
+        rescans = []
+
+        async def scan(*a, **k):
+            rescans.append(True)
+            return []
+
+        monkeypatch.setattr(schedule, "_scan_and_cache_for", lambda s: scan)
+        asyncio.run(schedule._refresh_or_alert("s3", None, "slot"))
+        assert rescans == [True]
